@@ -23,13 +23,16 @@ defaultOutDir = Path(__file__).parent / "results"
 
 
 def evaluateCase(case, dbPath, llm):
-  _, goldRows = db.runReadOnlyQuery(dbPath, case["goldSql"])
+  # 有些題目有不只一種合理的答法（見 cases.listTitles），符合其中一種就算對
+  acceptedSqls = [case["goldSql"], *case.get("alsoAccept", [])]
+  acceptedResults = [db.runReadOnlyQuery(dbPath, sql)[1] for sql in acceptedSqls]
   startedAt = time.perf_counter()
   # 走跟 app 完全相同的 answerQuestion（含失敗重試），量到的才是使用者實際會遇到的準確率
   answer = text2sql.answerQuestion(case["question"], dbPath, now=fixture.fixedNow, llm=llm)
   seconds = time.perf_counter() - startedAt
-  passed = answer["error"] is None and scoring.resultsMatch(
-    goldRows, answer["rows"], case.get("compareAsSet", False)
+  passed = answer["error"] is None and any(
+    scoring.resultsMatch(goldRows, answer["rows"], case.get("compareAsSet", False))
+    for goldRows in acceptedResults
   )
   return {
     "id": case["id"],

@@ -76,9 +76,12 @@ def evalDbPath(tmp_path_factory):
 def testFixtureBuildsFixedDataset(evalDbPath):
   resourceTypes = [resource["type"] for resource in db.listResources(evalDbPath)]
   _, rows = db.runReadOnlyQuery(evalDbPath, "SELECT COUNT(*), MIN(date(start_at)), MAX(date(start_at)) FROM events")
+  _, detailRows = db.runReadOnlyQuery(evalDbPath, "SELECT COUNT(*) FROM event_details")
 
   assert sorted(resourceTypes) == ["equipment"] * 2 + ["person"] * 4 + ["room"] * 2
-  assert rows[0] == (40, "2026-11-09", "2026-11-28")
+  assert rows[0] == (35, "2026-11-09", "2026-11-28")
+  # 有 5 場會議各有 2 個資源，明細因此比排程多 5 列；統計類題目靠這個差距測出模型有沒有重複計算
+  assert detailRows[0] == (40,)
 
 
 def testFixtureHasEventsInLastThisAndNextWeek(evalDbPath):
@@ -87,29 +90,31 @@ def testFixtureHasEventsInLastThisAndNextWeek(evalDbPath):
 
   eventCounts = [len(db.listEvents(evalDbPath, start, end)) for start, end in weekRanges]
 
-  assert eventCounts == [8, 18, 14]
+  assert eventCounts == [7, 16, 12]
 
 
 def testCasesHaveUniqueIdsAndCoverEveryCategory():
   caseIds = [case["id"] for case in cases.cases]
 
-  assert len(caseIds) >= 35
+  assert len(caseIds) >= 45
   assert len(caseIds) == len(set(caseIds))
+  assert "multi" in cases.categories
   assert {case["category"] for case in cases.cases} == set(cases.categories)
 
 
 @pytest.mark.parametrize("case", cases.cases, ids=lambda case: case["id"])
 def testGoldSqlIsReadOnlyAndReturnsRows(case, evalDbPath):
-  text2sql.validateSql(case["goldSql"])
-  _, rows = db.runReadOnlyQuery(evalDbPath, case["goldSql"])
+  for sql in [case["goldSql"], *case.get("alsoAccept", [])]:
+    text2sql.validateSql(sql)
+    _, rows = db.runReadOnlyQuery(evalDbPath, sql)
 
-  # 標準答案如果查不到資料，模型隨便寫一句查不到資料的 SQL 也會被判定為正確
-  assert rows
+    # 標準答案如果查不到資料，模型隨便寫一句查不到資料的 SQL 也會被判定為正確
+    assert rows
 
 
 def testCasesDoNotReuseFewShotQuestions(evalDbPath):
   # 題目如果跟 prompt 裡的範例一樣，模型等於直接看到答案，分數會虛高
-  messages = text2sql.buildMessages("問題", db.getSchemaText(), db.getVocabulary(evalDbPath), fixture.fixedNow)
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(evalDbPath), fixture.fixedNow)
   fewShotQuestions = {message["content"] for message in messages[1:-1] if message["role"] == "user"}
 
   assert len(fewShotQuestions) > 0
@@ -131,6 +136,24 @@ def testEvaluateCasePassesWhenResultMatchesGold(evalDbPath):
   assert result["id"] == case["id"]
   assert result["predictedSql"] == case["goldSql"]
   assert result["attempts"] == 1
+
+
+def testEvaluateCaseAcceptsAlternativeAnswer(evalDbPath):
+  # 今天有一場 2 個資源的會議：一場列一次（3 列）或每個資源列一次（4 列）都是合理的回答
+  case = {
+    "id": "x", "category": "date", "question": "今天有哪些排程？",
+    "goldSql": "SELECT title FROM events WHERE date(start_at) = '2026-11-17'",
+    "alsoAccept": ["SELECT title FROM event_details WHERE date(start_at) = '2026-11-17'"],
+  }
+  wrongSql = "SELECT title FROM events WHERE date(start_at) = '2026-11-18'"
+
+  perEvent = evalRun.evaluateCase(case, evalDbPath, lambda messages: case["goldSql"])
+  perResource = evalRun.evaluateCase(case, evalDbPath, lambda messages: case["alsoAccept"][0])
+  wrong = evalRun.evaluateCase(case, evalDbPath, lambda messages: wrongSql)
+
+  assert perEvent["passed"] is True
+  assert perResource["passed"] is True
+  assert wrong["passed"] is False
 
 
 def testEvaluateCaseFailsWhenResultDiffers(evalDbPath):

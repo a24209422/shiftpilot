@@ -70,14 +70,38 @@ def testReadOnlyConnectionBlocksWritesEvenWithoutValidation(dbPath):
 
 
 def testPromptContainsDatesSchemaAndVocabulary(dbPath):
-  messages = text2sql.buildMessages("問題", db.getSchemaText(), db.getVocabulary(dbPath), fixedNow)
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(dbPath), fixedNow)
   systemPrompt = messages[0]["content"]
 
   assert "2026-11-18 星期三（明天）" in systemPrompt
   assert "下週：2026-11-23 ～ 2026-11-29" in systemPrompt
-  assert "CREATE TABLE IF NOT EXISTS events" in systemPrompt
+  assert "CREATE TABLE event_details" in systemPrompt
   assert "王小明" in systemPrompt
   assert messages[-1] == {"role": "user", "content": "問題"}
+
+
+def getFewShotSqls(dbPath):
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(dbPath), fixedNow)
+  return [text2sql.extractSql(message["content"]) for message in messages[1:-1] if message["role"] == "assistant"]
+
+
+def testPromptTeachesModelToQueryTheFlatView(dbPath):
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(dbPath), fixedNow)
+  systemPrompt = messages[0]["content"]
+  fewShotSqls = getFewShotSqls(dbPath)
+
+  # 一筆排程在 view 裡有多列，prompt 沒提醒的話模型會用 COUNT(*) 多算
+  assert "COUNT(DISTINCT event_id)" in systemPrompt
+  assert "event_resources" not in systemPrompt
+  assert len(fewShotSqls) >= 2
+  assert all("event_details" in sql and "JOIN" not in sql for sql in fewShotSqls)
+
+
+def testFewShotExamplesRunOnTheRealSchema(dbPath):
+  # 範例 SQL 如果用到不存在的欄位，等於在教模型寫錯
+  for sql in getFewShotSqls(dbPath):
+    text2sql.validateSql(sql)
+    db.runReadOnlyQuery(dbPath, sql)
 
 
 def testAnswerQuestionRunsGeneratedSql(dbPath):

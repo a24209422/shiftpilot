@@ -15,7 +15,7 @@ dbPath = os.getenv("DB_PATH", "schedule.db")
 
 eventColumnNames = {
   "title": "標題", "category": "分類", "start_at": "開始", "end_at": "結束",
-  "resource_name": "資源", "resource_type": "資源種類", "note": "備註",
+  "resource_names": "資源", "resource_name": "資源", "note": "備註",
 }
 exampleQuestions = [
   "明天有哪些行程？",
@@ -41,8 +41,10 @@ def showEvents(events):
   if not events:
     st.info("這段期間沒有排程。")
     return
-  frame = pd.DataFrame(events).drop(columns=["id"]).rename(columns=eventColumnNames)
-  st.dataframe(frame, hide_index=True)
+  frame = pd.DataFrame(events).drop(columns=["id"])
+  # 一筆排程可能有多個資源，合併成一格才不會讓同一場會議佔好幾列
+  frame["resource_names"] = frame["resource_names"].str.join("、")
+  st.dataframe(frame.rename(columns=eventColumnNames), hide_index=True)
 
 
 st.set_page_config(page_title="排程工具", page_icon="📅", layout="wide")
@@ -105,10 +107,15 @@ with addTab:
     st.warning("請先到「資源」分頁新增資源。")
   else:
     categories = db.getVocabulary(dbPath)["categories"]
+    # multiselect 的選項用 id 而不是整個 dict：dict 不能雜湊，Streamlit 比對已選項目時會出問題
+    resourceById = {resource["id"]: resource for resource in resources}
     with st.form("addEventForm"):
       title = st.text_input("標題")
       category = st.text_input("分類", value="meeting", help=f"目前已有：{', '.join(categories)}")
-      resource = st.selectbox("資源", resources, format_func=formatResource)
+      selectedResourceIds = st.multiselect(
+        "資源（可多選，例如參加的人加上會議室）", list(resourceById),
+        format_func=lambda resourceId: formatResource(resourceById[resourceId]),
+      )
       timeColumns = st.columns(3)
       eventDate = timeColumns[0].date_input("日期", value=date.today())
       startTime = timeColumns[1].time_input("開始", value=time(9, 0), step=timedelta(minutes=15))
@@ -119,16 +126,19 @@ with addTab:
     if submitted:
       if not title.strip() or not category.strip():
         st.error("標題和分類不能空白。")
+      elif not selectedResourceIds:
+        st.error("至少要選一個資源。")
       else:
+        resourceLabel = "、".join(resourceById[resourceId]["name"] for resourceId in selectedResourceIds)
         try:
           db.addEvent(
-            dbPath, title, category, resource["id"],
+            dbPath, title, category, selectedResourceIds,
             datetime.combine(eventDate, startTime), datetime.combine(eventDate, endTime),
             note or None,
           )
-          st.success(f"已新增：{eventDate} {startTime:%H:%M}–{endTime:%H:%M} {title}（{resource['name']}）")
+          st.success(f"已新增：{eventDate} {startTime:%H:%M}–{endTime:%H:%M} {title}（{resourceLabel}）")
         except db.ScheduleConflictError as error:
-          st.error(f"{resource['name']} 在這個時段已經有排程，沒有新增：")
+          st.error("下列資源在這個時段已經有排程，整筆都沒有新增：")
           st.dataframe(pd.DataFrame(error.conflicts).drop(columns=["id"]).rename(columns=eventColumnNames), hide_index=True)
         except ValueError as error:
           st.error(str(error))

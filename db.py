@@ -7,7 +7,13 @@ from urllib.parse import quote
 
 baseDir = Path(__file__).parent
 schemaPath = baseDir / "schema.sql"
+llmSchemaPath = baseDir / "llm_schema.sql"
 timeFormat = "%Y-%m-%d %H:%M"
+eventResourceJoin = """
+  FROM events e
+  JOIN event_resources er ON er.event_id = e.id
+  JOIN resources r ON r.id = er.resource_id
+"""
 
 
 class ScheduleConflictError(Exception):
@@ -42,8 +48,9 @@ def initDb(dbPath):
     conn.executescript(schemaPath.read_text(encoding="utf-8"))
 
 
-def getSchemaText():
-  return schemaPath.read_text(encoding="utf-8")
+def getLlmSchemaText():
+  # 給模型看的不是完整的建表語法，而是只有 view 和 resources 的精簡說明
+  return llmSchemaPath.read_text(encoding="utf-8")
 
 
 def toTimeText(value):
@@ -69,46 +76,68 @@ def addResource(dbPath, name, resourceType, note=None):
 
 
 def listEvents(dbPath, startDate, endDate, resourceId=None):
-  sql = """
-    SELECT e.id, e.title, e.category, e.start_at, e.end_at, r.name AS resource_name, r.type AS resource_type, e.note
-    FROM events e JOIN resources r ON e.resource_id = r.id
+  sql = f"""
+    SELECT e.id, e.title, e.category, e.start_at, e.end_at, e.note, r.name AS resource_name
+    {eventResourceJoin}
     WHERE date(e.start_at) BETWEEN ? AND ?
   """
   params = [str(startDate), str(endDate)]
   if resourceId is not None:
-    sql += " AND e.resource_id = ?"
+    # 用子查詢篩選而不是 WHERE er.resource_id = ?：篩出來的排程才會帶出它全部的資源，而不是只剩被篩選的那一個
+    sql += " AND e.id IN (SELECT event_id FROM event_resources WHERE resource_id = ?)"
     params.append(resourceId)
-  sql += " ORDER BY e.start_at"
+  # er.rowid 是寫入順序，資源會照新增排程時選的順序排列
+  sql += " ORDER BY e.start_at, e.id, er.rowid"
   with openDb(dbPath) as conn:
     rows = conn.execute(sql, params).fetchall()
-  return [dict(row) for row in rows]
+
+  events = {}
+  for row in rows:
+    event = events.setdefault(row["id"], {
+      "id": row["id"], "title": row["title"], "category": row["category"],
+      "start_at": row["start_at"], "end_at": row["end_at"], "resource_names": [], "note": row["note"],
+    })
+    event["resource_names"].append(row["resource_name"])
+  return list(events.values())
 
 
-def findConflicts(dbPath, resourceId, startAt, endAt):
+def findConflicts(dbPath, resourceIds, startAt, endAt):
+  placeholders = ", ".join("?" * len(resourceIds))
   # 兩段時間重疊的條件：A 開始 < B 結束 且 A 結束 > B 開始；剛好接續（10:00-11:00 與 11:00-12:00）不算衝突
   with openDb(dbPath) as conn:
     rows = conn.execute(
-      """
-      SELECT id, title, start_at, end_at FROM events
-      WHERE resource_id = ? AND start_at < ? AND end_at > ?
-      ORDER BY start_at
+      f"""
+      SELECT e.id, e.title, e.start_at, e.end_at, r.name AS resource_name
+      {eventResourceJoin}
+      WHERE er.resource_id IN ({placeholders}) AND e.start_at < ? AND e.end_at > ?
+      ORDER BY e.start_at, r.name
       """,
-      (resourceId, toTimeText(endAt), toTimeText(startAt)),
+      (*resourceIds, toTimeText(endAt), toTimeText(startAt)),
     ).fetchall()
   return [dict(row) for row in rows]
 
 
-def addEvent(dbPath, title, category, resourceId, startAt, endAt, note=None):
+def addEvent(dbPath, title, category, resourceIds, startAt, endAt, note=None):
   startText, endText = toTimeText(startAt), toTimeText(endAt)
   if endText <= startText:
     raise ValueError("結束時間必須晚於開始時間")
-  conflicts = findConflicts(dbPath, resourceId, startText, endText)
+  # 去掉重複但保留順序：同一個資源選兩次會違反 event_resources 的主鍵
+  uniqueResourceIds = list(dict.fromkeys(resourceIds))
+  if not uniqueResourceIds:
+    raise ValueError("排程至少要有一個資源")
+  # 任何一個資源撞期就整筆不新增，不做「只排沒撞期的那幾個」
+  conflicts = findConflicts(dbPath, uniqueResourceIds, startText, endText)
   if conflicts:
     raise ScheduleConflictError(conflicts)
+  # 排程和它的資源寫在同一個交易：中途失敗就整筆不存，不會留下沒有資源的排程
   with openDb(dbPath) as conn:
     cursor = conn.execute(
-      "INSERT INTO events (title, category, start_at, end_at, resource_id, note) VALUES (?, ?, ?, ?, ?, ?)",
-      (title.strip(), category.strip(), startText, endText, resourceId, note),
+      "INSERT INTO events (title, category, start_at, end_at, note) VALUES (?, ?, ?, ?, ?)",
+      (title.strip(), category.strip(), startText, endText, note),
+    )
+    conn.executemany(
+      "INSERT INTO event_resources (event_id, resource_id) VALUES (?, ?)",
+      [(cursor.lastrowid, resourceId) for resourceId in uniqueResourceIds],
     )
     return cursor.lastrowid
 
@@ -148,25 +177,25 @@ def seedDemoData(dbPath, today=None):
   ]:
     resourceIds[name] = addResource(dbPath, name, resourceType)
 
+  weeklyMeetingAttendees = ["A 會議室", "王小明", "李小華", "陳大文"]
   demoEvents = [
     # (標題, 分類, 資源, 距離本週一的天數, 開始, 結束)
-    ("週會", "meeting", "A 會議室", 0, "10:00", "11:00"),
-    ("週會", "meeting", "A 會議室", 7, "10:00", "11:00"),
-    ("客戶簡報", "meeting", "B 會議室", 2, "14:00", "15:30"),
-    ("客戶簡報", "meeting", "王小明", 2, "14:00", "15:30"),
-    ("早班", "shift", "李小華", 1, "08:00", "16:00"),
-    ("早班", "shift", "李小華", 3, "08:00", "16:00"),
-    ("早班", "shift", "李小華", 8, "08:00", "16:00"),
-    ("晚班", "shift", "陳大文", 1, "16:00", "23:00"),
-    ("晚班", "shift", "陳大文", 5, "16:00", "23:00"),
-    ("晚班", "shift", "陳大文", 9, "16:00", "23:00"),
-    ("撰寫季報", "task", "王小明", 4, "09:00", "12:00"),
-    ("一對一面談", "meeting", "陳大文", 8, "15:00", "15:30"),
-    ("投影機借用", "booking", "投影機", 9, "13:00", "17:00"),
-    ("產品 demo", "meeting", "B 會議室", 10, "10:00", "12:00"),
-    ("產品 demo", "meeting", "王小明", 10, "10:00", "12:00"),
+    ("週會", "meeting", weeklyMeetingAttendees, 0, "10:00", "11:00"),
+    ("週會", "meeting", weeklyMeetingAttendees, 7, "10:00", "11:00"),
+    ("客戶簡報", "meeting", ["B 會議室", "王小明"], 2, "14:00", "15:30"),
+    ("早班", "shift", ["李小華"], 1, "08:00", "16:00"),
+    ("早班", "shift", ["李小華"], 3, "08:00", "16:00"),
+    ("早班", "shift", ["李小華"], 8, "08:00", "16:00"),
+    ("晚班", "shift", ["陳大文"], 1, "16:00", "23:00"),
+    ("晚班", "shift", ["陳大文"], 5, "16:00", "23:00"),
+    ("晚班", "shift", ["陳大文"], 9, "16:00", "23:00"),
+    ("撰寫季報", "task", ["王小明"], 4, "09:00", "12:00"),
+    ("一對一面談", "meeting", ["陳大文"], 8, "15:00", "15:30"),
+    ("投影機借用", "booking", ["投影機"], 9, "13:00", "17:00"),
+    ("產品 demo", "meeting", ["B 會議室", "王小明"], 10, "10:00", "12:00"),
   ]
-  for title, category, resourceName, dayOffset, startTime, endTime in demoEvents:
+  for title, category, resourceNames, dayOffset, startTime, endTime in demoEvents:
     day = (monday + timedelta(days=dayOffset)).isoformat()
-    addEvent(dbPath, title, category, resourceIds[resourceName], f"{day} {startTime}", f"{day} {endTime}")
+    eventResourceIds = [resourceIds[name] for name in resourceNames]
+    addEvent(dbPath, title, category, eventResourceIds, f"{day} {startTime}", f"{day} {endTime}")
   return True

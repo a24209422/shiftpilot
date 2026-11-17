@@ -98,21 +98,22 @@ def buildMessages(question, schemaText, vocabulary, now):
 
 規則：
 1. 只輸出一句 SELECT（或 WITH ... SELECT），放在 ```sql 區塊裡，不要任何解釋。
-2. 只能使用下方 schema 裡的資料表與欄位。
+2. 只能使用下方 schema 裡的資料表與欄位。排程相關的問題都查 event_details，不需要 JOIN。
 3. 時間欄位是文字，格式 'YYYY-MM-DD HH:MM'。取日期用 date(start_at)，取時間用 time(start_at)，可以直接用字串比較。
 4. 不要用 date('now')，日期一律以下方「日期參考」為準。
 5. 比對名稱或標題時用 LIKE '%關鍵字%'，因為使用者常只講部分名字。
-6. 查排程時 JOIN resources 帶出 r.name，並依 start_at 排序，讓結果看得懂。
-7. 使用者提到排程名稱（例如「晚班」「週會」）時，用 e.title LIKE 比對，不要自己推算時段。
-8. 「人」「每個人」「員工」指 resources.type = 'person'；「會議室」指 type = 'room'；「設備」指 type = 'equipment'。
+6. 列出排程時帶出 resource_name，並依 start_at 排序，讓結果看得懂。
+7. 使用者提到排程名稱（例如「晚班」「週會」）時，用 title LIKE 比對，不要自己推算時段。
+8. 「人」「每個人」「員工」指 resource_type = 'person'；「會議室」指 'room'；「設備」指 'equipment'。查 resources 表時欄位是 type。
+9. event_details 裡一筆排程有幾個資源就有幾列。計算「幾筆排程」「幾場會議」時用 COUNT(DISTINCT event_id)，不要用 COUNT(*)。
 
 ## Schema
 {schemaText}
 
 ## 目前資料中的值
-- events.category：{', '.join(vocabulary['categories']) or '（尚無）'}
-- resources.type：{', '.join(vocabulary['resourceTypes']) or '（尚無）'}
-- resources.name：{', '.join(vocabulary['resourceNames']) or '（尚無）'}
+- category：{', '.join(vocabulary['categories']) or '（尚無）'}
+- resource_type（resources.type）：{', '.join(vocabulary['resourceTypes']) or '（尚無）'}
+- resource_name（resources.name）：{', '.join(vocabulary['resourceNames']) or '（尚無）'}
 
 ## 日期參考
 {buildDateReference(now)}
@@ -121,15 +122,15 @@ def buildMessages(question, schemaText, vocabulary, now):
   fewShots = [
     (
       "明天小明有什麼行程？",
-      "SELECT r.name, e.title, e.start_at, e.end_at\n"
-      "FROM events e JOIN resources r ON e.resource_id = r.id\n"
-      f"WHERE r.name LIKE '%小明%' AND date(e.start_at) = '{tomorrow}'\n"
-      "ORDER BY e.start_at",
+      "SELECT resource_name, title, start_at, end_at\n"
+      "FROM event_details\n"
+      f"WHERE resource_name LIKE '%小明%' AND date(start_at) = '{tomorrow}'\n"
+      "ORDER BY start_at",
     ),
     (
       "下週總共有幾場會議？",
-      "SELECT COUNT(*) AS meeting_count\n"
-      "FROM events\n"
+      "SELECT COUNT(DISTINCT event_id) AS meeting_count\n"
+      "FROM event_details\n"
       f"WHERE category = 'meeting' AND date(start_at) BETWEEN '{nextMonday}' AND '{nextSunday}'",
     ),
   ]
@@ -144,7 +145,7 @@ def buildMessages(question, schemaText, vocabulary, now):
 def answerQuestion(question, dbPath, now=None, llm=None, maxRetries=1):
   now = now or datetime.now()
   llm = llm or callOllama
-  messages = buildMessages(question, db.getSchemaText(), db.getVocabulary(dbPath), now)
+  messages = buildMessages(question, db.getLlmSchemaText(), db.getVocabulary(dbPath), now)
   sql, lastError = "", None
   for attempt in range(1, maxRetries + 2):
     rawReply = llm(messages)
