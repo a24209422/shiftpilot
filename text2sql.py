@@ -1,16 +1,17 @@
-"""自然語言 → SQLite 查詢。只產生並執行唯讀的 SELECT。"""
+"""自然語言 → PostgreSQL 查詢。只產生並執行唯讀的 SELECT。"""
 import os
 import re
-import sqlite3
 from datetime import datetime, timedelta
 
+import psycopg
 import requests
 
 import db
 
 weekdayNames = ["一", "二", "三", "四", "五", "六", "日"]
+# WITH 開頭的查詢可以在子句裡夾帶寫入語句，只檢查開頭是不是 SELECT / WITH 不夠
 forbiddenPattern = re.compile(
-  r"\b(insert|update|delete|drop|alter|create|attach|detach|pragma|vacuum|reindex)\b",
+  r"\b(insert|update|delete|merge|truncate|drop|alter|create|grant|revoke|copy|vacuum|reindex|lock)\b",
   re.IGNORECASE,
 )
 
@@ -94,13 +95,13 @@ def buildMessages(question, schemaText, vocabulary, now):
   nextMonday = today - timedelta(days=today.weekday()) + timedelta(days=7)
   nextSunday = nextMonday + timedelta(days=6)
 
-  systemPrompt = f"""你是 SQLite 專家，負責把使用者的中文問題轉成一句 SQLite 查詢。
+  systemPrompt = f"""你是 PostgreSQL 專家，負責把使用者的中文問題轉成一句 PostgreSQL 查詢。
 
 規則：
 1. 只輸出一句 SELECT（或 WITH ... SELECT），放在 ```sql 區塊裡，不要任何解釋。
 2. 只能使用下方 schema 裡的資料表與欄位。排程相關的問題都查 event_details，不需要 JOIN。
-3. 時間欄位是文字，格式 'YYYY-MM-DD HH:MM'。取日期用 date(start_at)，取時間用 time(start_at)，可以直接用字串比較。
-4. 不要用 date('now')，日期一律以下方「日期參考」為準。
+3. 時間欄位是 timestamp。取日期用 start_at::date，取時間用 start_at::time，可以直接跟 'YYYY-MM-DD'、'HH:MM' 格式的字串比較。
+4. 不要用 CURRENT_DATE 或 now()，日期一律以下方「日期參考」為準。
 5. 比對名稱或標題時用 LIKE '%關鍵字%'，因為使用者常只講部分名字。
 6. 列出排程時帶出 resource_name，並依 start_at 排序，讓結果看得懂。
 7. 使用者提到排程名稱（例如「晚班」「週會」）時，用 title LIKE 比對，不要自己推算時段。
@@ -124,14 +125,14 @@ def buildMessages(question, schemaText, vocabulary, now):
       "明天小明有什麼行程？",
       "SELECT resource_name, title, start_at, end_at\n"
       "FROM event_details\n"
-      f"WHERE resource_name LIKE '%小明%' AND date(start_at) = '{tomorrow}'\n"
+      f"WHERE resource_name LIKE '%小明%' AND start_at::date = '{tomorrow}'\n"
       "ORDER BY start_at",
     ),
     (
       "下週總共有幾場會議？",
       "SELECT COUNT(DISTINCT event_id) AS meeting_count\n"
       "FROM event_details\n"
-      f"WHERE category = 'meeting' AND date(start_at) BETWEEN '{nextMonday}' AND '{nextSunday}'",
+      f"WHERE category = 'meeting' AND start_at::date BETWEEN '{nextMonday}' AND '{nextSunday}'",
     ),
   ]
   messages = [{"role": "system", "content": systemPrompt}]
@@ -142,19 +143,19 @@ def buildMessages(question, schemaText, vocabulary, now):
   return messages
 
 
-def answerQuestion(question, dbPath, now=None, llm=None, maxRetries=1):
+def answerQuestion(question, databaseUrl, now=None, llm=None, maxRetries=1):
   now = now or datetime.now()
   llm = llm or callOllama
-  messages = buildMessages(question, db.getLlmSchemaText(), db.getVocabulary(dbPath), now)
+  messages = buildMessages(question, db.getLlmSchemaText(), db.getVocabulary(databaseUrl), now)
   sql, lastError = "", None
   for attempt in range(1, maxRetries + 2):
     rawReply = llm(messages)
     sql = extractSql(rawReply)
     try:
       validateSql(sql)
-      columns, rows = db.runReadOnlyQuery(dbPath, sql)
+      columns, rows = db.runReadOnlyQuery(databaseUrl, sql)
       return {"sql": sql, "columns": columns, "rows": rows, "error": None, "attempts": attempt}
-    except (UnsafeSqlError, sqlite3.Error) as error:
+    except (UnsafeSqlError, psycopg.Error) as error:
       lastError = error
       # 把錯誤訊息回饋給模型重試：小模型常拼錯欄位名稱，給它看錯誤通常一次就能修好
       messages = messages + [

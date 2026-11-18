@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      # 密碼只放在 .env（不進 git），沒設定就直接啟動失敗，避免用空密碼跑起來
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?請在 .env 設定 POSTGRES_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}
+    ports:
+      # 只綁本機，區網裡的其他電腦連不到；用 5433 避開本機其他專案或已安裝的 PostgreSQL 常用的 5432
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # 走 TCP 檢查：初始化期間的暫時伺服器只開 unix socket，這樣才會等 docker/init 跑完才回報健康
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pgdata:

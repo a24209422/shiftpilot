@@ -1,6 +1,6 @@
-import sqlite3
 from datetime import date, datetime
 
+import psycopg
 import pytest
 
 import db
@@ -10,11 +10,9 @@ fixedNow = datetime(2026, 11, 17, 14, 30)  # 星期二
 
 
 @pytest.fixture
-def dbPath(tmp_path):
-  path = tmp_path / "test.db"
-  db.initDb(path)
-  db.seedDemoData(path, today=fixedNow.date())
-  return path
+def demoDatabaseUrl(databaseUrl):
+  db.seedDemoData(databaseUrl, today=fixedNow.date())
+  return databaseUrl
 
 
 def makeFakeLlm(replies):
@@ -56,21 +54,22 @@ def testValidateSqlAllowsReadOnlyQueries(sql):
   "DELETE FROM events",
   "SELECT 1; DROP TABLE events",
   "WITH x AS (SELECT 1) DELETE FROM events",
-  "SELECT * FROM events WHERE id IN (SELECT 1) UNION SELECT 1 FROM pragma_table_info('events'); PRAGMA x",
+  "WITH removed AS (DELETE FROM events RETURNING *) SELECT * FROM removed",
+  "SELECT * FROM events WHERE id IN (SELECT 1) UNION SELECT 1 FROM events; TRUNCATE events",
 ])
 def testValidateSqlRejectsWritesAndMultipleStatements(sql):
   with pytest.raises(text2sql.UnsafeSqlError):
     text2sql.validateSql(sql)
 
 
-def testReadOnlyConnectionBlocksWritesEvenWithoutValidation(dbPath):
-  with pytest.raises(sqlite3.OperationalError):
-    db.runReadOnlyQuery(dbPath, "DELETE FROM events")
-  assert db.runReadOnlyQuery(dbPath, "SELECT COUNT(*) FROM events")[1][0][0] > 0
+def testReadOnlyConnectionBlocksWritesEvenWithoutValidation(demoDatabaseUrl):
+  with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+    db.runReadOnlyQuery(demoDatabaseUrl, "DELETE FROM events")
+  assert db.runReadOnlyQuery(demoDatabaseUrl, "SELECT COUNT(*) FROM events")[1][0][0] > 0
 
 
-def testPromptContainsDatesSchemaAndVocabulary(dbPath):
-  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(dbPath), fixedNow)
+def testPromptContainsDatesSchemaAndVocabulary(demoDatabaseUrl):
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(demoDatabaseUrl), fixedNow)
   systemPrompt = messages[0]["content"]
 
   assert "2026-11-18 星期三（明天）" in systemPrompt
@@ -80,15 +79,15 @@ def testPromptContainsDatesSchemaAndVocabulary(dbPath):
   assert messages[-1] == {"role": "user", "content": "問題"}
 
 
-def getFewShotSqls(dbPath):
-  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(dbPath), fixedNow)
+def getFewShotSqls(demoDatabaseUrl):
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(demoDatabaseUrl), fixedNow)
   return [text2sql.extractSql(message["content"]) for message in messages[1:-1] if message["role"] == "assistant"]
 
 
-def testPromptTeachesModelToQueryTheFlatView(dbPath):
-  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(dbPath), fixedNow)
+def testPromptTeachesModelToQueryTheFlatView(demoDatabaseUrl):
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(demoDatabaseUrl), fixedNow)
   systemPrompt = messages[0]["content"]
-  fewShotSqls = getFewShotSqls(dbPath)
+  fewShotSqls = getFewShotSqls(demoDatabaseUrl)
 
   # 一筆排程在 view 裡有多列，prompt 沒提醒的話模型會用 COUNT(*) 多算
   assert "COUNT(DISTINCT event_id)" in systemPrompt
@@ -97,17 +96,17 @@ def testPromptTeachesModelToQueryTheFlatView(dbPath):
   assert all("event_details" in sql and "JOIN" not in sql for sql in fewShotSqls)
 
 
-def testFewShotExamplesRunOnTheRealSchema(dbPath):
+def testFewShotExamplesRunOnTheRealSchema(demoDatabaseUrl):
   # 範例 SQL 如果用到不存在的欄位，等於在教模型寫錯
-  for sql in getFewShotSqls(dbPath):
+  for sql in getFewShotSqls(demoDatabaseUrl):
     text2sql.validateSql(sql)
-    db.runReadOnlyQuery(dbPath, sql)
+    db.runReadOnlyQuery(demoDatabaseUrl, sql)
 
 
-def testAnswerQuestionRunsGeneratedSql(dbPath):
+def testAnswerQuestionRunsGeneratedSql(demoDatabaseUrl):
   fakeLlm = makeFakeLlm(["```sql\nSELECT title FROM events WHERE category = 'shift' ORDER BY start_at\n```"])
 
-  result = text2sql.answerQuestion("有哪些班？", dbPath, now=fixedNow, llm=fakeLlm)
+  result = text2sql.answerQuestion("有哪些班？", demoDatabaseUrl, now=fixedNow, llm=fakeLlm)
 
   assert result["error"] is None
   assert result["columns"] == ["title"]
@@ -115,24 +114,24 @@ def testAnswerQuestionRunsGeneratedSql(dbPath):
   assert result["attempts"] == 1
 
 
-def testAnswerQuestionFeedsErrorBackAndRetries(dbPath):
+def testAnswerQuestionFeedsErrorBackAndRetries(demoDatabaseUrl):
   fakeLlm = makeFakeLlm([
     "SELECT wrong_column FROM events",
     "SELECT COUNT(*) FROM events",
   ])
 
-  result = text2sql.answerQuestion("幾筆？", dbPath, now=fixedNow, llm=fakeLlm)
+  result = text2sql.answerQuestion("幾筆？", demoDatabaseUrl, now=fixedNow, llm=fakeLlm)
 
   assert result["error"] is None
   assert result["attempts"] == 2
   assert "wrong_column" in fakeLlm.calls[1][-1]["content"]
 
 
-def testAnswerQuestionGivesUpAfterMaxRetries(dbPath):
+def testAnswerQuestionGivesUpAfterMaxRetries(demoDatabaseUrl):
   fakeLlm = makeFakeLlm(["DELETE FROM events", "DELETE FROM events"])
 
-  result = text2sql.answerQuestion("刪掉", dbPath, now=fixedNow, llm=fakeLlm)
+  result = text2sql.answerQuestion("刪掉", demoDatabaseUrl, now=fixedNow, llm=fakeLlm)
 
   assert result["error"] is not None
   assert result["rows"] == []
-  assert len(db.listEvents(dbPath, date(2026, 1, 1), date(2026, 12, 31))) > 0
+  assert len(db.listEvents(demoDatabaseUrl, date(2026, 1, 1), date(2026, 12, 31))) > 0

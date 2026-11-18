@@ -3,15 +3,17 @@ import os
 from datetime import date, datetime, time, timedelta
 
 import pandas as pd
+import psycopg
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+from psycopg.conninfo import conninfo_to_dict
 
 import db
 import text2sql
 
 load_dotenv()
-dbPath = os.getenv("DB_PATH", "schedule.db")
+databaseUrl = os.getenv("DATABASE_URL")
 
 eventColumnNames = {
   "title": "標題", "category": "分類", "start_at": "開始", "end_at": "結束",
@@ -26,11 +28,17 @@ exampleQuestions = [
 
 
 @st.cache_resource
-def prepareDb(path):
+def prepareDb(url):
   # cache_resource 讓建表與塞示範資料只在 server 啟動時跑一次，不會每次互動都重跑
-  db.initDb(path)
-  db.seedDemoData(path)
+  db.initDb(url)
+  db.seedDemoData(url)
   return True
+
+
+def describeDatabase(url):
+  # 畫面上只顯示資料庫位置，連線字串裡有密碼，不能整串印出來
+  info = conninfo_to_dict(url)
+  return f"{info.get('dbname', '')}@{info.get('host', 'localhost')}:{info.get('port', '5432')}"
 
 
 def formatResource(resource):
@@ -48,10 +56,17 @@ def showEvents(events):
 
 
 st.set_page_config(page_title="排程工具", page_icon="📅", layout="wide")
-prepareDb(dbPath)
+if not databaseUrl:
+  st.error("請先在 .env 設定 DATABASE_URL（參考 .env.example）。")
+  st.stop()
+try:
+  prepareDb(databaseUrl)
+except psycopg.OperationalError as error:
+  st.error(f"無法連線到 PostgreSQL：{error}\n\n請確認已執行 `docker compose up -d`，且 .env 的密碼正確。")
+  st.stop()
 
 st.title("排程工具 MVP")
-st.caption(f"資料庫：{dbPath}　｜　text2sql 模型：{text2sql.getOllamaConfig()['model']}（Ollama）")
+st.caption(f"資料庫：{describeDatabase(databaseUrl)}（PostgreSQL）　｜　text2sql 模型：{text2sql.getOllamaConfig()['model']}（Ollama）")
 
 queryTab, listTab, addTab, resourceTab = st.tabs(["自然語言查詢", "排程清單", "新增排程", "資源"])
 
@@ -69,7 +84,7 @@ with queryTab:
   if runQuery and question.strip():
     with st.spinner("模型產生 SQL 中…"):
       try:
-        st.session_state.lastResult = text2sql.answerQuestion(question.strip(), dbPath)
+        st.session_state.lastResult = text2sql.answerQuestion(question.strip(), databaseUrl)
       except requests.RequestException as error:
         st.session_state.lastResult = None
         st.error(f"無法呼叫 Ollama：{error}\n\n請確認 Ollama 已啟動，且已下載 {text2sql.getOllamaConfig()['model']}。")
@@ -93,20 +108,20 @@ with listTab:
   filterColumns = st.columns(2)
   dateRange = filterColumns[0].date_input("日期區間", value=(monday, monday + timedelta(days=13)))
   selectedResource = filterColumns[1].selectbox(
-    "資源", [None] + db.listResources(dbPath), format_func=formatResource
+    "資源", [None] + db.listResources(databaseUrl), format_func=formatResource
   )
   if isinstance(dateRange, tuple) and len(dateRange) == 2:
     resourceId = selectedResource["id"] if selectedResource else None
-    showEvents(db.listEvents(dbPath, dateRange[0], dateRange[1], resourceId))
+    showEvents(db.listEvents(databaseUrl, dateRange[0], dateRange[1], resourceId))
   else:
     st.info("請選擇結束日期。")
 
 with addTab:
-  resources = db.listResources(dbPath)
+  resources = db.listResources(databaseUrl)
   if not resources:
     st.warning("請先到「資源」分頁新增資源。")
   else:
-    categories = db.getVocabulary(dbPath)["categories"]
+    categories = db.getVocabulary(databaseUrl)["categories"]
     # multiselect 的選項用 id 而不是整個 dict：dict 不能雜湊，Streamlit 比對已選項目時會出問題
     resourceById = {resource["id"]: resource for resource in resources}
     with st.form("addEventForm"):
@@ -132,7 +147,7 @@ with addTab:
         resourceLabel = "、".join(resourceById[resourceId]["name"] for resourceId in selectedResourceIds)
         try:
           db.addEvent(
-            dbPath, title, category, selectedResourceIds,
+            databaseUrl, title, category, selectedResourceIds,
             datetime.combine(eventDate, startTime), datetime.combine(eventDate, endTime),
             note or None,
           )
@@ -144,7 +159,7 @@ with addTab:
           st.error(str(error))
 
 with resourceTab:
-  st.dataframe(pd.DataFrame(db.listResources(dbPath)), hide_index=True)
+  st.dataframe(pd.DataFrame(db.listResources(databaseUrl)), hide_index=True)
   with st.form("addResourceForm", clear_on_submit=True):
     st.write("新增資源")
     name = st.text_input("名稱")
@@ -154,5 +169,5 @@ with resourceTab:
     if not name.strip() or not resourceType.strip():
       st.error("名稱和種類不能空白。")
     else:
-      db.addResource(dbPath, name, resourceType)
+      db.addResource(databaseUrl, name, resourceType)
       st.rerun()

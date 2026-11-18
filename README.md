@@ -1,17 +1,22 @@
 # 排程工具 MVP（text2sql）
 
-用中文問排程問題，本機 Ollama 模型把問題轉成 SQLite 查詢並回傳結果。一筆排程可以有多個資源（例如幾個人加一間會議室），新增時會自動檢查每個資源的時段衝突。
+用中文問排程問題，本機 Ollama 模型把問題轉成 PostgreSQL 查詢並回傳結果。一筆排程可以有多個資源（例如幾個人加一間會議室），新增時會自動檢查每個資源的時段衝突。
 
 ## 執行
 
 ```bash
+cp .env.example .env          # 再把 .env 裡的兩組 change-me 密碼改成自己的值
+docker compose up -d --wait   # 啟動 PostgreSQL 17
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-- 需要 Ollama 在背景執行，並已下載 `.env` 指定的模型（預設 `qwen2.5:3b`）
-- 想換模型：複製 `.env.example` 成 `.env`，修改 `OLLAMA_MODEL`
-- 第一次啟動會建立 `schedule.db`，並以「今天」為基準塞入兩週的示範資料
+- 需要 Docker，以及在背景執行的 Ollama，並已下載 `.env` 指定的模型（預設 `qwen2.5:3b`）
+- 想換模型：修改 `.env` 的 `OLLAMA_MODEL`
+- PostgreSQL 只綁在本機的 `127.0.0.1:5433`，避開常被其他 PostgreSQL 占用的 5432
+- 容器第一次啟動時，`docker/init/` 會建立非 superuser 的 `schedule_app` 帳號，以及 `schedule`（app 用）、`schedule_test`（測試與評測用）兩個資料庫
+- app 第一次啟動會建表，並以「今天」為基準塞入兩週的示範資料
+- 想清空資料重來：`docker compose down -v`（會刪掉整個資料庫，包含帳號）
 
 ## 測試
 
@@ -19,11 +24,11 @@ streamlit run app.py
 python -m pytest -q
 ```
 
-測試用假的 LLM，不需要 Ollama。
+需要先啟動 PostgreSQL。每個測試在 `schedule_test` 裡建立自己的 schema，跑完就刪掉。測試用假的 LLM，不需要 Ollama。
 
 ## text2sql 評測
 
-改 prompt、換模型或改資料表之後，用評測集確認準確率是變好還是變差。需要 Ollama。
+改 prompt、換模型或改資料表之後，用評測集確認準確率是變好還是變差。需要 Ollama 和 PostgreSQL。
 
 ```bash
 python -m evals.run
@@ -42,6 +47,8 @@ python -m evals.run
 - **流程**：走跟 app 相同的 `answerQuestion`，包含 SQL 出錯時重試一次
 
 ### 基準分數（2026-11-17，各跑一次，溫度 0）
+
+> 這組分數是改成 PostgreSQL 之前（SQLite 語法）量的。prompt 和標準答案改寫成 PostgreSQL 語法後還沒重跑，不能直接拿來比較。
 
 | 類別 | 測什麼 | 題數 | qwen2.5:3b | qwen3-vl:4b-instruct |
 |---|---|---|---|---|
@@ -73,6 +80,8 @@ python -m evals.run
 
 | 檔案 | 內容 |
 |---|---|
+| `docker-compose.yml` | PostgreSQL 17 容器，密碼從 `.env` 讀取 |
+| `docker/init/` | 容器第一次啟動時建立 app 帳號與資料庫 |
 | `schema.sql` | 資料表與 view 的定義 |
 | `llm_schema.sql` | 寫給 text2sql 模型看的結構說明，只有 `event_details` 和 `resources` |
 | `db.py` | 資料庫操作、衝突檢查、唯讀查詢、示範資料 |
@@ -92,13 +101,14 @@ python -m evals.run
 
 - text2sql 的模型只看得到 `event_details` 和 `resources`，不用自己寫 JOIN。代價是一筆排程在 view 裡有多列，算筆數時要用 `COUNT(DISTINCT event_id)`
 - 新增排程時，只要有任何一個資源在該時段已有排程，整筆都不會新增
-- 舊版（一筆排程只有一個資源）建立的 `schedule.db` 結構不相容，沒有提供資料遷移
+- `event_resources.position` 記錄新增排程時選資源的順序，清單上的資源才會照使用者選的順序顯示
+- 改成 PostgreSQL 之前的 `schedule.db`（SQLite）不會搬過來；裡面只有示範資料，新資料庫啟動時會重新塞入
 
 ## text2sql 的唯讀防護
 
 1. `validateSql`：只接受單一 `SELECT` / `WITH`，擋寫入關鍵字
-2. 以 `mode=ro` 唯讀模式開啟 SQLite
-3. `PRAGMA query_only = ON`
+2. 模型寫的 SQL 在 read-only transaction 裡執行，PostgreSQL 本身會拒絕寫入
+3. app 用非 superuser 的 `schedule_app` 帳號連線：superuser 可以用 `pg_read_file()` 這類函式讀取伺服器上的檔案
 
 ## 目前限制（之後擴充的方向）
 

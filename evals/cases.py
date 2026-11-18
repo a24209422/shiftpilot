@@ -16,10 +16,10 @@
 
 categories = ["basic", "date", "aggregate", "type", "time", "order", "multi"]
 
-thisWeek = "date(start_at) BETWEEN '2026-11-16' AND '2026-11-22'"
-lastWeek = "date(start_at) BETWEEN '2026-11-09' AND '2026-11-15'"
-nextWeek = "date(start_at) BETWEEN '2026-11-23' AND '2026-11-29'"
-durationHours = "(julianday(end_at) - julianday(start_at)) * 24"
+thisWeek = "start_at::date BETWEEN '2026-11-16' AND '2026-11-22'"
+lastWeek = "start_at::date BETWEEN '2026-11-09' AND '2026-11-15'"
+nextWeek = "start_at::date BETWEEN '2026-11-23' AND '2026-11-29'"
+durationHours = "EXTRACT(EPOCH FROM end_at - start_at) / 3600"
 
 
 def listTitles(condition):
@@ -47,26 +47,26 @@ cases = [
 
   # ── date：今天、明天、星期幾、上週下週 ──
   {"id": "d01", "category": "date", "question": "今天有哪些排程？",
-   **listTitles("date(start_at) = '2026-11-17'")},
+   **listTitles("start_at::date = '2026-11-17'")},
   {"id": "d02", "category": "date", "question": "明天有哪些行程？",
-   **listTitles("date(start_at) = '2026-11-18'")},
+   **listTitles("start_at::date = '2026-11-18'")},
   {"id": "d03", "category": "date", "question": "後天王小明要做什麼？",
-   "goldSql": "SELECT title FROM event_details WHERE resource_name = '王小明' AND date(start_at) = '2026-11-19'"},
+   "goldSql": "SELECT title FROM event_details WHERE resource_name = '王小明' AND start_at::date = '2026-11-19'"},
   {"id": "d04", "category": "date", "question": "昨天誰上晚班？", "compareAsSet": True,
-   "goldSql": "SELECT resource_name FROM event_details WHERE title = '晚班' AND date(start_at) = '2026-11-16'"},
+   "goldSql": "SELECT resource_name FROM event_details WHERE title = '晚班' AND start_at::date = '2026-11-16'"},
   {"id": "d05", "category": "date", "question": "下週三有哪些會議？",
-   **listTitles("category = 'meeting' AND date(start_at) = '2026-11-25'")},
+   **listTitles("category = 'meeting' AND start_at::date = '2026-11-25'")},
   {"id": "d06", "category": "date", "question": "這週五陳大文有什麼行程？",
-   "goldSql": "SELECT title FROM event_details WHERE resource_name = '陳大文' AND date(start_at) = '2026-11-20'"},
+   "goldSql": "SELECT title FROM event_details WHERE resource_name = '陳大文' AND start_at::date = '2026-11-20'"},
   {"id": "d07", "category": "date", "question": "上週有哪些排程？",
    **listTitles(lastWeek)},
   {"id": "d08", "category": "date", "question": "下週 A 會議室有哪些預約？",
    "goldSql": f"SELECT title FROM event_details WHERE resource_name = 'A 會議室' AND {nextWeek}"},
   {"id": "d09", "category": "date", "question": "11 月 26 日有哪些排程？",
-   **listTitles("date(start_at) = '2026-11-26'")},
+   **listTitles("start_at::date = '2026-11-26'")},
   {"id": "d10", "category": "date", "question": "這個週末有誰要上班？", "compareAsSet": True,
    "goldSql": "SELECT resource_name FROM event_details WHERE category = 'shift' "
-              "AND date(start_at) BETWEEN '2026-11-21' AND '2026-11-22'"},
+              "AND start_at::date BETWEEN '2026-11-21' AND '2026-11-22'"},
 
   # ── aggregate：COUNT、SUM、GROUP BY ──
   {"id": "a01", "category": "aggregate", "question": "總共有幾筆排程？",
@@ -96,7 +96,7 @@ cases = [
   {"id": "t02", "category": "type", "question": "有哪些設備？",
    "goldSql": "SELECT name FROM resources WHERE type = 'equipment'"},
   {"id": "t03", "category": "type", "question": "明天有哪些會議室被使用？", "compareAsSet": True,
-   "goldSql": "SELECT resource_name FROM event_details WHERE resource_type = 'room' AND date(start_at) = '2026-11-18'"},
+   "goldSql": "SELECT resource_name FROM event_details WHERE resource_type = 'room' AND start_at::date = '2026-11-18'"},
   {"id": "t04", "category": "type", "question": "下週有哪些設備被借用？", "compareAsSet": True,
    "goldSql": f"SELECT resource_name FROM event_details WHERE resource_type = 'equipment' AND {nextWeek}"},
   {"id": "t05", "category": "type", "question": "這週有哪些人要開會？", "compareAsSet": True,
@@ -104,19 +104,19 @@ cases = [
               f"WHERE resource_type = 'person' AND category = 'meeting' AND {thisWeek}"},
   {"id": "t06", "category": "type", "question": "今天有幾個人有排程？",
    "goldSql": "SELECT COUNT(DISTINCT resource_name) FROM event_details "
-              "WHERE resource_type = 'person' AND date(start_at) = '2026-11-17'"},
+              "WHERE resource_type = 'person' AND start_at::date = '2026-11-17'"},
 
   # ── time：一天中的時段、時長 ──
   {"id": "m01", "category": "time", "question": "明天中午 12 點以後開始的排程有哪些？",
-   **listTitles("date(start_at) = '2026-11-18' AND time(start_at) >= '12:00'")},
+   **listTitles("start_at::date = '2026-11-18' AND start_at::time >= '12:00'")},
   {"id": "m02", "category": "time", "question": "這週有哪些排程在早上 8 點半以前開始？",
-   "goldSql": f"SELECT title FROM events WHERE {thisWeek} AND time(start_at) < '08:30'"},
+   "goldSql": f"SELECT title FROM events WHERE {thisWeek} AND start_at::time < '08:30'"},
   {"id": "m03", "category": "time", "question": "哪些排程的時間超過 5 小時？",
    "goldSql": f"SELECT title FROM events WHERE {durationHours} > 5"},
   {"id": "m04", "category": "time", "question": "今天下午 3 點半有哪些排程正在進行？",
    **listTitles("start_at <= '2026-11-17 15:30' AND end_at > '2026-11-17 15:30'")},
   {"id": "m05", "category": "time", "question": "晚上 10 點以後才結束的排程有幾筆？",
-   "goldSql": "SELECT COUNT(*) FROM events WHERE time(end_at) > '22:00'"},
+   "goldSql": "SELECT COUNT(*) FROM events WHERE end_at::time > '22:00'"},
 
   # ── order：排序與 LIMIT ──
   {"id": "o01", "category": "order", "question": "王小明下一個行程是什麼？",
@@ -141,7 +141,8 @@ cases = [
    "goldSql": "SELECT title FROM event_details WHERE resource_name = '王小明' "
               "AND event_id IN (SELECT event_id FROM event_details WHERE resource_name = 'B 會議室')"},
   {"id": "x04", "category": "multi", "question": "哪些排程有兩個以上的資源參與？",
-   "goldSql": "SELECT title FROM event_details GROUP BY event_id HAVING COUNT(*) >= 2",
+   # PostgreSQL 要求 SELECT 的欄位都在 GROUP BY 裡（SQLite 不檢查），所以 title 也要列進去
+   "goldSql": "SELECT title FROM event_details GROUP BY event_id, title HAVING COUNT(*) >= 2",
    "alsoAccept": ["SELECT title FROM event_details WHERE event_id IN "
                   "(SELECT event_id FROM event_details GROUP BY event_id HAVING COUNT(*) >= 2)"]},
   {"id": "x05", "category": "multi", "question": "教育訓練總共有幾個資源參與？",

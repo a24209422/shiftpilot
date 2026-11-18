@@ -4,9 +4,9 @@
 """
 import argparse
 import json
+import os
 import re
 import sys
-import tempfile
 import time
 from datetime import datetime
 from functools import partial
@@ -22,13 +22,13 @@ from evals.cases import cases
 defaultOutDir = Path(__file__).parent / "results"
 
 
-def evaluateCase(case, dbPath, llm):
+def evaluateCase(case, databaseUrl, llm):
   # 有些題目有不只一種合理的答法（見 cases.listTitles），符合其中一種就算對
   acceptedSqls = [case["goldSql"], *case.get("alsoAccept", [])]
-  acceptedResults = [db.runReadOnlyQuery(dbPath, sql)[1] for sql in acceptedSqls]
+  acceptedResults = [db.runReadOnlyQuery(databaseUrl, sql)[1] for sql in acceptedSqls]
   startedAt = time.perf_counter()
   # 走跟 app 完全相同的 answerQuestion（含失敗重試），量到的才是使用者實際會遇到的準確率
-  answer = text2sql.answerQuestion(case["question"], dbPath, now=fixture.fixedNow, llm=llm)
+  answer = text2sql.answerQuestion(case["question"], databaseUrl, now=fixture.fixedNow, llm=llm)
   seconds = time.perf_counter() - startedAt
   passed = answer["error"] is None and any(
     scoring.resultsMatch(goldRows, answer["rows"], case.get("compareAsSet", False))
@@ -104,16 +104,18 @@ def main(argv=None, llm=None):
   selectedCases = selectCases(args.filter)
   if not selectedCases:
     parser.error(f"沒有符合 --filter {args.filter} 的題目")
+  testDatabaseUrl = os.getenv("TEST_DATABASE_URL")
+  if not testDatabaseUrl:
+    parser.error("請在 .env 設定 TEST_DATABASE_URL（參考 .env.example）")
   llm = llm or partial(text2sql.callOllama, model=args.model)
   # 模型寫的 SQL 可能含有終端機編碼印不出來的字元，不能因此讓整輪評測中斷
   sys.stdout.reconfigure(errors="replace")
 
   results = []
-  with tempfile.TemporaryDirectory() as tempDir:
-    dbPath = Path(tempDir) / "eval.db"
-    fixture.buildDb(dbPath)
+  with db.temporarySchema(testDatabaseUrl, "eval") as databaseUrl:
+    fixture.buildDb(databaseUrl)
     for case in selectedCases:
-      result = evaluateCase(case, dbPath, llm)
+      result = evaluateCase(case, databaseUrl, llm)
       results.append(result)
       print(formatCaseLine(result), flush=True)
 

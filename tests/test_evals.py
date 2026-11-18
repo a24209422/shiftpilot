@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -22,6 +23,8 @@ from evals import run as evalRun
   ([(3,)], [(3.0,)]),
   # 浮點數誤差
   ([(2.5,)], [(2.5000001,)]),
+  # PostgreSQL 的 numeric 會變成 Decimal，跟浮點數視為相同
+  ([(Decimal("2.5000000000000000"),)], [(2.5,)]),
   # 重複的資料列，筆數相同
   ([("早班",), ("早班",)], [("李小華", "早班"), ("林美玲", "早班")]),
 ])
@@ -67,28 +70,29 @@ def testEmptyGoldOnlyMatchesEmptyPrediction():
 
 
 @pytest.fixture(scope="module")
-def evalDbPath(tmp_path_factory):
-  path = tmp_path_factory.mktemp("evals") / "eval.db"
-  fixture.buildDb(path)
-  return path
+def evalDatabaseUrl(testDatabaseUrl):
+  # 整個檔案共用一份評測資料：題目只讀不寫，每個測試重建一次太慢
+  with db.temporarySchema(testDatabaseUrl, "eval") as url:
+    fixture.buildDb(url)
+    yield url
 
 
-def testFixtureBuildsFixedDataset(evalDbPath):
-  resourceTypes = [resource["type"] for resource in db.listResources(evalDbPath)]
-  _, rows = db.runReadOnlyQuery(evalDbPath, "SELECT COUNT(*), MIN(date(start_at)), MAX(date(start_at)) FROM events")
-  _, detailRows = db.runReadOnlyQuery(evalDbPath, "SELECT COUNT(*) FROM event_details")
+def testFixtureBuildsFixedDataset(evalDatabaseUrl):
+  resourceTypes = [resource["type"] for resource in db.listResources(evalDatabaseUrl)]
+  _, rows = db.runReadOnlyQuery(evalDatabaseUrl, "SELECT COUNT(*), MIN(start_at::date), MAX(start_at::date) FROM events")
+  _, detailRows = db.runReadOnlyQuery(evalDatabaseUrl, "SELECT COUNT(*) FROM event_details")
 
   assert sorted(resourceTypes) == ["equipment"] * 2 + ["person"] * 4 + ["room"] * 2
-  assert rows[0] == (35, "2026-11-09", "2026-11-28")
+  assert rows[0] == (35, date(2026, 11, 9), date(2026, 11, 28))
   # 有 5 場會議各有 2 個資源，明細因此比排程多 5 列；統計類題目靠這個差距測出模型有沒有重複計算
   assert detailRows[0] == (40,)
 
 
-def testFixtureHasEventsInLastThisAndNextWeek(evalDbPath):
+def testFixtureHasEventsInLastThisAndNextWeek(evalDatabaseUrl):
   # 三週都要有資料，相對日期算錯一週時查詢結果才會不一樣
   weekRanges = [(date(2026, 11, 9), date(2026, 11, 15)), (date(2026, 11, 16), date(2026, 11, 22)), (date(2026, 11, 23), date(2026, 11, 29))]
 
-  eventCounts = [len(db.listEvents(evalDbPath, start, end)) for start, end in weekRanges]
+  eventCounts = [len(db.listEvents(evalDatabaseUrl, start, end)) for start, end in weekRanges]
 
   assert eventCounts == [7, 16, 12]
 
@@ -103,18 +107,18 @@ def testCasesHaveUniqueIdsAndCoverEveryCategory():
 
 
 @pytest.mark.parametrize("case", cases.cases, ids=lambda case: case["id"])
-def testGoldSqlIsReadOnlyAndReturnsRows(case, evalDbPath):
+def testGoldSqlIsReadOnlyAndReturnsRows(case, evalDatabaseUrl):
   for sql in [case["goldSql"], *case.get("alsoAccept", [])]:
     text2sql.validateSql(sql)
-    _, rows = db.runReadOnlyQuery(evalDbPath, sql)
+    _, rows = db.runReadOnlyQuery(evalDatabaseUrl, sql)
 
     # 標準答案如果查不到資料，模型隨便寫一句查不到資料的 SQL 也會被判定為正確
     assert rows
 
 
-def testCasesDoNotReuseFewShotQuestions(evalDbPath):
+def testCasesDoNotReuseFewShotQuestions(evalDatabaseUrl):
   # 題目如果跟 prompt 裡的範例一樣，模型等於直接看到答案，分數會虛高
-  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(evalDbPath), fixture.fixedNow)
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(evalDatabaseUrl), fixture.fixedNow)
   fewShotQuestions = {message["content"] for message in messages[1:-1] if message["role"] == "user"}
 
   assert len(fewShotQuestions) > 0
@@ -127,10 +131,10 @@ def answerWithGoldSql(messages):
   return goldSqlByQuestion[messages[-1]["content"]]
 
 
-def testEvaluateCasePassesWhenResultMatchesGold(evalDbPath):
+def testEvaluateCasePassesWhenResultMatchesGold(evalDatabaseUrl):
   case = cases.cases[0]
 
-  result = evalRun.evaluateCase(case, evalDbPath, answerWithGoldSql)
+  result = evalRun.evaluateCase(case, evalDatabaseUrl, answerWithGoldSql)
 
   assert result["passed"] is True
   assert result["id"] == case["id"]
@@ -138,33 +142,33 @@ def testEvaluateCasePassesWhenResultMatchesGold(evalDbPath):
   assert result["attempts"] == 1
 
 
-def testEvaluateCaseAcceptsAlternativeAnswer(evalDbPath):
+def testEvaluateCaseAcceptsAlternativeAnswer(evalDatabaseUrl):
   # 今天有一場 2 個資源的會議：一場列一次（3 列）或每個資源列一次（4 列）都是合理的回答
   case = {
     "id": "x", "category": "date", "question": "今天有哪些排程？",
-    "goldSql": "SELECT title FROM events WHERE date(start_at) = '2026-11-17'",
-    "alsoAccept": ["SELECT title FROM event_details WHERE date(start_at) = '2026-11-17'"],
+    "goldSql": "SELECT title FROM events WHERE start_at::date = '2026-11-17'",
+    "alsoAccept": ["SELECT title FROM event_details WHERE start_at::date = '2026-11-17'"],
   }
-  wrongSql = "SELECT title FROM events WHERE date(start_at) = '2026-11-18'"
+  wrongSql = "SELECT title FROM events WHERE start_at::date = '2026-11-18'"
 
-  perEvent = evalRun.evaluateCase(case, evalDbPath, lambda messages: case["goldSql"])
-  perResource = evalRun.evaluateCase(case, evalDbPath, lambda messages: case["alsoAccept"][0])
-  wrong = evalRun.evaluateCase(case, evalDbPath, lambda messages: wrongSql)
+  perEvent = evalRun.evaluateCase(case, evalDatabaseUrl, lambda messages: case["goldSql"])
+  perResource = evalRun.evaluateCase(case, evalDatabaseUrl, lambda messages: case["alsoAccept"][0])
+  wrong = evalRun.evaluateCase(case, evalDatabaseUrl, lambda messages: wrongSql)
 
   assert perEvent["passed"] is True
   assert perResource["passed"] is True
   assert wrong["passed"] is False
 
 
-def testEvaluateCaseFailsWhenResultDiffers(evalDbPath):
-  result = evalRun.evaluateCase(cases.cases[0], evalDbPath, lambda messages: "SELECT title FROM events LIMIT 1")
+def testEvaluateCaseFailsWhenResultDiffers(evalDatabaseUrl):
+  result = evalRun.evaluateCase(cases.cases[0], evalDatabaseUrl, lambda messages: "SELECT title FROM events LIMIT 1")
 
   assert result["passed"] is False
   assert result["error"] is None
 
 
-def testEvaluateCaseFailsWhenSqlCannotRun(evalDbPath):
-  result = evalRun.evaluateCase(cases.cases[0], evalDbPath, lambda messages: "SELECT no_such_column FROM events")
+def testEvaluateCaseFailsWhenSqlCannotRun(evalDatabaseUrl):
+  result = evalRun.evaluateCase(cases.cases[0], evalDatabaseUrl, lambda messages: "SELECT no_such_column FROM events")
 
   assert result["passed"] is False
   assert "no_such_column" in result["error"]

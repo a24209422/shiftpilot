@@ -4,8 +4,8 @@ CREATE TABLE event_details (
   event_id INTEGER,      -- 排程編號。同一筆排程的每一列都相同
   title TEXT,            -- 排程標題，例如 '週會'、'早班'
   category TEXT,         -- 分類：meeting（會議）、shift（班別）、task（工作）、booking（借用）
-  start_at TEXT,         -- 開始時間，格式 'YYYY-MM-DD HH:MM'
-  end_at TEXT,           -- 結束時間，格式 'YYYY-MM-DD HH:MM'
+  start_at TIMESTAMP,    -- 開始時間，例如 '2026-11-17 10:00'
+  end_at TIMESTAMP,      -- 結束時間，例如 '2026-11-17 11:00'
   resource_name TEXT,    -- 參與這筆排程的資源名稱，例如 '王小明'、'A 會議室'
   resource_type TEXT     -- 資源種類：person（人）、room（會議室）、equipment（設備）
 );

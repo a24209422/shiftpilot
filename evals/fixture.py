@@ -60,10 +60,10 @@ events = [
 ]
 
 
-def buildDb(dbPath):
-  db.initDb(dbPath)
-  resourceIds = {name: db.addResource(dbPath, name, resourceType) for name, resourceType in resources}
+def buildDb(databaseUrl):
+  db.initDb(databaseUrl)
+  resourceIds = {name: db.addResource(databaseUrl, name, resourceType) for name, resourceType in resources}
   for title, category, resourceNames, day, startTime, endTime in events:
     # 走 addEvent 而不是直接 INSERT：資料如果不小心排到衝突的時段，建庫時就會報錯
     eventResourceIds = [resourceIds[name] for name in resourceNames]
-    db.addEvent(dbPath, title, category, eventResourceIds, f"{day} {startTime}", f"{day} {endTime}")
+    db.addEvent(databaseUrl, title, category, eventResourceIds, f"{day} {startTime}", f"{day} {endTime}")

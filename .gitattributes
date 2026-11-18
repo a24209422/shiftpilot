@@ -1,0 +1,2 @@
+# 容器裡的 shell script 必須是 LF 換行，Windows 上 checkout 成 CRLF 會讓 PostgreSQL 初始化失敗
+*.sh text eol=lf
