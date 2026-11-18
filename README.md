@@ -47,22 +47,36 @@ python -m pytest -q
 改 prompt、換模型或改資料表之後，用評測集確認準確率是變好還是變差。需要 Ollama 和 PostgreSQL。
 
 ```bash
-python -m evals.run
+python -m evals.run               # dev：調 prompt 時用，印出每題的對錯與模型寫的 SQL
+python -m evals.run --split test  # test：確認改進有沒有效，只印分數
 ```
 
 - `--model qwen3-vl:4b-instruct`：指定模型（預設讀 `.env` 的 `OLLAMA_MODEL`）
-- `--filter date` 或 `--filter d05`：只跑某個類別或某一題
-- 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）
+- `--filter date` 或 `--filter d05`：只跑某個類別或某一題（只限 dev）
+- 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test 的報告檔不要打開看每題的細節
 
 做法：
 
 - **固定資料**：`evals/fixture.py` 有 8 個資源、35 筆排程（其中 5 場會議有 2 個資源），「現在」固定在 2026-11-17（二）14:30，所以每次跑的題目和答案都一樣
-- **題目**：`evals/cases.py` 共 47 題，分 7 類。每題附一句標準答案 SQL
+- **題目**：分成兩份，每題附一句標準答案 SQL
+  - dev：`evals/cases.py` 47 題，分 7 類。調 prompt 時看每題的對錯，找出模型的錯誤模式
+  - test：`evals/heldout_cases.py` 24 題，各類別題數照 dev 的比例縮小。2026-11-18 在改 prompt 之前寫好並凍結，之後不再修改，只用來確認改進不是只對 dev 有效
+  - test 和調 prompt 的是同一個人出的題，出題時已經知道 dev 上的錯誤模式，獨立性不如由別人出題
 - **比對**：比的是查詢結果，不是 SQL 文字。模型多選欄位不扣分，但標準答案的欄位和資料列必須都在
 - **替代答案**：列出排程的題目，一場 2 個資源的會議列一次或列兩次都算對；問「幾筆」「幾場」的題目只有一個正確數字
 - **流程**：走跟 app 相同的 `answerQuestion`，包含 SQL 出錯時重試一次
 
-### 基準分數（2026-11-18，PostgreSQL，各跑 3 次，溫度 0）
+### 基準分數（2026-11-18，PostgreSQL，溫度 0）
+
+| | qwen2.5:3b | qwen3-vl:4b-instruct |
+|---|---|---|
+| dev（47 題） | 25（53.2%） | 41（87.2%） |
+| test（24 題） | 15（62.5%） | 15（62.5%） |
+
+- 4b 在 test 比 dev 低將近 25 個百分點。dev 的題目在之前調 prompt 時都看過，dev 分數可能因此偏高；原因沒有逐題確認，因為看了 test 的細節，test 就不算沒看過的題目了
+- test 只有 24 題，一題就是 4.2 個百分點
+
+dev 各類別：
 
 | 類別 | 測什麼 | 題數 | qwen2.5:3b | qwen3-vl:4b-instruct |
 |---|---|---|---|---|
@@ -78,7 +92,7 @@ python -m evals.run
 
 秒數是在開發機上量的，不含第一題載入模型的時間。
 
-- 3 次的結果每一題的對錯都相同：溫度 0、同一台機器上，改 prompt 後跑一次就夠，分數的變化來自改動本身，不是隨機
+- dev 各跑 3 次，每一題的對錯都相同：溫度 0、同一台機器上，改 prompt 後跑一次就夠，分數的變化來自改動本身，不是隨機。test 各跑 1 次，平均每題秒數是 3.8 和 13.7
 - 改成 PostgreSQL 之前（SQLite 語法）兩個模型分別是 25 和 37 題。資料庫和 prompt 裡的語法說明是一起改的，分不出差異來自哪一項
 
 ### 和改成多對多之前比較（SQLite 時期）

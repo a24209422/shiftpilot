@@ -6,8 +6,10 @@ import pytest
 
 import db
 import text2sql
-from evals import cases, fixture, scoring
+from evals import cases, fixture, heldout_cases, scoring
 from evals import run as evalRun
+
+allCases = cases.cases + heldout_cases.heldoutCases
 
 
 @pytest.mark.parametrize("goldRows, predictedRows", [
@@ -106,7 +108,18 @@ def testCasesHaveUniqueIdsAndCoverEveryCategory():
   assert {case["category"] for case in cases.cases} == set(cases.categories)
 
 
-@pytest.mark.parametrize("case", cases.cases, ids=lambda case: case["id"])
+def testHeldoutCasesAreSeparateFromDev():
+  heldoutIds = [case["id"] for case in heldout_cases.heldoutCases]
+  heldoutQuestions = {case["question"] for case in heldout_cases.heldoutCases}
+
+  assert len(heldoutIds) == len(set(heldoutIds))
+  assert not set(heldoutIds) & {case["id"] for case in cases.cases}
+  # 跟 dev 同一題的話，調 prompt 時就已經看過答案，不算沒看過的題目
+  assert not heldoutQuestions & {case["question"] for case in cases.cases}
+  assert {case["category"] for case in heldout_cases.heldoutCases} == set(cases.categories)
+
+
+@pytest.mark.parametrize("case", allCases, ids=lambda case: case["id"])
 def testGoldSqlIsReadOnlyAndReturnsRows(case, evalDatabaseUrl):
   for sql in [case["goldSql"], *case.get("alsoAccept", [])]:
     text2sql.validateSql(sql)
@@ -122,12 +135,12 @@ def testCasesDoNotReuseFewShotQuestions(evalDatabaseUrl):
   fewShotQuestions = {message["content"] for message in messages[1:-1] if message["role"] == "user"}
 
   assert len(fewShotQuestions) > 0
-  assert not fewShotQuestions & {case["question"] for case in cases.cases}
+  assert not fewShotQuestions & {case["question"] for case in allCases}
 
 
 def answerWithGoldSql(messages):
   """假的 LLM：每一題都回答標準答案。"""
-  goldSqlByQuestion = {case["question"]: case["goldSql"] for case in cases.cases}
+  goldSqlByQuestion = {case["question"]: case["goldSql"] for case in allCases}
   return goldSqlByQuestion[messages[-1]["content"]]
 
 
@@ -199,6 +212,7 @@ def testMainRunsFilteredCasesAndWritesReport(tmp_path, capsys):
   assert summary["passed"] == summary["total"] == 6
   assert len(reportPaths) == 1
   assert report["model"] == "fake:1b"
+  assert report["split"] == "dev"
   assert [result["id"] for result in report["results"]] == ["b01", "b02", "b03", "b04", "b05", "b06"]
   assert "PASS b01" in output
   assert "6/6" in output
@@ -216,3 +230,27 @@ def testMainPrintsPredictedSqlForFailedCase(tmp_path, capsys):
 def testMainRejectsFilterThatMatchesNothing(tmp_path):
   with pytest.raises(SystemExit):
     evalRun.main(["--filter", "no-such-case", "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+
+def testMainTestSplitPassesEveryCaseWithGoldAnswers(tmp_path):
+  summary = evalRun.main(["--split", "test", "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+  assert summary["passed"] == summary["total"] == len(heldout_cases.heldoutCases)
+
+
+def testMainTestSplitHidesPerCaseResults(tmp_path, capsys):
+  summary = evalRun.main(["--split", "test", "--model", "fake:1b", "--out", str(tmp_path)], llm=lambda messages: "SELECT 1")
+
+  report = json.loads(next(tmp_path.glob("fake-1b-test-*.json")).read_text(encoding="utf-8"))
+  output = capsys.readouterr().out
+  assert summary["passed"] == 0
+  assert report["split"] == "test"
+  # 每題的對錯與 SQL 只留在報告檔裡，不印在終端機上
+  assert "FAIL" not in output
+  assert "SELECT 1" not in output
+  assert f"{'total':<10} 0/{len(heldout_cases.heldoutCases)}" in output
+
+
+def testMainRejectsFilterOnTestSplit(tmp_path):
+  with pytest.raises(SystemExit):
+    evalRun.main(["--split", "test", "--filter", "basic", "--out", str(tmp_path)], llm=answerWithGoldSql)
