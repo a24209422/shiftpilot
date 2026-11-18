@@ -4,19 +4,35 @@
 
 ## 執行
 
+需要 Docker，以及在主機上執行的 Ollama，並已下載 `.env` 指定的模型（預設 `qwen2.5:3b`）。
+
 ```bash
-cp .env.example .env          # 再把 .env 裡的兩組 change-me 密碼改成自己的值
-docker compose up -d --wait   # 啟動 PostgreSQL 17
-pip install -r requirements.txt
-streamlit run app.py
+cp .env.example .env                  # 再把 .env 裡的兩組 change-me 密碼改成自己的值（只用英文和數字）
+docker compose up -d --build --wait   # 建置並啟動 app 與 PostgreSQL 17
 ```
 
-- 需要 Docker，以及在背景執行的 Ollama，並已下載 `.env` 指定的模型（預設 `qwen2.5:3b`）
-- 想換模型：修改 `.env` 的 `OLLAMA_MODEL`
-- PostgreSQL 只綁在本機的 `127.0.0.1:5433`，避開常被其他 PostgreSQL 占用的 5432
+打開 http://127.0.0.1:8501 。
+
+- app 和 PostgreSQL 都在容器裡；Ollama 留在主機上，app 透過 `host.docker.internal` 連線，可以直接用主機的 GPU，模型也不用重新下載
+- 網頁只綁在本機的 `127.0.0.1:8501`：還沒有登入功能，所以不開放給內網
+- 改了程式之後，執行 `docker compose up -d --build` 重建 app
+- 想換模型：修改 `.env` 的 `OLLAMA_MODEL`，再執行 `docker compose up -d`
+- 兩個容器都設定成自動重啟，電腦重開機、Docker 啟動後會自己跑起來
+- PostgreSQL 另外綁在本機的 `127.0.0.1:5433`，給本機跑測試和評測用，避開常被其他 PostgreSQL 占用的 5432
 - 容器第一次啟動時，`docker/init/` 會建立非 superuser 的 `schedule_app` 帳號，以及 `schedule`（app 用）、`schedule_test`（測試與評測用）兩個資料庫
 - app 第一次啟動會建表，並以「今天」為基準塞入兩週的示範資料
 - 想清空資料重來：`docker compose down -v`（會刪掉整個資料庫，包含帳號）
+
+### 本機開發
+
+改程式時想馬上看到結果，可以只在容器裡跑 PostgreSQL，app 直接在本機執行：
+
+```bash
+docker compose stop app               # app 容器也占用 8501，先停掉
+docker compose up -d --wait postgres
+pip install -r requirements.txt
+streamlit run app.py
+```
 
 ## 測試
 
@@ -80,7 +96,8 @@ python -m evals.run
 
 | 檔案 | 內容 |
 |---|---|
-| `docker-compose.yml` | PostgreSQL 17 容器，密碼從 `.env` 讀取 |
+| `Dockerfile` | app 的映像檔，只包含執行需要的檔案，以非 root 帳號執行 |
+| `docker-compose.yml` | app 與 PostgreSQL 17 兩個容器，密碼從 `.env` 讀取 |
 | `docker/init/` | 容器第一次啟動時建立 app 帳號與資料庫 |
 | `schema.sql` | 資料表與 view 的定義 |
 | `llm_schema.sql` | 寫給 text2sql 模型看的結構說明，只有 `event_details` 和 `resources` |

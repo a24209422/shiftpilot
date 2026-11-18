@@ -1,0 +1,9 @@
+# build 時整個資料夾都會送給 Docker，.env 的密碼不能跟著送出去
+.env
+.git
+__pycache__/
+.pytest_cache/
+*.db
+tests/
+evals/
+docker/
