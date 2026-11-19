@@ -498,3 +498,13 @@ def testCallOllamaFixesContextLength(monkeypatch, modelEnv):
 
   assert text2sql.callOllama([{"role": "user", "content": "問題"}]) == "SELECT 1"
   assert sent["options"] == {"temperature": 0, "num_ctx": 8192}
+
+
+def testPromptListsOrganizationVocabulary(demoDatabaseUrl):
+  messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(demoDatabaseUrl), fixedNow)
+  systemPrompt = messages[0]["content"]
+
+  assert "- departments.name：" in systemPrompt
+  assert "營運部" in systemPrompt
+  assert "- leave_requests.status：" in systemPrompt
+  assert "approved" in systemPrompt

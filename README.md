@@ -24,6 +24,7 @@ docker compose up -d --build --wait   # 建置並啟動 app 與 PostgreSQL 17
 - 容器第一次啟動時，`docker/init/` 會建立非 superuser 的 `schedule_app` 帳號，以及 `schedule`（app 用）、`schedule_test`（測試與評測用）兩個資料庫
 - app 第一次啟動會建表，並以「今天」為基準塞入兩週的示範資料
 - 想清空資料重來：`docker compose down -v`（會刪掉整個資料庫，包含帳號）
+- 從加入部門、員工、請假這幾張表之前的版本更新時，要先清空重建（`docker compose down -v` 再 `docker compose up -d --build --wait`）：示範資料只在資料庫是空的時候寫入，沒清空的話新表會建出來但是空的，在畫面上問新表的問題查不到東西
 
 ### 本機開發
 
@@ -216,6 +217,12 @@ dev 各類別：
 | `events` | 排程，一筆排程一列 |
 | `event_resources` | 排程和資源的多對多關聯：一場會議可以同時有多個人和一間會議室 |
 | `event_details`（view） | 攤平成「一筆排程 × 一個資源」一列；模型看不到它，評測集舊的標準答案在用 |
+| `departments` | 部門，`parent_id` 指向上層部門 |
+| `employees` | 員工：對應一個 `type = 'person'` 的資源，有部門、職稱、主管（`manager_id` 指向另一個員工）、到職日 |
+| `rooms` | 會議室的細節：對應一個 `type = 'room'` 的資源，有樓層、容納人數、有沒有視訊設備 |
+| `work_hours` | 固定班表員工的每週上班時段（`weekday` 1 = 星期一）；輪班的員工沒有資料，上班時間看 `events` 裡的班別 |
+| `leave_requests` | 請假，可以跨好幾天；`status` 是 `pending`、`approved`、`rejected`，只有核准的才算請假 |
+| `holidays` | 國定假日與公司特別休假日 |
 
 - text2sql 的模型看的是原始的 `events`、`event_resources`、`resources`，要自己寫 JOIN；一筆排程有幾個資源，JOIN 之後就有幾列，算筆數時要用 `COUNT(DISTINCT events.id)`。改成這樣對分數的影響見「結構變複雜的代價」
 - 新增排程時，只要有任何一個資源在該時段已有排程，整筆都不會新增

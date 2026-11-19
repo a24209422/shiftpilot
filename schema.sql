@@ -44,3 +44,57 @@ SELECT
 FROM events e
 JOIN event_resources er ON er.event_id = e.id
 JOIN resources r ON r.id = er.resource_id;
+
+-- 部門，可以有上層部門
+CREATE TABLE IF NOT EXISTS departments (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name TEXT NOT NULL,
+  parent_id INTEGER REFERENCES departments(id)
+);
+
+-- 員工；每個員工對應 resources 裡一個 type = 'person' 的資源
+CREATE TABLE IF NOT EXISTS employees (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  resource_id INTEGER NOT NULL UNIQUE REFERENCES resources(id),
+  department_id INTEGER NOT NULL REFERENCES departments(id),
+  job_title TEXT NOT NULL,
+  manager_id INTEGER REFERENCES employees(id),
+  hired_on DATE NOT NULL
+);
+
+-- 會議室的細節；每間對應 resources 裡一個 type = 'room' 的資源
+CREATE TABLE IF NOT EXISTS rooms (
+  resource_id INTEGER PRIMARY KEY REFERENCES resources(id),
+  floor SMALLINT NOT NULL,
+  capacity SMALLINT NOT NULL,
+  has_video_conference BOOLEAN NOT NULL
+);
+
+-- 固定班表員工的每週上班時段；輪班的員工沒有這裡的資料，上班時間看 events 裡的 shift
+CREATE TABLE IF NOT EXISTS work_hours (
+  employee_id INTEGER NOT NULL REFERENCES employees(id),
+  -- 1 = 星期一，與 EXTRACT(ISODOW FROM ...) 相同
+  weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  PRIMARY KEY (employee_id, weekday)
+);
+
+-- 請假，可以跨好幾天；只有 status = 'approved' 的才算真的請假
+CREATE TABLE IF NOT EXISTS leave_requests (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id),
+  -- annual（特休）、sick（病假）、personal（事假）
+  leave_type TEXT NOT NULL,
+  start_at TIMESTAMP NOT NULL,
+  end_at TIMESTAMP NOT NULL,
+  -- pending（審核中）、approved（核准）、rejected（駁回）
+  status TEXT NOT NULL,
+  CHECK (end_at > start_at)
+);
+
+-- 不用上班的日子：國定假日與公司特別休假日
+CREATE TABLE IF NOT EXISTS holidays (
+  day DATE PRIMARY KEY,
+  name TEXT NOT NULL
+);

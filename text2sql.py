@@ -238,6 +238,9 @@ def buildMessages(question, schemaText, vocabulary, now):
 - events.category：{', '.join(vocabulary['categories']) or '（尚無）'}
 - resources.type：{', '.join(vocabulary['resourceTypes']) or '（尚無）'}
 - resources.name：{', '.join(vocabulary['resourceNames']) or '（尚無）'}
+- departments.name：{', '.join(vocabulary['departmentNames']) or '（尚無）'}
+- leave_requests.leave_type：{', '.join(vocabulary['leaveTypes']) or '（尚無）'}
+- leave_requests.status：{', '.join(vocabulary['leaveStatuses']) or '（尚無）'}
 
 ## 日期參考
 {buildDateReference(now)}

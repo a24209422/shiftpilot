@@ -158,3 +158,83 @@ def testLlmSchemaListsEveryRealColumn(databaseUrl):
   assert "event_details" not in db.getLlmSchemaText()
   assert {table for table, _ in rows} == set(blocks)
   assert [(table, column) for table, column in rows if column not in blocks[table]] == []
+
+
+overlappingApprovedLeaveSql = """
+  SELECT l.id FROM leave_requests l
+  JOIN employees em ON em.id = l.employee_id
+  JOIN event_resources er ON er.resource_id = em.resource_id
+  JOIN events e ON e.id = er.event_id
+  WHERE l.status = 'approved' AND e.start_at < l.end_at AND e.end_at > l.start_at
+"""
+
+
+def countRows(databaseUrl, table):
+  return db.runReadOnlyQuery(databaseUrl, f"SELECT COUNT(*) FROM {table}")[1][0][0]
+
+
+def testAddOrganizationDataLinksPeopleDepartmentsAndRooms(databaseUrl, personId, roomId):
+  db.addResource(databaseUrl, "李小華", "person")
+
+  db.addOrganizationData(databaseUrl, {
+    "departments": [("總經理室", None), ("營運部", "總經理室")],
+    "employees": [
+      ("王小明", "總經理室", "副總經理", None, "2019-03-01"),
+      ("李小華", "營運部", "營運組長", "王小明", "2021-07-15"),
+    ],
+    "rooms": [("A 會議室", 10, 12, True)],
+  })
+
+  _, rows = db.runReadOnlyQuery(databaseUrl, """
+    SELECT sub.name, boss.name, parentDept.name
+    FROM employees e
+    JOIN resources sub ON sub.id = e.resource_id
+    JOIN employees bossEmployee ON bossEmployee.id = e.manager_id
+    JOIN resources boss ON boss.id = bossEmployee.resource_id
+    JOIN departments d ON d.id = e.department_id
+    JOIN departments parentDept ON parentDept.id = d.parent_id
+  """)
+  _, roomRows = db.runReadOnlyQuery(databaseUrl, """
+    SELECT r.name, rooms.floor, rooms.capacity, rooms.has_video_conference
+    FROM rooms JOIN resources r ON r.id = rooms.resource_id
+  """)
+  assert rows == [("李小華", "王小明", "總經理室")]
+  assert roomRows == [("A 會議室", 10, 12, True)]
+
+
+def testAddOrganizationDataRejectsUnknownResourceAndSavesNothing(databaseUrl, personId):
+  with pytest.raises(ValueError):
+    db.addOrganizationData(databaseUrl, {
+      "departments": [("營運部", None)],
+      "employees": [("不存在的人", "營運部", "專員", None, "2024-01-01")],
+    })
+
+  # 部門先寫、員工後寫：員工失敗時部門也要一起回復，不能留下半套資料
+  assert countRows(databaseUrl, "departments") == 0
+  assert countRows(databaseUrl, "employees") == 0
+
+
+def testSeedDemoDataFillsOrganizationTables(databaseUrl):
+  db.seedDemoData(databaseUrl, today=day)
+
+  assert countRows(databaseUrl, "departments") == 3
+  assert countRows(databaseUrl, "employees") == 3
+  assert countRows(databaseUrl, "rooms") == 2
+  assert countRows(databaseUrl, "work_hours") == 5
+  assert countRows(databaseUrl, "leave_requests") == 4
+  assert countRows(databaseUrl, "holidays") >= 2
+
+
+def testDemoApprovedLeaveDoesNotOverlapOwnEvents(databaseUrl):
+  db.seedDemoData(databaseUrl, today=day)
+
+  assert db.runReadOnlyQuery(databaseUrl, overlappingApprovedLeaveSql)[1] == []
+
+
+def testInitDbTwiceKeepsDemoData(databaseUrl):
+  # app 每次啟動都會執行 initDb，已經有資料的資料庫不能因此出錯或掉資料
+  db.seedDemoData(databaseUrl, today=day)
+
+  db.initDb(databaseUrl)
+
+  assert countRows(databaseUrl, "employees") == 3

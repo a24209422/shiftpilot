@@ -1,7 +1,7 @@
 """排程資料庫操作（PostgreSQL）。"""
 import uuid
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import psycopg
@@ -146,13 +146,66 @@ def addEvent(databaseUrl, title, category, resourceIds, startAt, endAt, note=Non
   return eventId
 
 
+def addOrganizationData(databaseUrl, data):
+  """寫入部門、員工、會議室細節、上班時段、請假、假日。
+
+  人、部門、主管都用名稱對應；任何一個名稱找不到，或日期時間格式不對，整批都不寫入。
+  data 的每個鍵都可以省略。部門要先列上層、員工要先列主管，後面的項目才找得到前面的。
+  """
+  def findId(ids, name, kind):
+    if name not in ids:
+      raise ValueError(f"找不到{kind}：{name}")
+    return ids[name]
+
+  # 所有項目寫在同一個交易：中途失敗（例如員工對不到資源）就整批回復，不會留下只有部門的半套資料
+  with openDb(databaseUrl) as conn:
+    resourceIds = {row["name"]: row["id"] for row in conn.execute("SELECT id, name FROM resources")}
+    departmentIds, employeeIds = {}, {}
+    for name, parentName in data.get("departments", []):
+      parentId = None if parentName is None else findId(departmentIds, parentName, "上層部門")
+      departmentIds[name] = conn.execute(
+        "INSERT INTO departments (name, parent_id) VALUES (%s, %s) RETURNING id", (name, parentId)
+      ).fetchone()["id"]
+    for personName, departmentName, jobTitle, managerName, hiredOn in data.get("employees", []):
+      managerId = None if managerName is None else findId(employeeIds, managerName, "主管")
+      employeeIds[personName] = conn.execute(
+        "INSERT INTO employees (resource_id, department_id, job_title, manager_id, hired_on) "
+        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        (findId(resourceIds, personName, "資源"), findId(departmentIds, departmentName, "部門"),
+         jobTitle, managerId, date.fromisoformat(hiredOn)),
+      ).fetchone()["id"]
+    for roomName, floor, capacity, hasVideoConference in data.get("rooms", []):
+      conn.execute(
+        "INSERT INTO rooms (resource_id, floor, capacity, has_video_conference) VALUES (%s, %s, %s, %s)",
+        (findId(resourceIds, roomName, "資源"), floor, capacity, hasVideoConference),
+      )
+    for personName, weekday, startTime, endTime in data.get("workHours", []):
+      conn.execute(
+        "INSERT INTO work_hours (employee_id, weekday, start_time, end_time) VALUES (%s, %s, %s, %s)",
+        (findId(employeeIds, personName, "員工"), weekday, time.fromisoformat(startTime), time.fromisoformat(endTime)),
+      )
+    for personName, leaveType, startAt, endAt, status in data.get("leaveRequests", []):
+      conn.execute(
+        "INSERT INTO leave_requests (employee_id, leave_type, start_at, end_at, status) VALUES (%s, %s, %s, %s, %s)",
+        (findId(employeeIds, personName, "員工"), leaveType, toDateTime(startAt), toDateTime(endAt), status),
+      )
+    for holidayDay, holidayName in data.get("holidays", []):
+      conn.execute("INSERT INTO holidays (day, name) VALUES (%s, %s)", (date.fromisoformat(holidayDay), holidayName))
+
+
 def getVocabulary(databaseUrl):
   # 把資料裡實際出現的值告訴 LLM，小模型才不會自己編出不存在的分類或名稱
   with openDb(databaseUrl) as conn:
     categories = [row["category"] for row in conn.execute("SELECT DISTINCT category FROM events ORDER BY category")]
     resourceTypes = [row["type"] for row in conn.execute("SELECT DISTINCT type FROM resources ORDER BY type")]
     resourceNames = [row["name"] for row in conn.execute("SELECT name FROM resources ORDER BY name LIMIT 100")]
-  return {"categories": categories, "resourceTypes": resourceTypes, "resourceNames": resourceNames}
+    departmentNames = [row["name"] for row in conn.execute("SELECT DISTINCT name FROM departments ORDER BY name")]
+    leaveTypes = [row["leave_type"] for row in conn.execute("SELECT DISTINCT leave_type FROM leave_requests ORDER BY leave_type")]
+    leaveStatuses = [row["status"] for row in conn.execute("SELECT DISTINCT status FROM leave_requests ORDER BY status")]
+  return {
+    "categories": categories, "resourceTypes": resourceTypes, "resourceNames": resourceNames,
+    "departmentNames": departmentNames, "leaveTypes": leaveTypes, "leaveStatuses": leaveStatuses,
+  }
 
 
 def runReadOnlyQuery(databaseUrl, query, maxRows=200):
@@ -201,4 +254,26 @@ def seedDemoData(databaseUrl, today=None):
     day = (monday + timedelta(days=dayOffset)).isoformat()
     eventResourceIds = [resourceIds[name] for name in resourceNames]
     addEvent(databaseUrl, title, category, eventResourceIds, f"{day} {startTime}", f"{day} {endTime}")
+
+  def at(dayOffset, clock):
+    return f"{(monday + timedelta(days=dayOffset)).isoformat()} {clock}"
+
+  addOrganizationData(databaseUrl, {
+    "departments": [("總經理室", None), ("業務部", "總經理室"), ("營運部", "總經理室")],
+    "employees": [
+      ("王小明", "總經理室", "副總經理", None, "2019-03-01"),
+      ("李小華", "營運部", "營運組長", "王小明", "2021-07-15"),
+      ("陳大文", "營運部", "值班專員", "李小華", "2023-02-01"),
+    ],
+    "rooms": [("A 會議室", 10, 12, True), ("B 會議室", 8, 6, False)],
+    "workHours": [("王小明", weekday, "09:00", "18:00") for weekday in range(1, 6)],
+    # 核准的假不跟本人的排程重疊；被駁回的李小華那筆刻意跟早班重疊，真實情況常是因為有班才被駁回
+    "leaveRequests": [
+      ("王小明", "annual", at(11, "09:00"), at(11, "18:00"), "approved"),
+      ("陳大文", "sick", at(2, "00:00"), at(4, "00:00"), "approved"),
+      ("李小華", "personal", at(8, "08:00"), at(8, "16:00"), "rejected"),
+      ("李小華", "annual", at(12, "00:00"), at(13, "00:00"), "pending"),
+    ],
+    "holidays": [("2026-11-11", "公司創立紀念日"), ("2026-12-25", "行憲紀念日"), ("2027-01-01", "開國紀念日")],
+  })
   return True

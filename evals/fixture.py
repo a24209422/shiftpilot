@@ -60,6 +60,31 @@ events = [
 ]
 
 
+# 新表只描述上面現有的 8 個資源：多一個資源或多一筆排程，舊題（列出所有會議室、總共幾筆排程…）的答案就會變。
+# 核准的假不跟本人的排程重疊；李小華被駁回的那筆跟她 11-23 的早班重疊，真實情況常是因為有班才被駁回。
+# 2026-11-11（星期三）是沒有任何排程的公司特別休假日，之後的兩天是國定假日
+organization = {
+  "departments": [("總經理室", None), ("業務部", "總經理室"), ("營運部", "總經理室")],
+  "employees": [
+    ("王小明", "總經理室", "副總經理", None, "2019-03-01"),
+    ("李小華", "營運部", "營運組長", "王小明", "2021-07-15"),
+    ("林美玲", "業務部", "門市專員", "王小明", "2024-09-02"),
+    ("陳大文", "營運部", "值班專員", "李小華", "2023-02-01"),
+  ],
+  "rooms": [("A 會議室", 10, 12, True), ("B 會議室", 8, 6, False)],
+  # 只有固定班表的王小明有；其他三人是輪班或排班，上班時間看 events 裡的 shift
+  "workHours": [("王小明", weekday, "09:00", "18:00") for weekday in range(1, 6)],
+  "leaveRequests": [
+    ("王小明", "annual", "2026-11-20 09:00", "2026-11-20 18:00", "approved"),
+    ("陳大文", "sick", "2026-11-25 00:00", "2026-11-27 00:00", "approved"),
+    ("林美玲", "personal", "2026-11-18 13:00", "2026-11-18 17:00", "approved"),
+    ("李小華", "annual", "2026-11-23 08:00", "2026-11-23 16:00", "rejected"),
+    ("陳大文", "personal", "2026-11-30 00:00", "2026-12-01 00:00", "pending"),
+  ],
+  "holidays": [("2026-11-11", "公司創立紀念日"), ("2026-12-25", "行憲紀念日"), ("2027-01-01", "開國紀念日")],
+}
+
+
 def buildDb(databaseUrl):
   db.initDb(databaseUrl)
   resourceIds = {name: db.addResource(databaseUrl, name, resourceType) for name, resourceType in resources}
@@ -67,3 +92,4 @@ def buildDb(databaseUrl):
     # 走 addEvent 而不是直接 INSERT：資料如果不小心排到衝突的時段，建庫時就會報錯
     eventResourceIds = [resourceIds[name] for name in resourceNames]
     db.addEvent(databaseUrl, title, category, eventResourceIds, f"{day} {startTime}", f"{day} {endTime}")
+  db.addOrganizationData(databaseUrl, organization)

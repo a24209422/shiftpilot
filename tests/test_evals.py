@@ -362,3 +362,80 @@ def testGoldAnswersMatchSnapshot(evalDatabaseUrl):
   saved = json.loads(snapshot.snapshotPath.read_text(encoding="utf-8"))
 
   assert snapshot.computeGoldHashes(evalDatabaseUrl, snapshot.protectedCases()) == saved
+
+
+overlappingApprovedLeaveSql = """
+  SELECT l.id FROM leave_requests l
+  JOIN employees em ON em.id = l.employee_id
+  JOIN event_resources er ON er.resource_id = em.resource_id
+  JOIN events e ON e.id = er.event_id
+  WHERE l.status = 'approved' AND e.start_at < l.end_at AND e.end_at > l.start_at
+"""
+
+
+def queryScalar(databaseUrl, sql):
+  return db.runReadOnlyQuery(databaseUrl, sql)[1][0][0]
+
+
+def testFixtureOrganizationDescribesOnlyExistingResources(evalDatabaseUrl):
+  # 新增資源會讓「列出所有會議室」這類舊題的答案變動，所以新表只能描述現有的資源
+  _, employeeTypes = db.runReadOnlyQuery(evalDatabaseUrl, "SELECT r.type FROM employees e JOIN resources r ON r.id = e.resource_id")
+  _, roomTypes = db.runReadOnlyQuery(evalDatabaseUrl, "SELECT r.type FROM rooms JOIN resources r ON r.id = rooms.resource_id")
+
+  assert [row[0] for row in employeeTypes] == ["person"] * 4
+  assert [row[0] for row in roomTypes] == ["room"] * 2
+
+
+def testFixtureOrganizationHasTwoLevelsOfManagers(evalDatabaseUrl):
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM employees WHERE manager_id IS NULL") == 1
+  assert queryScalar(evalDatabaseUrl, """
+    SELECT COUNT(*) FROM employees e JOIN employees m ON m.id = e.manager_id WHERE m.manager_id IS NOT NULL
+  """) >= 1
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM departments") == 3
+  assert queryScalar(evalDatabaseUrl, """
+    SELECT COUNT(*) FROM departments WHERE parent_id = (SELECT id FROM departments WHERE parent_id IS NULL)
+  """) == 2
+
+
+def testFixtureRoomsDiffer(evalDatabaseUrl):
+  # 兩間要有差異，「容納 8 人以上」「有視訊」這類題目才篩得出不同結果
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(DISTINCT floor) FROM rooms") == 2
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(DISTINCT capacity) FROM rooms") == 2
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(DISTINCT has_video_conference) FROM rooms") == 2
+
+
+def testFixtureLeaveRequestsCoverEveryStatusAndType(evalDatabaseUrl):
+  _, statusRows = db.runReadOnlyQuery(evalDatabaseUrl, "SELECT DISTINCT status FROM leave_requests")
+  _, typeRows = db.runReadOnlyQuery(evalDatabaseUrl, "SELECT DISTINCT leave_type FROM leave_requests")
+
+  assert {row[0] for row in statusRows} == {"pending", "approved", "rejected"}
+  assert {row[0] for row in typeRows} == {"annual", "sick", "personal"}
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM leave_requests WHERE end_at::date > start_at::date") >= 1
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM leave_requests WHERE end_at - start_at <= interval '4 hours'") >= 1
+
+
+def testFixtureApprovedLeaveDoesNotOverlapOwnEvents(evalDatabaseUrl):
+  assert db.runReadOnlyQuery(evalDatabaseUrl, overlappingApprovedLeaveSql)[1] == []
+
+
+def testFixtureWorkHoursOnlyForStaffWithoutShifts(evalDatabaseUrl):
+  # 輪班的員工上班時間看 events 裡的 shift；兩邊都有資料的話，「幾點上班」會有兩個答案
+  _, rows = db.runReadOnlyQuery(evalDatabaseUrl, """
+    SELECT DISTINCT em.id FROM work_hours w
+    JOIN employees em ON em.id = w.employee_id
+    JOIN event_resources er ON er.resource_id = em.resource_id
+    JOIN events e ON e.id = er.event_id
+    WHERE e.category = 'shift'
+  """)
+
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM work_hours") > 0
+  assert rows == []
+
+
+def testFixtureHolidays(evalDatabaseUrl):
+  assert queryScalar(evalDatabaseUrl, """
+    SELECT COUNT(*) FROM holidays h
+    WHERE h.day BETWEEN '2026-11-09' AND '2026-11-28'
+      AND NOT EXISTS (SELECT 1 FROM events e WHERE e.start_at::date = h.day)
+  """) >= 1
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM holidays WHERE day > '2026-11-28'") >= 1
