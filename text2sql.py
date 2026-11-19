@@ -94,6 +94,7 @@ def buildMessages(question, schemaText, vocabulary, now):
   tomorrow = today + timedelta(days=1)
   nextMonday = today - timedelta(days=today.weekday()) + timedelta(days=7)
   nextSunday = nextMonday + timedelta(days=6)
+  nowText = now.strftime("%Y-%m-%d %H:%M")
 
   systemPrompt = f"""你是 PostgreSQL 專家，負責把使用者的中文問題轉成一句 PostgreSQL 查詢。
 
@@ -104,9 +105,12 @@ def buildMessages(question, schemaText, vocabulary, now):
 4. 不要用 CURRENT_DATE 或 now()，日期一律以下方「日期參考」為準。
 5. 比對名稱或標題時用 LIKE '%關鍵字%'，因為使用者常只講部分名字。
 6. 列出排程時帶出 resource_name，並依 start_at 排序，讓結果看得懂。
-7. 使用者提到排程名稱（例如「晚班」「週會」）時，用 title LIKE 比對，不要自己推算時段。
-8. 「人」「每個人」「員工」指 resource_type = 'person'；「會議室」指 'room'；「設備」指 'equipment'。查 resources 表時欄位是 type。
+7. 使用者提到排程名稱（例如「晚班」「週會」）時，用 title LIKE 比對，不要自己推算時段，也不要猜它屬於哪個 category。
+8. 「人」「每個人」「員工」「誰」指 resource_type = 'person'；「會議室」指 'room'；「設備」指 'equipment'。查 resources 表時欄位是 type。
 9. event_details 裡一筆排程有幾個資源就有幾列。計算「幾筆排程」「幾場會議」時用 COUNT(DISTINCT event_id)，不要用 COUNT(*)。
+10. 這是 PostgreSQL，不要用 julianday()、strftime() 這類 SQLite 函式。時長用 EXTRACT(EPOCH FROM end_at - start_at) / 3600 換算成小時。
+11. 現在時間是 '{nowText}'。問「下一個」「接下來」的排程時用 start_at > '{nowText}'。問某個時間點「正在進行」的排程時用 start_at <= 該時間點 AND end_at > 該時間點。
+12. 同一筆排程的每個資源都有相同的 event_id。要找兩個資源一起參與的排程（例如某人在某間會議室開的會），用 event_id IN (SELECT event_id FROM event_details WHERE ...) 子查詢。
 
 ## Schema
 {schemaText}
@@ -133,6 +137,15 @@ def buildMessages(question, schemaText, vocabulary, now):
       "SELECT COUNT(DISTINCT event_id) AS meeting_count\n"
       "FROM event_details\n"
       f"WHERE category = 'meeting' AND start_at::date BETWEEN '{nextMonday}' AND '{nextSunday}'",
+    ),
+    # 前兩個範例都有日期條件，小模型會照抄，連沒問日期的題目也加上日期範圍；這個範例刻意不帶日期
+    (
+      "李小華和陳大文一起參加過哪些排程？",
+      "SELECT title, start_at, end_at\n"
+      "FROM event_details\n"
+      "WHERE resource_name LIKE '%李小華%'\n"
+      "  AND event_id IN (SELECT event_id FROM event_details WHERE resource_name LIKE '%陳大文%')\n"
+      "ORDER BY start_at",
     ),
   ]
   messages = [{"role": "system", "content": systemPrompt}]

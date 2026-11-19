@@ -74,6 +74,8 @@ def testPromptContainsDatesSchemaAndVocabulary(demoDatabaseUrl):
 
   assert "2026-11-18 星期三（明天）" in systemPrompt
   assert "下週：2026-11-23 ～ 2026-11-29" in systemPrompt
+  # 「下一個行程」要跟現在比較，模型需要日期加時間的完整字串才寫得出 start_at > '...'
+  assert "start_at > '2026-11-17 14:30'" in systemPrompt
   assert "CREATE TABLE event_details" in systemPrompt
   assert "王小明" in systemPrompt
   assert messages[-1] == {"role": "user", "content": "問題"}
