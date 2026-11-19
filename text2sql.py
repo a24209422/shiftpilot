@@ -219,25 +219,25 @@ def buildMessages(question, schemaText, vocabulary, now):
 
 規則：
 1. 只輸出一句 SELECT（或 WITH ... SELECT），放在 ```sql 區塊裡，不要任何解釋。
-2. 只能使用下方 schema 裡的資料表與欄位。排程相關的問題都查 event_details，不需要 JOIN。
+2. 只能使用下方 schema 裡的資料表與欄位。排程在 events，資源在 resources，兩者透過 event_resources 對應；同時用到排程和資源時，JOIN 這三張表。
 3. 時間欄位是 timestamp。取日期用 start_at::date，取時間用 start_at::time，可以直接跟 'YYYY-MM-DD'、'HH:MM' 格式的字串比較。
 4. 不要用 CURRENT_DATE 或 now()，日期一律以下方「日期參考」為準。
 5. 比對名稱或標題時用 LIKE '%關鍵字%'，因為使用者常只講部分名字。
-6. 列出排程時帶出 resource_name，並依 start_at 排序，讓結果看得懂。
+6. 列出排程時帶出資源名稱（resources.name），並依 start_at 排序，讓結果看得懂。
 7. 使用者提到排程名稱（例如「晚班」「週會」）時，用 title LIKE 比對，不要自己推算時段，也不要猜它屬於哪個 category。
-8. 「人」「每個人」「員工」「誰」指 resource_type = 'person'；「會議室」指 'room'；「設備」指 'equipment'。查 resources 表時欄位是 type。
-9. event_details 裡一筆排程有幾個資源就有幾列。計算「幾筆排程」「幾場會議」時用 COUNT(DISTINCT event_id)，不要用 COUNT(*)。
+8. 「人」「每個人」「員工」「誰」指 resources.type = 'person'；「會議室」指 'room'；「設備」指 'equipment'。
+9. JOIN event_resources 之後，一筆排程有幾個資源就有幾列。計算「幾筆排程」「幾場會議」時用 COUNT(DISTINCT events.id)，不要用 COUNT(*)。
 10. 這是 PostgreSQL，不要用 julianday()、strftime() 這類 SQLite 函式。時長用 EXTRACT(EPOCH FROM end_at - start_at) / 3600 換算成小時。
 11. 現在時間是 '{nowText}'。問「下一個」「接下來」的排程時用 start_at > '{nowText}'。問某個時間點「正在進行」的排程時用 start_at <= 該時間點 AND end_at > 該時間點。
-12. 同一筆排程的每個資源都有相同的 event_id。要找兩個資源一起參與的排程（例如某人在某間會議室開的會），用 event_id IN (SELECT event_id FROM event_details WHERE ...) 子查詢。
+12. 同一筆排程的每個資源在 event_resources 裡都有相同的 event_id。要找兩個資源一起參與的排程（例如某人在某間會議室開的會），用 events.id IN (SELECT event_resources.event_id FROM event_resources JOIN resources ON resources.id = event_resources.resource_id WHERE ...) 子查詢。
 
 ## Schema
 {schemaText}
 
 ## 目前資料中的值
-- category：{', '.join(vocabulary['categories']) or '（尚無）'}
-- resource_type（resources.type）：{', '.join(vocabulary['resourceTypes']) or '（尚無）'}
-- resource_name（resources.name）：{', '.join(vocabulary['resourceNames']) or '（尚無）'}
+- events.category：{', '.join(vocabulary['categories']) or '（尚無）'}
+- resources.type：{', '.join(vocabulary['resourceTypes']) or '（尚無）'}
+- resources.name：{', '.join(vocabulary['resourceNames']) or '（尚無）'}
 
 ## 日期參考
 {buildDateReference(now)}
@@ -246,25 +246,32 @@ def buildMessages(question, schemaText, vocabulary, now):
   fewShots = [
     (
       "明天小明有什麼行程？",
-      "SELECT resource_name, title, start_at, end_at\n"
-      "FROM event_details\n"
-      f"WHERE resource_name LIKE '%小明%' AND start_at::date = '{tomorrow}'\n"
-      "ORDER BY start_at",
+      "SELECT resources.name, events.title, events.start_at, events.end_at\n"
+      "FROM events\n"
+      "JOIN event_resources ON event_resources.event_id = events.id\n"
+      "JOIN resources ON resources.id = event_resources.resource_id\n"
+      f"WHERE resources.name LIKE '%小明%' AND events.start_at::date = '{tomorrow}'\n"
+      "ORDER BY events.start_at",
     ),
     (
       "下週總共有幾場會議？",
-      "SELECT COUNT(DISTINCT event_id) AS meeting_count\n"
-      "FROM event_details\n"
-      f"WHERE category = 'meeting' AND start_at::date BETWEEN '{nextMonday}' AND '{nextSunday}'",
+      "SELECT COUNT(DISTINCT events.id) AS meeting_count\n"
+      "FROM events\n"
+      f"WHERE events.category = 'meeting' AND events.start_at::date BETWEEN '{nextMonday}' AND '{nextSunday}'",
     ),
     # 前兩個範例都有日期條件，小模型會照抄，連沒問日期的題目也加上日期範圍；這個範例刻意不帶日期
     (
       "李小華和陳大文一起參加過哪些排程？",
-      "SELECT title, start_at, end_at\n"
-      "FROM event_details\n"
-      "WHERE resource_name LIKE '%李小華%'\n"
-      "  AND event_id IN (SELECT event_id FROM event_details WHERE resource_name LIKE '%陳大文%')\n"
-      "ORDER BY start_at",
+      "SELECT events.title, events.start_at, events.end_at\n"
+      "FROM events\n"
+      "JOIN event_resources ON event_resources.event_id = events.id\n"
+      "JOIN resources ON resources.id = event_resources.resource_id\n"
+      "WHERE resources.name LIKE '%李小華%'\n"
+      "  AND events.id IN (\n"
+      "    SELECT event_resources.event_id FROM event_resources\n"
+      "    JOIN resources ON resources.id = event_resources.resource_id\n"
+      "    WHERE resources.name LIKE '%陳大文%')\n"
+      "ORDER BY events.start_at",
     ),
   ]
   messages = [{"role": "system", "content": systemPrompt}]

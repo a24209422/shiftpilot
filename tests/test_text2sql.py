@@ -78,7 +78,9 @@ def testPromptContainsDatesSchemaAndVocabulary(demoDatabaseUrl):
   assert "下週：2026-11-23 ～ 2026-11-29" in systemPrompt
   # 「下一個行程」要跟現在比較，模型需要日期加時間的完整字串才寫得出 start_at > '...'
   assert "start_at > '2026-11-17 14:30'" in systemPrompt
-  assert "CREATE TABLE event_details" in systemPrompt
+  assert "CREATE TABLE event_resources" in systemPrompt
+  assert "- resources.name：" in systemPrompt
+  assert "resource_name（resources.name）" not in systemPrompt
   assert "王小明" in systemPrompt
   assert messages[-1] == {"role": "user", "content": "問題"}
 
@@ -88,16 +90,34 @@ def getFewShotSqls(demoDatabaseUrl):
   return [text2sql.extractSql(message["content"]) for message in messages[1:-1] if message["role"] == "assistant"]
 
 
-def testPromptTeachesModelToQueryTheFlatView(demoDatabaseUrl):
+def testPromptTeachesModelToJoinRawTables(demoDatabaseUrl):
   messages = text2sql.buildMessages("問題", db.getLlmSchemaText(), db.getVocabulary(demoDatabaseUrl), fixedNow)
   systemPrompt = messages[0]["content"]
   fewShotSqls = getFewShotSqls(demoDatabaseUrl)
 
-  # 一筆排程在 view 裡有多列，prompt 沒提醒的話模型會用 COUNT(*) 多算
-  assert "COUNT(DISTINCT event_id)" in systemPrompt
-  assert "event_resources" not in systemPrompt
-  assert len(fewShotSqls) >= 2
-  assert all("event_details" in sql and "JOIN" not in sql for sql in fewShotSqls)
+  # JOIN event_resources 之後一筆排程有多列，prompt 沒提醒的話模型會用 COUNT(*) 多算
+  assert "COUNT(DISTINCT events.id)" in systemPrompt
+  assert "event_details" not in systemPrompt
+  assert len(fewShotSqls) == 3
+  assert all("event_details" not in sql and "FROM events" in sql for sql in fewShotSqls)
+
+
+viewVersionFewShotSqls = [
+  "SELECT resource_name, title, start_at, end_at FROM event_details "
+  "WHERE resource_name LIKE '%小明%' AND start_at::date = '2026-11-18' ORDER BY start_at",
+  "SELECT COUNT(DISTINCT event_id) AS meeting_count FROM event_details "
+  "WHERE category = 'meeting' AND start_at::date BETWEEN '2026-11-23' AND '2026-11-29'",
+  "SELECT title, start_at, end_at FROM event_details WHERE resource_name LIKE '%李小華%' "
+  "AND event_id IN (SELECT event_id FROM event_details WHERE resource_name LIKE '%陳大文%') ORDER BY start_at",
+]
+
+
+def testFewShotResultsMatchViewVersion(demoDatabaseUrl):
+  # 改寫只換寫法不換意思：每個範例查出來的結果要跟改寫前的 view 版本一模一樣
+  for newSql, viewSql in zip(getFewShotSqls(demoDatabaseUrl), viewVersionFewShotSqls, strict=True):
+    _, viewRows = db.runReadOnlyQuery(demoDatabaseUrl, viewSql)
+    assert viewRows
+    assert db.runReadOnlyQuery(demoDatabaseUrl, newSql)[1] == viewRows
 
 
 def testFewShotExamplesRunOnTheRealSchema(demoDatabaseUrl):

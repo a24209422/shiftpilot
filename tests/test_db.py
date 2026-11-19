@@ -145,10 +145,16 @@ def testSeedDemoDataIncludesEventsWithSeveralResources(databaseUrl):
   assert any(len(event["resource_names"]) > 1 for event in events)
 
 
-def testLlmSchemaHidesTheJoinTable():
-  # 模型只該看到攤平的 view；看到 event_resources 就會想自己寫兩次 JOIN
-  schemaText = db.getLlmSchemaText()
+def testLlmSchemaListsEveryRealColumn(databaseUrl):
+  # 給模型看的說明是手寫的，實際的表多了欄位卻沒寫進去，模型就不知道它存在
+  _, rows = db.runReadOnlyQuery(databaseUrl, """
+    SELECT c.table_name, c.column_name
+    FROM information_schema.columns c
+    JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+    WHERE c.table_schema = current_schema() AND t.table_type = 'BASE TABLE'
+  """)
+  blocks = {block.split("(")[0].strip(): block for block in db.getLlmSchemaText().split("CREATE TABLE ")[1:]}
 
-  assert "event_details" in schemaText
-  assert "resources" in schemaText
-  assert "event_resources" not in schemaText
+  assert "event_details" not in db.getLlmSchemaText()
+  assert {table for table, _ in rows} == set(blocks)
+  assert [(table, column) for table, column in rows if column not in blocks[table]] == []
