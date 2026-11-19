@@ -39,7 +39,7 @@ text2sql 現在只能用本機 Ollama 的小模型（qwen2.5:3b、qwen3-vl:4b-in
 2. 雲端模型一律走 OpenRouter
 3. `callOllama` 不改，雲端另外寫 `callOpenRouter`
 4. 評測程式這次就支援雲端模型，但不跑；測試只用假的 HTTP 回應
-5. 選單的模型清單寫在 `.env`：`OLLAMA_MODELS`、`OPENROUTER_MODELS`、`OPENROUTER_API_KEY`（留空）
+5. 選單的模型清單寫在 `.env`：`LOCAL_MODELS`、`OPENROUTER_MODELS`、`OPENROUTER_API_KEY`（留空）。原本訂的名稱是 `OLLAMA_MODELS`，實作時發現它是 Ollama 自己用來指定模型存放資料夾的環境變數，所以改名
 6. 呼叫參數：溫度 0、timeout 60 秒、不限制輸出長度、不送 `HTTP-Referer` / `X-Title`
 7. 錯誤訊息：401 提示檢查 key、402 提示餘額不足、其他顯示狀態碼與內容；本機模型的訊息不變
 8. `docker-compose.yml` 傳入三個新設定，沒填也能啟動

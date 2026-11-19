@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 import psycopg
 import pytest
+import requests
 
 import db
 import text2sql
@@ -177,13 +178,13 @@ def testParseModelListIgnoresSpacesAndEmptyItems():
 
 
 def testListModelsHidesCloudModelsWithoutApiKey(modelEnv):
-  modelEnv(OLLAMA_MODEL="qwen2.5:3b", OLLAMA_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct",
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", LOCAL_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct",
            OPENROUTER_API_KEY="   ", OPENROUTER_MODELS=cloudModels)
   assert text2sql.listModels() == ["qwen2.5:3b", "qwen3-vl:4b-instruct"]
 
 
 def testListModelsAddsCloudModelsWhenApiKeySet(modelEnv):
-  modelEnv(OLLAMA_MODEL="qwen2.5:3b", OLLAMA_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct",
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", LOCAL_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct",
            OPENROUTER_API_KEY="test-key", OPENROUTER_MODELS=cloudModels)
   assert text2sql.listModels() == [
     "qwen2.5:3b", "qwen3-vl:4b-instruct", "anthropic/claude-haiku-5.5", "openai/gpt-6-luna",
@@ -191,8 +192,14 @@ def testListModelsAddsCloudModelsWhenApiKeySet(modelEnv):
 
 
 def testListModelsPutsDefaultModelFirstWhenMissingFromList(modelEnv):
-  modelEnv(OLLAMA_MODEL="llama3:8b", OLLAMA_MODELS="qwen2.5:3b,qwen2.5:3b")
+  modelEnv(OLLAMA_MODEL="llama3:8b", LOCAL_MODELS="qwen2.5:3b,qwen2.5:3b")
   assert text2sql.listModels() == ["llama3:8b", "qwen2.5:3b"]
+
+
+def testListModelsIgnoresOllamaStorageDirectory(modelEnv):
+  # OLLAMA_MODELS 是 Ollama 自己用來指定模型存放資料夾的環境變數，不能被當成選單清單
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", OLLAMA_MODELS=r"D:\models\ollama", LOCAL_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct")
+  assert text2sql.listModels() == ["qwen2.5:3b", "qwen3-vl:4b-instruct"]
 
 
 def testListModelsFallsBackToDefaultModel(modelEnv):
@@ -237,3 +244,49 @@ def testCallOpenRouterTreatsNullContentAsEmpty(monkeypatch, modelEnv):
   modelEnv(OPENROUTER_API_KEY="test-key")
   monkeypatch.setattr(text2sql.requests, "post", makeFakePost(None))
   assert text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna") == ""
+
+
+def makeHttpError(statusCode, body):
+  response = requests.Response()
+  response.status_code = statusCode
+  response._content = body.encode("utf-8")
+  return requests.HTTPError(f"{statusCode} Error", response=response)
+
+
+def testDescribeModelMarksCloudAndLocal(modelEnv):
+  modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna")
+  assert text2sql.describeModel("openai/gpt-6-luna") == "openai/gpt-6-luna（雲端）"
+  assert text2sql.describeModel("qwen2.5:3b") == "qwen2.5:3b（本機）"
+
+
+def testDescribeLlmErrorExplainsOpenRouterAuthAndCredit(modelEnv):
+  modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna")
+  assert text2sql.describeLlmError(makeHttpError(401, "{}"), "openai/gpt-6-luna") == (
+    "無法呼叫 OpenRouter（HTTP 401）：API key 錯誤，請確認 .env 的 OPENROUTER_API_KEY"
+  )
+  assert text2sql.describeLlmError(makeHttpError(402, "{}"), "openai/gpt-6-luna") == (
+    "無法呼叫 OpenRouter（HTTP 402）：OpenRouter 餘額不足"
+  )
+
+
+def testDescribeLlmErrorTruncatesOtherHttpErrors(modelEnv):
+  modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna")
+  prefix = "無法呼叫 OpenRouter（HTTP 502）："
+
+  message = text2sql.describeLlmError(makeHttpError(502, "<html>" + "x" * 1000), "openai/gpt-6-luna")
+
+  assert message.startswith(prefix + "<html>")
+  assert len(message) == len(prefix) + 300
+
+
+def testDescribeLlmErrorWithoutResponse(modelEnv):
+  modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna")
+  error = requests.ConnectionError("連不上")
+  assert text2sql.describeLlmError(error, "openai/gpt-6-luna") == "無法呼叫 OpenRouter：連不上"
+
+
+def testDescribeLlmErrorKeepsOllamaHint(modelEnv):
+  error = requests.ConnectionError("refused")
+  assert text2sql.describeLlmError(error, "qwen2.5:3b") == (
+    "無法呼叫 Ollama：refused\n\n請確認 Ollama 已啟動，且已下載 qwen2.5:3b。"
+  )

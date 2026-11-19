@@ -16,7 +16,7 @@ def testDatabaseUrl():
   return url
 
 
-modelEnvNames = ["OLLAMA_MODEL", "OLLAMA_MODELS", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"]
+modelEnvNames = ["OLLAMA_MODEL", "OLLAMA_MODELS", "LOCAL_MODELS", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"]
 
 
 @pytest.fixture

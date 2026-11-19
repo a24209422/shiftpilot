@@ -16,7 +16,8 @@ docker compose up -d --build --wait   # 建置並啟動 app 與 PostgreSQL 17
 - app 和 PostgreSQL 都在容器裡；Ollama 留在主機上，app 透過 `host.docker.internal` 連線，可以直接用主機的 GPU，模型也不用重新下載
 - 網頁只綁在本機的 `127.0.0.1:8501`：還沒有登入功能，所以不開放給內網
 - 改了程式之後，執行 `docker compose up -d --build` 重建 app
-- 想換模型：修改 `.env` 的 `OLLAMA_MODEL`，再執行 `docker compose up -d`
+- 換模型：「自然語言查詢」分頁的下拉選單可以切換模型，預設選 `.env` 的 `OLLAMA_MODEL`，選單裡的本機模型列在 `LOCAL_MODELS`。改了 `.env` 之後執行 `docker compose up -d`
+- 用雲端模型：在 `.env` 填 `OPENROUTER_API_KEY`（到 openrouter.ai 申請），執行 `docker compose up -d` 後，選單會出現 `OPENROUTER_MODELS` 列出的模型。用雲端模型時，問題、資料表結構和資源名稱會送到 OpenRouter，再轉給模型的廠商
 - 兩個容器都設定成自動重啟，電腦重開機、Docker 啟動後會自己跑起來
 - PostgreSQL 另外綁在本機的 `127.0.0.1:5433`，給本機跑測試和評測用，避開常被其他 PostgreSQL 占用的 5432
 - 容器第一次啟動時，`docker/init/` 會建立非 superuser 的 `schedule_app` 帳號，以及 `schedule`（app 用）、`schedule_test`（測試與評測用）兩個資料庫
@@ -151,7 +152,7 @@ dev 各類別（加規則之前 → 之後）：
 | `schema.sql` | 資料表與 view 的定義 |
 | `llm_schema.sql` | 寫給 text2sql 模型看的結構說明，只有 `event_details` 和 `resources` |
 | `db.py` | 資料庫操作、衝突檢查、唯讀查詢、示範資料 |
-| `text2sql.py` | 組 prompt（schema、資料中的實際值、日期對照表、few-shot）、呼叫 Ollama、SQL 檢查、失敗重試 |
+| `text2sql.py` | 組 prompt（schema、資料中的實際值、日期對照表、few-shot）、呼叫 Ollama 或 OpenRouter、SQL 檢查、失敗重試 |
 | `app.py` | Streamlit 介面：自然語言查詢、排程清單、新增排程、資源 |
 | `evals/` | text2sql 評測集：固定資料、題目與標準答案、比對邏輯、跑分腳本 |
 | `tests/` | 自動化測試 |

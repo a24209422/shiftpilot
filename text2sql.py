@@ -61,7 +61,7 @@ def getOpenRouterConfig():
 
 def listModels():
   defaultModel = getOllamaConfig()["model"]
-  localModels = parseModelList(os.getenv("OLLAMA_MODELS"))
+  localModels = parseModelList(os.getenv("LOCAL_MODELS"))
   if defaultModel not in localModels:
     localModels.insert(0, defaultModel)
   openRouter = getOpenRouterConfig()
@@ -91,6 +91,22 @@ def callOpenRouter(messages, model, apiKey=None):
   response.raise_for_status()
   # 推理模型有時只回傳思考內容、content 是 null，當成沒產生 SQL 交給後面處理
   return response.json()["choices"][0]["message"]["content"] or ""
+
+
+def describeModel(model):
+  return f"{model}（{'雲端' if getProvider(model) == 'openrouter' else '本機'}）"
+
+
+def describeLlmError(error, model):
+  if getProvider(model) == "ollama":
+    return f"無法呼叫 Ollama：{error}\n\n請確認 Ollama 已啟動，且已下載 {model}。"
+  response = getattr(error, "response", None)
+  if response is None:
+    return f"無法呼叫 OpenRouter：{error}"
+  hints = {401: "API key 錯誤，請確認 .env 的 OPENROUTER_API_KEY", 402: "OpenRouter 餘額不足"}
+  # 閘道錯誤常回整頁 HTML，只留開頭，畫面才不會被塞滿
+  detail = hints.get(response.status_code, response.text[:300])
+  return f"無法呼叫 OpenRouter（HTTP {response.status_code}）：{detail}"
 
 
 def extractSql(text):

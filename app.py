@@ -66,12 +66,16 @@ except psycopg.OperationalError as error:
   st.stop()
 
 st.title("排程工具 MVP")
-st.caption(f"資料庫：{describeDatabase(databaseUrl)}（PostgreSQL）　｜　text2sql 模型：{text2sql.getOllamaConfig()['model']}（Ollama）")
+st.caption(f"資料庫：{describeDatabase(databaseUrl)}（PostgreSQL）")
 
 queryTab, listTab, addTab, resourceTab = st.tabs(["自然語言查詢", "排程清單", "新增排程", "資源"])
 
 with queryTab:
   st.write("用中文問排程相關的問題，系統會轉成 SQL 查詢資料庫（唯讀，不會修改資料）。")
+  models = text2sql.listModels()
+  selectedModel = st.selectbox(
+    "模型", models, index=models.index(text2sql.getOllamaConfig()["model"]), format_func=text2sql.describeModel
+  )
   runQuery = False
   for column, example in zip(st.columns(len(exampleQuestions)), exampleQuestions):
     if column.button(example):
@@ -84,10 +88,12 @@ with queryTab:
   if runQuery and question.strip():
     with st.spinner("模型產生 SQL 中…"):
       try:
-        st.session_state.lastResult = text2sql.answerQuestion(question.strip(), databaseUrl)
+        st.session_state.lastResult = text2sql.answerQuestion(
+          question.strip(), databaseUrl, llm=text2sql.getLlm(selectedModel)
+        )
       except requests.RequestException as error:
         st.session_state.lastResult = None
-        st.error(f"無法呼叫 Ollama：{error}\n\n請確認 Ollama 已啟動，且已下載 {text2sql.getOllamaConfig()['model']}。")
+        st.error(text2sql.describeLlmError(error, selectedModel))
 
   # 結果存在 session_state，切換分頁或操作其他元件時才不會消失
   result = st.session_state.get("lastResult")
