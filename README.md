@@ -58,7 +58,7 @@ python -m evals.run --split test-ext  # 新表的 test：只印分數
 
 - `--model qwen3-vl:4b-instruct`：指定模型，可以是本機 Ollama 模型，或 `OPENROUTER_MODELS`、`GOOGLE_AI_MODELS` 裡的雲端模型（需要對應的 `OPENROUTER_API_KEY` 或 `GOOGLE_AI_API_KEY`，例如 `--model anthropic/claude-haiku-5.5`、`--model gemini-3.5-flash-lite`）。預設讀 `.env` 的 `OLLAMA_MODEL`
 - `--filter date` 或 `--filter d05`：只跑某個類別或某一題（只限 dev、dev-ext）
-- 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test、test-ext 的報告檔不要打開看每題的細節
+- 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test、test-ext 的報告檔不要打開看每題的細節；這兩個 split 在終端機上只印總分，類別分數只存在報告檔裡
 
 做法：
 
@@ -151,7 +151,7 @@ dev 各類別（加規則之前 → 之後）：
 | 步驟 0：固定 `num_ctx` | 31/47（66.0%） | 13/24（54.2%） | 43/47（91.5%） | 16/24（66.7%） |
 | 步驟 1：原始三張表 | 31/47（66.0%） | 13/24（54.2%） | 44/47（93.6%） | 16/24（66.7%） |
 | 步驟 2：加新表（舊題） | 31/47（66.0%） | 13/24（54.2%） | 未量測 | 未量測 |
-| 步驟 2：新題（dev-ext／test-ext） | 7/25（28.0%） | 1/15（6.7%） | 未量測 | 未量測 |
+| 步驟 2：新題（dev-ext／test-ext） | 6/25（24.0%） | 0/15（0.0%） | 未量測 | 未量測 |
 
 溫度 0，各跑 1 次。test 一題是 4.2 個百分點；之後新題的 test-ext 只有 15 題，一題約 6.7 個百分點。
 
@@ -179,17 +179,21 @@ dev 各類別（加規則之前 → 之後）：
 - 新表是 `departments`、`employees`、`rooms`、`work_hours`、`leave_requests`、`holidays`（見「資料結構」）。fixture 只替現有的 8 個資源補資料，舊題的標準答案一題都沒變（`evals/gold_snapshot.json` 的 hash 檢查）。prompt 的規則沒有新增或修改，新表怎麼用只靠 `llm_schema.sql` 的註解；「目前資料中的值」多列了部門名稱、假別和審核狀態
 - 截斷檢查：prompt 是 2362 個 token（步驟 1 是 1716），遠小於 8192
 - **舊題：總分沒變，3b 還是 31/47 和 13/24**。dev 有 8 題對錯互換（4 題變對、4 題變錯）。變錯的 b06、d01、m04、o02，SQL 都沒用到新表，是時間或日期條件、多選資源名稱欄位的寫法變了；舊題裡只有 d10（本來就錯）和 t01（本來就對）的 SQL 碰到新表。在 3b 身上，看不出新表讓舊題變難
-- **新題：3b 的 dev-ext 是 7/25（28.0%）、test-ext 是 1/15（6.7%）**。新題跟舊題是不同的題目，這個差距混合了題目難度和結構複雜度，不能全部算成「表變多」的代價；test-ext 只有 15 題，一題是 6.7 個百分點。新題平均每題 6.0 秒（舊題 dev 步驟 1 是 3.8）
+- **新題：3b 的 dev-ext 是 6/25（24.0%）、test-ext 是 0/15（0.0%）**。新題跟舊題是不同的題目，這個差距混合了題目難度和結構複雜度，不能全部算成「表變多」的代價；test-ext 只有 15 題，一題是 6.7 個百分點。新題平均每題 6.0 秒（舊題 dev 步驟 1 是 3.8）
+- 新題的結果經過一次修正、重跑，第一次量測是 dev-ext 7/25、test-ext 1/15：
+  - 審查發現 fixture 裡王小明、李小華的 `employees.id` 和 `resources.id` 剛好相同（1／1、2／2），把 `employee_id` 當成 `resources.id` 去 JOIN 的錯誤寫法會碰巧答對。改成 `employees.id` 從 101 起再重跑，e-hours04、e-leave03 變成答錯；test-ext 少 1 題，看不到是哪一題，推測是同一類
+  - e-hours02、e-hours03 的標準答案原本要求日期和名稱兩個欄位都有，這違反「標準答案只選最少需要的欄位」的出題原則，改成日期或名稱擇一，e-hours02 因此變成答對。這個修改的依據是出題原則，不是模型的答案，但時間點是看過第一次量測的結果之後
+  - 重跑後 dev-ext 淨減 1 題（7 → 6）；舊題的分數兩次都一樣，模型寫的 SQL 也一模一樣
 - **4b 的步驟 2 還沒量**：4b 有一部分在系統記憶體裡跑，電腦記憶體不足時，背景的評測被系統中止了兩次，所以先不跑。補跑：`python -m evals.run --model qwen3-vl:4b-instruct --split dev`，再依序把 `--split` 換成 `test`、`dev-ext`、`test-ext`，量測表的「未量測」就能填上
 - 新題的錯誤模式（3b，只看 dev-ext 的 SQL，沒有針對它們改 prompt；一題可能同時有好幾種）：
   - 欄位放錯表（5 題，SQL 執行失敗、重試一次還是錯）：e-org02（`employees.resource_name`）、e-org03（`e2.name`）、e-hours01（`employees.name`）、e-room03（在 `rooms` 上找 `name`）、e-room01（在 `resources` 上找 `capacity`）。名字都在 `resources.name`；`employees` 和 `rooms` 只有 `resource_id`
   - 自己參照（主管、上層部門）：org 類 4 題全錯，只有單純 JOIN 的 e-org01 對。e-org04 巢了 4 層 `parent_id` 子查詢，e-org05 只往上查一層、回的是 `manager_id` 不是名字
   - 沒用到 `rooms`：room 類 0/5。e-room02、e-room04、e-room05 和 e-combo05 完全沒用到 `rooms`，改用 `resources.name LIKE '%有視訊設備%'`，或只看 `type = 'room'`，樓層、容量、視訊設備都沒用到
   - 請假用「開始日期等於那天」判斷：e-leave05 漏掉 11-25 開始、跨到 26 日的假；e-leave02 同樣寫法，但那筆剛好 18 日開始，所以碰巧答對。e-leave04 用 `start_at < end_at`（永遠成立），沒有比較日期，也只回 `employee_id`、沒有名字
-  - 把 `employee_id` 當成 `resources.id` 去 JOIN：e-combo03 因此答錯。e-hours04、e-leave03 也這樣寫，但 fixture 裡王小明（employees.id 1／resources.id 1）和李小華（2／2）兩邊的 id 剛好相同，所以碰巧答對；林美玲（3／4）、陳大文（4／3）就不同。這兩題的分數可能偏高，之後應該把 fixture 裡 `employees` 的寫入順序改掉，讓每個人兩邊的 id 都不一樣
+  - 把 `employee_id` 當成 `resources.id` 去 JOIN：e-combo03、e-hours04、e-leave03 都這樣寫，都答錯（e-hours04、e-leave03 在第一次量測時因為 id 剛好相同而碰巧答對，見上）
   - 把部門名稱當成資源名稱比對：e-combo01 用 `resources.name LIKE '%營運部%'`，沒用到 `employees`、`departments`
-  - 假日：e-hours02 只選了日期、沒選名稱（標準答案要日期和名稱）；e-hours03 沒限制在今年，多回了 2027-01-01
-- 狀態篩選不是這一輪的難點：e-leave01、e-leave03 的狀態值（`pending`、`rejected`）寫對了
+  - 假日：e-hours03 沒限制在今年，多回了 2027-01-01
+- 狀態篩選不是這一輪的難點：e-leave01、e-leave03 的狀態值（`pending`、`rejected`）都寫對了，e-leave03 答錯是因為上面的 id JOIN
 
 dev 各類別（舊題）：
 
@@ -211,9 +215,9 @@ dev-ext 各類別（新題，3b 步驟 2）：
 | org | 部門、主管（多層 JOIN、自己參照） | 5 | 1 |
 | room | 會議室細節加上排程 | 5 | 0 |
 | hours | 上班時段、假日 | 5 | 2 |
-| leave | 請假區間重疊、審核狀態 | 5 | 3 |
+| leave | 請假區間重疊、審核狀態 | 5 | 2 |
 | combo | 排程結合新表 | 5 | 1 |
-| **合計** | | **25** | **7** |
+| **合計** | | **25** | **6** |
 
 ### 和改成多對多之前比較（SQLite 時期）
 
