@@ -1,5 +1,6 @@
 import io
 import json
+from collections import Counter
 from datetime import date
 from decimal import Decimal
 
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 
 import db
 import text2sql
-from evals import cases, fixture, heldout_cases, scoring, snapshot
+from evals import cases, ext_cases, ext_heldout_cases, fixture, heldout_cases, scoring, snapshot
 from evals import run as evalRun
 
 allCases = cases.cases + heldout_cases.heldoutCases
@@ -139,6 +140,8 @@ def testCasesDoNotReuseFewShotQuestions(evalDatabaseUrl):
 
   assert len(fewShotQuestions) > 0
   assert not fewShotQuestions & {case["question"] for case in allCases}
+  # 只列題號：test-ext 的題目文字印出來就等於讓主 session 看到 test
+  assert [case["id"] for case in ext_heldout_cases.extHeldoutCases if case["question"] in fewShotQuestions] == []
 
 
 def answerWithGoldSql(messages):
@@ -439,3 +442,30 @@ def testFixtureHolidays(evalDatabaseUrl):
       AND NOT EXISTS (SELECT 1 FROM events e WHERE e.start_at::date = h.day)
   """) >= 1
   assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM holidays WHERE day > '2026-11-28'") >= 1
+
+
+def testExtHeldoutCasesAreWellFormed():
+  heldout = ext_heldout_cases.extHeldoutCases
+  oldQuestions = {case["question"] for case in allCases}
+
+  assert len({case["id"] for case in heldout}) == len(heldout) == 15
+  assert [case["id"] for case in heldout if not case["id"].startswith("h-")] == []
+  assert Counter(case["category"] for case in heldout) == {category: 3 for category in ext_cases.extCategories}
+  # 只列題號：題目文字印出來就等於讓主 session 看到 test
+  assert [case["id"] for case in heldout if case["question"] in oldQuestions] == []
+
+
+def testExtHeldoutGoldSqlRunsAndReturnsRows(evalDatabaseUrl):
+  failedIds = []
+  for case in ext_heldout_cases.extHeldoutCases:
+    try:
+      for sql in [case["goldSql"], *case.get("alsoAccept", [])]:
+        text2sql.validateSql(sql)
+        # 標準答案如果查不到資料，模型隨便寫一句查不到資料的 SQL 也會被判定為正確
+        if not db.runReadOnlyQuery(evalDatabaseUrl, sql)[1]:
+          raise ValueError("no rows")
+    except Exception:
+      # 錯誤訊息可能帶出 SQL，只記題號
+      failedIds.append(case["id"])
+
+  assert failedIds == []

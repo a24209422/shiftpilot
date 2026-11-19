@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import db
-from evals import fixture, heldout_cases, scoring
+from evals import ext_heldout_cases, fixture, heldout_cases, scoring
 from evals.cases import cases
 
 snapshotPath = Path(__file__).parent / "gold_snapshot.json"
@@ -25,7 +25,7 @@ class SnapshotMismatchError(Exception):
 
 
 def protectedCases():
-  return cases + heldout_cases.heldoutCases
+  return cases + heldout_cases.heldoutCases + ext_heldout_cases.extHeldoutCases
 
 
 def hashRows(rows):

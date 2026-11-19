@@ -79,6 +79,51 @@
   "d10": [
     "c435bf2bd4e9035b99c2941d28fd631f64830deac5d7c5d190124c54580a282e"
   ],
+  "h-combo01": [
+    "ab7596ec8756d8c690e4da1ca632b800e1567d751ba078b597fd1271e7c9cfce"
+  ],
+  "h-combo02": [
+    "b5a8b3b22ad8fe442d8b44ddb1488fdcb43b86a35cdcdaf0bb2519999a1d9330"
+  ],
+  "h-combo03": [
+    "ecd92e265abd23ae301956896d2380edbb1f2e5d40c9760e83fd1cb77d0846f4"
+  ],
+  "h-hours01": [
+    "1ba5edf59854386be920ac9fd3e4a2af3bb6369bf2a1aef78dcdf908c96d70a9"
+  ],
+  "h-hours02": [
+    "74b239485732f50aa141bc2a6b09a7159c698af595340894be3edf75d7aa941a"
+  ],
+  "h-hours03": [
+    "4272c7ca2c742ad83c36750353069a4f62c3efbd807052053e92c9eada2e69ab"
+  ],
+  "h-leave01": [
+    "5552cc5aa701b59dc0fdb521a81f3a8f639a70b198590c4b39475019021e5a93"
+  ],
+  "h-leave02": [
+    "694a8f2b0d2d8958a72f5b474ec48dd80f8fc21c9fa228e23ae3f766c38658e2"
+  ],
+  "h-leave03": [
+    "8eb76d2e521141346977777a06dc2da82400f1c8af8730f9ba095572fb5e3b38"
+  ],
+  "h-org01": [
+    "694a8f2b0d2d8958a72f5b474ec48dd80f8fc21c9fa228e23ae3f766c38658e2"
+  ],
+  "h-org02": [
+    "cff2ec6815b218b561b792fec41545eec88d1e88f4eaf3afc8885dde3dfd1454"
+  ],
+  "h-org03": [
+    "41cca9aeb795833098410ef5af8074c2eb63cbf6c3fb09be2b6b379efea902cd"
+  ],
+  "h-room01": [
+    "88d73f365d1af296507ee6cb8232488ef2bdce643d17ef8cc43203399fc81ed3"
+  ],
+  "h-room02": [
+    "adc5dfc2978b0a4d88bc5c62107dc5bad0a9505e7323303ceeecc4abaa994391"
+  ],
+  "h-room03": [
+    "bb6032c3b06aa7195549c62ddd87149772a705302a45b88de03ef5c5754ac0cb"
+  ],
   "ha01": [
     "04731fb5bb9b72ecb68d4f181e1cd7a6d49e5a18d686fb1826b6c3af4e087943"
   ],
