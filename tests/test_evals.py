@@ -1,8 +1,10 @@
+import io
 import json
 from datetime import date
 from decimal import Decimal
 
 import pytest
+from dotenv import load_dotenv
 
 import db
 import text2sql
@@ -281,3 +283,9 @@ def testMainUsesOpenRouterForCloudModel(tmp_path, monkeypatch, modelEnv):
   assert calledModels == ["openai/gpt-6-luna"]
   # 模型名稱的斜線不能變成子資料夾
   assert len(list(tmp_path.glob("openai-gpt-6-luna-dev-*.json"))) == 1
+
+
+def testModelEnvStopsDotenvFromRestoringApiKey(modelEnv):
+  # evalRun.main 一開始會執行 load_dotenv()；使用者的 .env 填了 key 之後，測試不能因此拿到真的 key
+  load_dotenv(stream=io.StringIO("OPENROUTER_API_KEY=real-key"))
+  assert text2sql.getOpenRouterConfig()["apiKey"] == ""

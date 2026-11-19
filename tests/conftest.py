@@ -16,14 +16,17 @@ def testDatabaseUrl():
   return url
 
 
-modelEnvNames = ["OLLAMA_MODEL", "OLLAMA_MODELS", "LOCAL_MODELS", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"]
+emptiedModelEnvNames = ["OLLAMA_MODELS", "LOCAL_MODELS", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"]
 
 
 @pytest.fixture
 def modelEnv(monkeypatch):
-  # 上面的 load_dotenv 會載入真正的 .env，使用者填了 key 之後測試結果不能跟著變
-  for name in modelEnvNames:
-    monkeypatch.delenv(name, raising=False)
+  # 上面的 load_dotenv 會載入真正的 .env，使用者填了 key 之後測試結果不能跟著變。
+  # 設成空字串而不是刪掉：evals.run.main 會再呼叫 load_dotenv，被刪掉的變數會從 .env 載回來
+  for name in emptiedModelEnvNames:
+    monkeypatch.setenv(name, "")
+  # OLLAMA_MODEL 要真的刪掉，才測得到預設值；它被載回來也只影響預設模型，不會呼叫雲端
+  monkeypatch.delenv("OLLAMA_MODEL", raising=False)
 
   def setEnv(**values):
     for name, value in values.items():
