@@ -52,11 +52,13 @@ python -m pytest -q
 ```bash
 python -m evals.run               # dev：調 prompt 時用，印出每題的對錯與模型寫的 SQL
 python -m evals.run --split test  # test：確認改進有沒有效，只印分數
+python -m evals.run --split dev-ext   # 新表的 dev：調 prompt 時用，同 dev
+python -m evals.run --split test-ext  # 新表的 test：只印分數
 ```
 
 - `--model qwen3-vl:4b-instruct`：指定模型，可以是本機 Ollama 模型，或 `OPENROUTER_MODELS`、`GOOGLE_AI_MODELS` 裡的雲端模型（需要對應的 `OPENROUTER_API_KEY` 或 `GOOGLE_AI_API_KEY`，例如 `--model anthropic/claude-haiku-5.5`、`--model gemini-3.5-flash-lite`）。預設讀 `.env` 的 `OLLAMA_MODEL`
-- `--filter date` 或 `--filter d05`：只跑某個類別或某一題（只限 dev）
-- 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test 的報告檔不要打開看每題的細節
+- `--filter date` 或 `--filter d05`：只跑某個類別或某一題（只限 dev、dev-ext）
+- 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test、test-ext 的報告檔不要打開看每題的細節
 
 做法：
 
@@ -65,6 +67,9 @@ python -m evals.run --split test  # test：確認改進有沒有效，只印分�
   - dev：`evals/cases.py` 47 題，分 7 類。調 prompt 時看每題的對錯，找出模型的錯誤模式
   - test：`evals/heldout_cases.py` 24 題，各類別題數照 dev 的比例縮小。2026-11-18 在改 prompt 之前寫好並凍結，之後不再修改，只用來確認改進不是只對 dev 有效
   - test 和調 prompt 的是同一個人出的題，出題時已經知道 dev 上的錯誤模式，獨立性不如由別人出題
+  - dev-ext：`evals/ext_cases.py` 25 題，新表（部門、員工、會議室細節、上班時段、請假、假日）的題目，org、room、hours、leave、combo 各 5 題
+  - test-ext：`evals/ext_heldout_cases.py` 15 題，每類 3 題。由沒看過 dev 錯誤模式、也沒看過 dev-ext 題目的 subagent 出題，使用者抽查標準答案後在 2026-11-20 凍結，之後不再修改。test-ext 只有 15 題，一題約 6.7 個百分點
+- **標準答案快照**：`evals/gold_snapshot.json` 記錄舊題與 test-ext 每題標準答案查詢結果的 hash（只存 hash，看不到答案內容）。改資料表或 fixture 之後執行 `python -m pytest`，快照測試會確認這些題目的答案一題都沒變
 - **比對**：比的是查詢結果，不是 SQL 文字。模型多選欄位不扣分，但標準答案的欄位和資料列必須都在
 - **替代答案**：列出排程的題目，一場 2 個資源的會議列一次或列兩次都算對；問「幾筆」「幾場」的題目只有一個正確數字
 - **流程**：走跟 app 相同的 `answerQuestion`，包含 SQL 出錯時重試一次
@@ -145,8 +150,8 @@ dev 各類別（加規則之前 → 之後）：
 |---|---|---|---|---|
 | 步驟 0：固定 `num_ctx` | 31/47（66.0%） | 13/24（54.2%） | 43/47（91.5%） | 16/24（66.7%） |
 | 步驟 1：原始三張表 | 31/47（66.0%） | 13/24（54.2%） | 44/47（93.6%） | 16/24（66.7%） |
-| 步驟 2：加新表（舊題） | | | | |
-| 步驟 2：新題（dev-ext／test-ext） | | | | |
+| 步驟 2：加新表（舊題） | 31/47（66.0%） | 13/24（54.2%） | 未量測 | 未量測 |
+| 步驟 2：新題（dev-ext／test-ext） | 7/25（28.0%） | 1/15（6.7%） | 未量測 | 未量測 |
 
 溫度 0，各跑 1 次。test 一題是 4.2 個百分點；之後新題的 test-ext 只有 15 題，一題約 6.7 個百分點。
 
@@ -169,18 +174,46 @@ dev 各類別（加規則之前 → 之後）：
 - 其餘互換的題目（3b 的 m05、o01 變錯，以及變對的 5 題）是日期或時間條件的寫法變了，看不出跟 JOIN 有關。答錯的題目裡，沒有因為 JOIN 之後重複計算而錯的
 - 平均每題秒數（dev，不含第一題）：3b 3.8（步驟 0 是 3.4）、4b 18.7（步驟 0 是 12.7）。4b 這一輪是在系統記憶體不足、背景工作被中止後重跑的，秒數不能當成結構的影響
 
-dev 各類別：
+**步驟 2：加 6 張新表**
 
-| 類別 | 題數 | 3b 步驟 0 | 3b 步驟 1 | 4b 步驟 0 | 4b 步驟 1 |
-|---|---|---|---|---|---|
-| basic | 6 | 5 | 5 | 6 | 6 |
-| date | 10 | 7 | 6 | 9 | 9 |
-| aggregate | 9 | 5 | 6 | 9 | 9 |
-| type | 6 | 5 | 6 | 6 | 6 |
-| time | 5 | 4 | 3 | 4 | 5 |
-| order | 5 | 3 | 4 | 4 | 4 |
-| multi | 6 | 2 | 1 | 5 | 5 |
-| **合計** | **47** | **31** | **31** | **43** | **44** |
+- 新表是 `departments`、`employees`、`rooms`、`work_hours`、`leave_requests`、`holidays`（見「資料結構」）。fixture 只替現有的 8 個資源補資料，舊題的標準答案一題都沒變（`evals/gold_snapshot.json` 的 hash 檢查）。prompt 的規則沒有新增或修改，新表怎麼用只靠 `llm_schema.sql` 的註解；「目前資料中的值」多列了部門名稱、假別和審核狀態
+- 截斷檢查：prompt 是 2362 個 token（步驟 1 是 1716），遠小於 8192
+- **舊題：總分沒變，3b 還是 31/47 和 13/24**。dev 有 8 題對錯互換（4 題變對、4 題變錯）。變錯的 b06、d01、m04、o02，SQL 都沒用到新表，是時間或日期條件、多選資源名稱欄位的寫法變了；舊題裡只有 d10（本來就錯）和 t01（本來就對）的 SQL 碰到新表。在 3b 身上，看不出新表讓舊題變難
+- **新題：3b 的 dev-ext 是 7/25（28.0%）、test-ext 是 1/15（6.7%）**。新題跟舊題是不同的題目，這個差距混合了題目難度和結構複雜度，不能全部算成「表變多」的代價；test-ext 只有 15 題，一題是 6.7 個百分點。新題平均每題 6.0 秒（舊題 dev 步驟 1 是 3.8）
+- **4b 的步驟 2 還沒量**：4b 有一部分在系統記憶體裡跑，電腦記憶體不足時，背景的評測被系統中止了兩次，所以先不跑。補跑：`python -m evals.run --model qwen3-vl:4b-instruct --split dev`，再依序把 `--split` 換成 `test`、`dev-ext`、`test-ext`，量測表的「未量測」就能填上
+- 新題的錯誤模式（3b，只看 dev-ext 的 SQL，沒有針對它們改 prompt；一題可能同時有好幾種）：
+  - 欄位放錯表（5 題，SQL 執行失敗、重試一次還是錯）：e-org02（`employees.resource_name`）、e-org03（`e2.name`）、e-hours01（`employees.name`）、e-room03（在 `rooms` 上找 `name`）、e-room01（在 `resources` 上找 `capacity`）。名字都在 `resources.name`；`employees` 和 `rooms` 只有 `resource_id`
+  - 自己參照（主管、上層部門）：org 類 4 題全錯，只有單純 JOIN 的 e-org01 對。e-org04 巢了 4 層 `parent_id` 子查詢，e-org05 只往上查一層、回的是 `manager_id` 不是名字
+  - 沒用到 `rooms`：room 類 0/5。e-room02、e-room04、e-room05 和 e-combo05 完全沒用到 `rooms`，改用 `resources.name LIKE '%有視訊設備%'`，或只看 `type = 'room'`，樓層、容量、視訊設備都沒用到
+  - 請假用「開始日期等於那天」判斷：e-leave05 漏掉 11-25 開始、跨到 26 日的假；e-leave02 同樣寫法，但那筆剛好 18 日開始，所以碰巧答對。e-leave04 用 `start_at < end_at`（永遠成立），沒有比較日期，也只回 `employee_id`、沒有名字
+  - 把 `employee_id` 當成 `resources.id` 去 JOIN：e-combo03 因此答錯。e-hours04、e-leave03 也這樣寫，但 fixture 裡王小明（employees.id 1／resources.id 1）和李小華（2／2）兩邊的 id 剛好相同，所以碰巧答對；林美玲（3／4）、陳大文（4／3）就不同。這兩題的分數可能偏高，之後應該把 fixture 裡 `employees` 的寫入順序改掉，讓每個人兩邊的 id 都不一樣
+  - 把部門名稱當成資源名稱比對：e-combo01 用 `resources.name LIKE '%營運部%'`，沒用到 `employees`、`departments`
+  - 假日：e-hours02 只選了日期、沒選名稱（標準答案要日期和名稱）；e-hours03 沒限制在今年，多回了 2027-01-01
+- 狀態篩選不是這一輪的難點：e-leave01、e-leave03 的狀態值（`pending`、`rejected`）寫對了
+
+dev 各類別（舊題）：
+
+| 類別 | 題數 | 3b 步驟 0 | 3b 步驟 1 | 3b 步驟 2 | 4b 步驟 0 | 4b 步驟 1 |
+|---|---|---|---|---|---|---|
+| basic | 6 | 5 | 5 | 4 | 6 | 6 |
+| date | 10 | 7 | 6 | 5 | 9 | 9 |
+| aggregate | 9 | 5 | 6 | 7 | 9 | 9 |
+| type | 6 | 5 | 6 | 6 | 6 | 6 |
+| time | 5 | 4 | 3 | 3 | 4 | 5 |
+| order | 5 | 3 | 4 | 3 | 4 | 4 |
+| multi | 6 | 2 | 1 | 3 | 5 | 5 |
+| **合計** | **47** | **31** | **31** | **31** | **43** | **44** |
+
+dev-ext 各類別（新題，3b 步驟 2）：
+
+| 類別 | 測什麼 | 題數 | 3b |
+|---|---|---|---|
+| org | 部門、主管（多層 JOIN、自己參照） | 5 | 1 |
+| room | 會議室細節加上排程 | 5 | 0 |
+| hours | 上班時段、假日 | 5 | 2 |
+| leave | 請假區間重疊、審核狀態 | 5 | 3 |
+| combo | 排程結合新表 | 5 | 1 |
+| **合計** | | **25** | **7** |
 
 ### 和改成多對多之前比較（SQLite 時期）
 
