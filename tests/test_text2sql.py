@@ -438,3 +438,30 @@ def testDescribeLlmErrorWithoutResponseNamesGoogle(modelEnv):
   modelEnv(GOOGLE_AI_MODELS=googleModels)
   error = requests.ConnectionError("連不上")
   assert text2sql.describeLlmError(error, "gemini-3.5-flash-lite") == "無法呼叫 Google：連不上"
+
+
+@pytest.mark.parametrize("payload", [
+  {"choices": []},
+  [{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key."}}],
+  None,
+])
+def testCallCloudModelRaisesRequestErrorForMalformedPayload(monkeypatch, modelEnv, payload):
+  modelEnv(GOOGLE_AI_API_KEY="google-key")
+  monkeypatch.setattr(text2sql.requests, "post", makeSequencePost([makeOpenRouterResponse(200, payload)]))
+
+  with pytest.raises(requests.RequestException):
+    text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="google", model="gemini-3.5-flash-lite")
+
+
+@pytest.mark.parametrize("choice", [
+  {"index": 0, "finish_reason": "content_filter", "message": {"role": "assistant"}},
+  {"index": 0, "finish_reason": "content_filter"},
+])
+def testCallCloudModelTreatsBlockedAnswerAsEmpty(monkeypatch, modelEnv, choice):
+  modelEnv(GOOGLE_AI_API_KEY="google-key")
+  monkeypatch.setattr(text2sql.requests, "post", makeSequencePost([makeOpenRouterResponse(200, {"choices": [choice]})]))
+
+  # 被安全機制擋下是模型沒有給出答案，要算答錯，不能當成連線錯誤而不計分
+  reply = text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="google", model="gemini-3.5-flash-lite")
+
+  assert reply == ""

@@ -36,7 +36,11 @@ def evaluateCase(case, databaseUrl, llm):
   except requests.RequestException as error:
     # 重試後還是叫不到模型：模型根本沒回答這題，不能算答錯，也不能讓整輪白跑
     infraError = True
-    answer = {"sql": "", "rows": [], "error": f"連線錯誤：{error}", "attempts": 0}
+    # HTTPError 的字串只有狀態和網址；模型 ID 打錯或 key 無效時，原因只在回應內文裡，沒附上就看不出來。
+    # 要用 is not None 判斷：Response 在 4xx、5xx 時布林值是 False
+    response = getattr(error, "response", None)
+    detail = f" {response.text[:300]}" if response is not None else ""
+    answer = {"sql": "", "rows": [], "error": f"連線錯誤：{error}{detail}", "attempts": 0}
   seconds = time.perf_counter() - startedAt
   passed = not infraError and answer["error"] is None and any(
     scoring.resultsMatch(goldRows, answer["rows"], case.get("compareAsSet", False))

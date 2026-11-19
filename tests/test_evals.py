@@ -322,3 +322,18 @@ def testMainRejectsGoogleModelWithoutApiKey(tmp_path, capsys, modelEnv):
 
   assert "GOOGLE_AI_API_KEY" in capsys.readouterr().err
   assert list(tmp_path.iterdir()) == []
+
+
+def testEvaluateCaseKeepsResponseBodyOfConnectionError(evalDatabaseUrl):
+  response = requests.Response()
+  response.status_code = 404
+  response._content = '{"error": {"message": "models/gemini-x is not found"}}'.encode("utf-8")
+
+  def failingLlm(messages):
+    raise requests.HTTPError("404 Client Error: Not Found for url: https://example.test", response=response)
+
+  result = evalRun.evaluateCase(cases.cases[0], evalDatabaseUrl, failingLlm)
+
+  # HTTPError 的字串只有狀態和網址；模型 ID 打錯或 key 無效時，原因只在回應內文裡
+  assert result["infraError"] is True
+  assert "models/gemini-x is not found" in result["error"]

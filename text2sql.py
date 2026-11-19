@@ -131,11 +131,14 @@ def callCloudModel(messages, provider, model, apiKey=None):
     time.sleep(waitSeconds)
   response.raise_for_status()
   payload = response.json()
-  if "choices" not in payload:
-    # 沒有 choices 的回應（例如只有 error 物件）改成 RequestException，app 和評測才會當成連線錯誤，而不是整個當掉
+  choices = payload.get("choices") if isinstance(payload, dict) else None
+  if not choices:
+    # 回應不是物件、沒有 choices 或 choices 是空的（例如只有 error），改成 RequestException，
+    # app 和評測才會當成連線錯誤，而不是整個當掉、讓評測丟掉前面已經跑完的題目
     raise CloudResponseError(f"{config['label']} 的回應沒有 choices", response=response)
-  # 推理模型有時只回傳思考內容、content 是 null，當成沒產生 SQL 交給後面處理
-  return payload["choices"][0]["message"]["content"] or ""
+  # 推理模型只回傳思考內容、或被安全機制擋下時，content 是 null、整個 message 不存在，
+  # 都當成模型沒產生 SQL 交給後面處理：它有回應，只是沒給答案，評測要算答錯
+  return (choices[0].get("message") or {}).get("content") or ""
 
 
 def describeModel(model):
