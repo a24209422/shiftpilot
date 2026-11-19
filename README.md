@@ -18,6 +18,7 @@ docker compose up -d --build --wait   # 建置並啟動 app 與 PostgreSQL 17
 - 改了程式之後，執行 `docker compose up -d --build` 重建 app
 - 換模型：「自然語言查詢」分頁的下拉選單可以切換模型，預設選 `.env` 的 `OLLAMA_MODEL`，選單裡的本機模型列在 `LOCAL_MODELS`。改了 `.env` 之後執行 `docker compose up -d`
 - 用雲端模型：在 `.env` 填 `OPENROUTER_API_KEY`（到 openrouter.ai 申請），執行 `docker compose up -d` 後，選單會出現 `OPENROUTER_MODELS` 列出的模型。用雲端模型時，問題、資料表結構和資源名稱會送到 OpenRouter，再轉給模型的廠商
+- 用 Google 的 Gemini（直連，不經過 OpenRouter）：Google AI Pro 每月附 Cloud credits，OpenRouter 用不到，所以要直連。步驟：到 Google AI Studio 領取 credits、綁定帳單（第三方資料說可能要先預付 US$5，以 AI Studio 畫面為準）、建立 API key，填進 `.env` 的 `GOOGLE_AI_API_KEY`，執行 `docker compose up -d` 後，選單會出現 `GOOGLE_AI_MODELS` 列出的模型。資料會送到 Google。各家獨立：只填 Google 的 key，選單就只多出 Google 的模型；同一個模型名稱同時列在兩家時，以 OpenRouter 為準
 - 兩個容器都設定成自動重啟，電腦重開機、Docker 啟動後會自己跑起來
 - PostgreSQL 另外綁在本機的 `127.0.0.1:5433`，給本機跑測試和評測用，避開常被其他 PostgreSQL 占用的 5432
 - 容器第一次啟動時，`docker/init/` 會建立非 superuser 的 `schedule_app` 帳號，以及 `schedule`（app 用）、`schedule_test`（測試與評測用）兩個資料庫
@@ -52,7 +53,7 @@ python -m evals.run               # dev：調 prompt 時用，印出每題的對
 python -m evals.run --split test  # test：確認改進有沒有效，只印分數
 ```
 
-- `--model qwen3-vl:4b-instruct`：指定模型，可以是本機 Ollama 模型，或 `OPENROUTER_MODELS` 裡的雲端模型（需要 `OPENROUTER_API_KEY`，例如 `--model anthropic/claude-haiku-5.5`）。預設讀 `.env` 的 `OLLAMA_MODEL`
+- `--model qwen3-vl:4b-instruct`：指定模型，可以是本機 Ollama 模型，或 `OPENROUTER_MODELS`、`GOOGLE_AI_MODELS` 裡的雲端模型（需要對應的 `OPENROUTER_API_KEY` 或 `GOOGLE_AI_API_KEY`，例如 `--model anthropic/claude-haiku-5.5`、`--model gemini-3.5-flash-lite`）。預設讀 `.env` 的 `OLLAMA_MODEL`
 - `--filter date` 或 `--filter d05`：只跑某個類別或某一題（只限 dev）
 - 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test 的報告檔不要打開看每題的細節
 
@@ -153,7 +154,7 @@ dev 各類別（加規則之前 → 之後）：
 | `schema.sql` | 資料表與 view 的定義 |
 | `llm_schema.sql` | 寫給 text2sql 模型看的結構說明，只有 `event_details` 和 `resources` |
 | `db.py` | 資料庫操作、衝突檢查、唯讀查詢、示範資料 |
-| `text2sql.py` | 組 prompt（schema、資料中的實際值、日期對照表、few-shot）、呼叫 Ollama 或 OpenRouter、SQL 檢查、失敗重試 |
+| `text2sql.py` | 組 prompt（schema、資料中的實際值、日期對照表、few-shot）、呼叫 Ollama、OpenRouter 或 Google、SQL 檢查、失敗重試 |
 | `app.py` | Streamlit 介面：自然語言查詢、排程清單、新增排程、資源 |
 | `evals/` | text2sql 評測集：固定資料、題目與標準答案、比對邏輯、跑分腳本 |
 | `tests/` | 自動化測試 |

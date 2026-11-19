@@ -366,3 +366,75 @@ def testCallOpenRouterRaisesRequestErrorWhenChoicesMissing(monkeypatch, modelEnv
 
   # app 只接 RequestException，訊息要看得出是上游出錯
   assert "Upstream provider error" in text2sql.describeLlmError(raised.value, "openai/gpt-6-luna")
+
+
+googleModels = "gemini-3.5-flash-lite,gemini-3.8-flash"
+sqlReply = "```sql" + chr(10) + "SELECT 1" + chr(10) + "```"
+
+
+def testListModelsAddsGoogleModelsWithOnlyGoogleKey(modelEnv):
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", LOCAL_MODELS="qwen2.5:3b", OPENROUTER_MODELS=cloudModels,
+           GOOGLE_AI_API_KEY="google-key", GOOGLE_AI_MODELS=googleModels)
+  assert text2sql.listModels() == ["qwen2.5:3b", "gemini-3.5-flash-lite", "gemini-3.8-flash"]
+
+
+def testModelInBothCloudListsGoesToOpenRouterOnce(modelEnv):
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", LOCAL_MODELS="qwen2.5:3b",
+           OPENROUTER_API_KEY="openrouter-key", OPENROUTER_MODELS="gemini-3.5-flash-lite",
+           GOOGLE_AI_API_KEY="google-key", GOOGLE_AI_MODELS="gemini-3.5-flash-lite")
+  assert text2sql.listModels() == ["qwen2.5:3b", "gemini-3.5-flash-lite"]
+  assert text2sql.getProvider("gemini-3.5-flash-lite") == "openrouter"
+
+
+def testGetLlmRoutesGoogleModels(modelEnv):
+  modelEnv(GOOGLE_AI_MODELS=googleModels)
+  googleLlm = text2sql.getLlm("gemini-3.5-flash-lite")
+  assert googleLlm.func is text2sql.callCloudModel
+  assert googleLlm.keywords == {"provider": "google", "model": "gemini-3.5-flash-lite"}
+
+
+def testCallCloudModelSendsGoogleRequest(monkeypatch, modelEnv):
+  modelEnv(GOOGLE_AI_API_KEY="google-key")
+  fakePost = makeFakePost(sqlReply)
+  monkeypatch.setattr(text2sql.requests, "post", fakePost)
+  messages = [{"role": "user", "content": "問題"}]
+
+  reply = text2sql.callCloudModel(messages, provider="google", model="gemini-3.5-flash-lite")
+
+  call = fakePost.calls[0]
+  assert reply == sqlReply
+  assert call["url"] == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+  assert call["headers"] == {"Authorization": "Bearer google-key"}
+  assert call["json"] == {"model": "gemini-3.5-flash-lite", "messages": messages, "temperature": 0}
+  assert call["timeout"] == 60
+
+
+def testDescribeModelMarksGoogleAsCloud(modelEnv):
+  modelEnv(GOOGLE_AI_MODELS=googleModels)
+  assert text2sql.describeModel("gemini-3.5-flash-lite") == "gemini-3.5-flash-lite（雲端）"
+
+
+def testDescribeLlmErrorExplainsGoogleBillingAndQuota(modelEnv):
+  modelEnv(GOOGLE_AI_MODELS=googleModels)
+  assert text2sql.describeLlmError(makeHttpError(403, "{}"), "gemini-3.5-flash-lite") == (
+    "無法呼叫 Google（HTTP 403）：請確認 AI Studio 已綁定帳單，而且 key 屬於有 credits 的專案"
+  )
+  assert text2sql.describeLlmError(makeHttpError(429, "{}"), "gemini-3.5-flash-lite") == (
+    "無法呼叫 Google（HTTP 429）：額度用完或呼叫太頻繁，請到 AI Studio 查看用量"
+  )
+
+
+def testDescribeLlmErrorShowsGoogleBodyForInvalidKey(modelEnv):
+  modelEnv(GOOGLE_AI_MODELS=googleModels)
+  body = '{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}'
+
+  message = text2sql.describeLlmError(makeHttpError(400, body), "gemini-3.5-flash-lite")
+
+  assert message.startswith("無法呼叫 Google（HTTP 400）：")
+  assert "API key not valid" in message
+
+
+def testDescribeLlmErrorWithoutResponseNamesGoogle(modelEnv):
+  modelEnv(GOOGLE_AI_MODELS=googleModels)
+  error = requests.ConnectionError("連不上")
+  assert text2sql.describeLlmError(error, "gemini-3.5-flash-lite") == "無法呼叫 Google：連不上"

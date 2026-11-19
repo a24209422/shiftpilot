@@ -32,10 +32,12 @@ services:
       # 容器裡的 localhost 是容器自己，host.docker.internal 才是執行 Ollama 的主機
       OLLAMA_URL: http://host.docker.internal:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      # 下面三個沒填也能啟動：沒有 key 時選單只會出現本機模型
+      # 下面幾個沒填也能啟動：沒有 key 時選單只會出現本機模型
       LOCAL_MODELS: ${LOCAL_MODELS:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+      GOOGLE_AI_MODELS: ${GOOGLE_AI_MODELS:-}
     extra_hosts:
       # Docker Desktop 內建 host.docker.internal；Linux 的 Docker Engine 要靠這行才有
       - "host.docker.internal:host-gateway"

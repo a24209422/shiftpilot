@@ -55,6 +55,17 @@ cloudProviders = {
     "modelsEnv": "OPENROUTER_MODELS",
     "errorHints": {401: "API key 錯誤，請確認 .env 的 OPENROUTER_API_KEY", 402: "OpenRouter 餘額不足"},
   },
+  # key 填錯時 Google 回 400，原文就寫得很清楚，所以只補帳單和額度這兩種原文看不出原因的狀況
+  "google": {
+    "label": "Google",
+    "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    "apiKeyEnv": "GOOGLE_AI_API_KEY",
+    "modelsEnv": "GOOGLE_AI_MODELS",
+    "errorHints": {
+      403: "請確認 AI Studio 已綁定帳單，而且 key 屬於有 credits 的專案",
+      429: "額度用完或呼叫太頻繁，請到 AI Studio 查看用量",
+    },
+  },
 }
 cloudRetryStatuses = {429, 500, 502, 503, 504}
 cloudRetryWaits = [2, 4]

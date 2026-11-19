@@ -286,10 +286,11 @@ def testMainUsesOpenRouterForCloudModel(tmp_path, monkeypatch, modelEnv):
   assert len(list(tmp_path.glob("openai-gpt-6-luna-dev-*.json"))) == 1
 
 
-def testModelEnvStopsDotenvFromRestoringApiKey(modelEnv):
+@pytest.mark.parametrize("provider, apiKeyEnv", [("openrouter", "OPENROUTER_API_KEY"), ("google", "GOOGLE_AI_API_KEY")])
+def testModelEnvStopsDotenvFromRestoringApiKey(modelEnv, provider, apiKeyEnv):
   # evalRun.main 一開始會執行 load_dotenv()；使用者的 .env 填了 key 之後，測試不能因此拿到真的 key
-  load_dotenv(stream=io.StringIO("OPENROUTER_API_KEY=real-key"))
-  assert text2sql.getCloudConfig("openrouter")["apiKey"] == ""
+  load_dotenv(stream=io.StringIO(f"{apiKeyEnv}=real-key"))
+  assert text2sql.getCloudConfig(provider)["apiKey"] == ""
 
 
 def testMainMarksConnectionErrorsWithoutCountingThemWrong(tmp_path, capsys):
@@ -311,3 +312,13 @@ def testMainMarksConnectionErrorsWithoutCountingThemWrong(tmp_path, capsys):
   assert [result["id"] for result in report["results"] if result["infraError"]] == ["b01"]
   assert "ERROR b01" in output
   assert "另有 1 題連線錯誤沒有計分" in output
+
+
+def testMainRejectsGoogleModelWithoutApiKey(tmp_path, capsys, modelEnv):
+  modelEnv(GOOGLE_AI_MODELS="gemini-3.5-flash-lite")
+
+  with pytest.raises(SystemExit):
+    evalRun.main(["--model", "gemini-3.5-flash-lite", "--filter", "b01", "--out", str(tmp_path)])
+
+  assert "GOOGLE_AI_API_KEY" in capsys.readouterr().err
+  assert list(tmp_path.iterdir()) == []
