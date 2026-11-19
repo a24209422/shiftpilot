@@ -1,6 +1,6 @@
 """跑 text2sql 評測。
 
-執行：python -m evals.run [--split dev|test] [--model 模型名稱] [--filter 類別或題號]
+執行：python -m evals.run [--split dev|test|dev-ext|test-ext] [--model 模型名稱] [--filter 類別或題號]
 """
 import argparse
 import json
@@ -18,10 +18,14 @@ import db
 import text2sql
 from evals import fixture, scoring
 from evals.cases import cases
+from evals.ext_cases import extCases
+from evals.ext_heldout_cases import extHeldoutCases
 from evals.heldout_cases import heldoutCases
 
 defaultOutDir = Path(__file__).parent / "results"
-casesBySplit = {"dev": cases, "test": heldoutCases}
+casesBySplit = {"dev": cases, "test": heldoutCases, "dev-ext": extCases, "test-ext": extHeldoutCases}
+# test 類的 split 只印進度與總分：每題的對錯和 SQL 看了，就會不自覺地針對那些題目調 prompt
+hiddenSplits = {"test", "test-ext"}
 
 
 def evaluateCase(case, databaseUrl, llm):
@@ -119,7 +123,7 @@ def writeReport(outDir, model, split, summary, results):
 def main(argv=None, llm=None):
   load_dotenv()
   parser = argparse.ArgumentParser(description="text2sql 評測")
-  parser.add_argument("--split", choices=list(casesBySplit), default="dev", help="dev：調 prompt 用；test：只看分數")
+  parser.add_argument("--split", choices=list(casesBySplit), default="dev", help="dev、dev-ext：調 prompt 用；test、test-ext：只看分數（dev-ext、test-ext 是新表的題目）")
   parser.add_argument(
     "--model", default=text2sql.getOllamaConfig()["model"],
     help="模型名稱：本機 Ollama 模型，或 OPENROUTER_MODELS 裡的雲端模型",
@@ -132,9 +136,9 @@ def main(argv=None, llm=None):
   if llm is None and provider != "ollama" and not text2sql.getCloudConfig(provider)["apiKey"]:
     # 沒有 key 就直接停下來：每題都打出 401，跑完只會得到一份全錯的報告
     parser.error(f"請在 .env 設定 {text2sql.cloudProviders[provider]['apiKeyEnv']} 才能評測雲端模型")
-  if args.split == "test" and args.filter:
+  if args.split in hiddenSplits and args.filter:
     # 篩出單一題就看得到那題的對錯，等於拿 test 題來調 prompt
-    parser.error("test 集不能搭配 --filter")
+    parser.error(f"{args.split} 集不能搭配 --filter")
   selectedCases = selectCases(args.filter, args.split)
   if not selectedCases:
     parser.error(f"沒有符合 --filter {args.filter} 的題目")
@@ -152,7 +156,7 @@ def main(argv=None, llm=None):
       result = evaluateCase(case, databaseUrl, llm)
       results.append(result)
       # test 集只印進度，不印每題對錯與 SQL，避免看了之後不自覺地針對 test 題調 prompt
-      line = formatCaseLine(result) if args.split == "dev" else f"{index}/{len(selectedCases)}"
+      line = f"{index}/{len(selectedCases)}" if args.split in hiddenSplits else formatCaseLine(result)
       print(line, flush=True)
 
   summary = summarize(results)

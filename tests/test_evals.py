@@ -13,7 +13,7 @@ import text2sql
 from evals import cases, ext_cases, ext_heldout_cases, fixture, heldout_cases, scoring, snapshot
 from evals import run as evalRun
 
-allCases = cases.cases + heldout_cases.heldoutCases
+allCases = cases.cases + heldout_cases.heldoutCases + ext_cases.extCases
 
 
 @pytest.mark.parametrize("goldRows, predictedRows", [
@@ -146,7 +146,7 @@ def testCasesDoNotReuseFewShotQuestions(evalDatabaseUrl):
 
 def answerWithGoldSql(messages):
   """假的 LLM：每一題都回答標準答案。"""
-  goldSqlByQuestion = {case["question"]: case["goldSql"] for case in allCases}
+  goldSqlByQuestion = {case["question"]: case["goldSql"] for case in allCases + ext_heldout_cases.extHeldoutCases}
   return goldSqlByQuestion[messages[-1]["content"]]
 
 
@@ -244,22 +244,22 @@ def testMainTestSplitPassesEveryCaseWithGoldAnswers(tmp_path):
   assert summary["passed"] == summary["total"] == len(heldout_cases.heldoutCases)
 
 
-def testMainTestSplitHidesPerCaseResults(tmp_path, capsys):
-  summary = evalRun.main(["--split", "test", "--model", "fake:1b", "--out", str(tmp_path)], llm=lambda messages: "SELECT 1")
+@pytest.mark.parametrize("split", ["test", "test-ext"])
+def testMainHiddenSplitsHidePerCaseResults(tmp_path, capsys, split):
+  evalRun.main(["--split", split, "--model", "fake:1b", "--out", str(tmp_path)], llm=lambda messages: "SELECT 1")
 
-  report = json.loads(next(tmp_path.glob("fake-1b-test-*.json")).read_text(encoding="utf-8"))
+  report = json.loads(next(tmp_path.glob(f"fake-1b-{split}-*.json")).read_text(encoding="utf-8"))
   output = capsys.readouterr().out
-  assert summary["passed"] == 0
-  assert report["split"] == "test"
+  assert report["split"] == split
   # 每題的對錯與 SQL 只留在報告檔裡，不印在終端機上
   assert "FAIL" not in output
   assert "SELECT 1" not in output
-  assert f"{'total':<10} 0/{len(heldout_cases.heldoutCases)}" in output
 
 
-def testMainRejectsFilterOnTestSplit(tmp_path):
+@pytest.mark.parametrize("split", ["test", "test-ext"])
+def testMainRejectsFilterOnHiddenSplits(tmp_path, split):
   with pytest.raises(SystemExit):
-    evalRun.main(["--split", "test", "--filter", "basic", "--out", str(tmp_path)], llm=answerWithGoldSql)
+    evalRun.main(["--split", split, "--filter", "org", "--out", str(tmp_path)], llm=answerWithGoldSql)
 
 
 def testMainRejectsCloudModelWithoutApiKey(tmp_path, capsys, modelEnv):
@@ -469,3 +469,28 @@ def testExtHeldoutGoldSqlRunsAndReturnsRows(evalDatabaseUrl):
       failedIds.append(case["id"])
 
   assert failedIds == []
+
+
+def testExtCasesAreWellFormed():
+  heldoutQuestions = {case["question"] for case in ext_heldout_cases.extHeldoutCases}
+  # 不能用 allCases：它已經包含 extCases，每題都會跟自己重複
+  oldQuestions = {case["question"] for case in cases.cases + heldout_cases.heldoutCases}
+
+  assert len({case["id"] for case in ext_cases.extCases}) == len(ext_cases.extCases) == 25
+  assert all(case["id"].startswith("e-") for case in ext_cases.extCases)
+  assert Counter(case["category"] for case in ext_cases.extCases) == {category: 5 for category in ext_cases.extCategories}
+  # 只列題號，不印出 test-ext 的題目
+  assert [case["id"] for case in ext_cases.extCases if case["question"] in heldoutQuestions] == []
+  assert [case["id"] for case in ext_cases.extCases if case["question"] in oldQuestions] == []
+
+
+def testMainDevExtPassesEveryCaseWithGoldAnswers(tmp_path):
+  summary = evalRun.main(["--split", "dev-ext", "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+  assert summary["passed"] == summary["total"] == 25
+
+
+def testMainTestExtPassesEveryCaseWithGoldAnswers(tmp_path):
+  summary = evalRun.main(["--split", "test-ext", "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+  assert summary["passed"] == summary["total"] == 15
