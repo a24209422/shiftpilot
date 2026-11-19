@@ -9,7 +9,6 @@ import re
 import sys
 import time
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -103,11 +102,18 @@ def main(argv=None, llm=None):
   load_dotenv()
   parser = argparse.ArgumentParser(description="text2sql 評測")
   parser.add_argument("--split", choices=list(casesBySplit), default="dev", help="dev：調 prompt 用；test：只看分數")
-  parser.add_argument("--model", default=text2sql.getOllamaConfig()["model"], help="Ollama 模型名稱")
+  parser.add_argument(
+    "--model", default=text2sql.getOllamaConfig()["model"],
+    help="模型名稱：本機 Ollama 模型，或 OPENROUTER_MODELS 裡的雲端模型",
+  )
   parser.add_argument("--filter", default="", help="只跑某個類別或某一題，例如 date 或 d05（只限 dev）")
   parser.add_argument("--out", type=Path, default=defaultOutDir, help="報告輸出資料夾")
   args = parser.parse_args(argv)
 
+  needsApiKey = llm is None and text2sql.getProvider(args.model) == "openrouter"
+  if needsApiKey and not text2sql.getOpenRouterConfig()["apiKey"]:
+    # 沒有 key 就直接停下來：每題都打出 401，跑完只會得到一份全錯的報告
+    parser.error("請在 .env 設定 OPENROUTER_API_KEY 才能評測雲端模型")
   if args.split == "test" and args.filter:
     # 篩出單一題就看得到那題的對錯，等於拿 test 題來調 prompt
     parser.error("test 集不能搭配 --filter")
@@ -117,7 +123,7 @@ def main(argv=None, llm=None):
   testDatabaseUrl = os.getenv("TEST_DATABASE_URL")
   if not testDatabaseUrl:
     parser.error("請在 .env 設定 TEST_DATABASE_URL（參考 .env.example）")
-  llm = llm or partial(text2sql.callOllama, model=args.model)
+  llm = llm or text2sql.getLlm(args.model)
   # 模型寫的 SQL 可能含有終端機編碼印不出來的字元，不能因此讓整輪評測中斷
   sys.stdout.reconfigure(errors="replace")
 

@@ -52,7 +52,7 @@ python -m evals.run               # dev：調 prompt 時用，印出每題的對
 python -m evals.run --split test  # test：確認改進有沒有效，只印分數
 ```
 
-- `--model qwen3-vl:4b-instruct`：指定模型（預設讀 `.env` 的 `OLLAMA_MODEL`）
+- `--model qwen3-vl:4b-instruct`：指定模型，可以是本機 Ollama 模型，或 `OPENROUTER_MODELS` 裡的雲端模型（需要 `OPENROUTER_API_KEY`，例如 `--model anthropic/claude-haiku-5.5`）。預設讀 `.env` 的 `OLLAMA_MODEL`
 - `--filter date` 或 `--filter d05`：只跑某個類別或某一題（只限 dev）
 - 每題的結果與模型寫的 SQL 會存到 `evals/results/`（不進 git）。test 的報告檔不要打開看每題的細節
 

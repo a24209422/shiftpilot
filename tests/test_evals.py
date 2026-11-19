@@ -254,3 +254,30 @@ def testMainTestSplitHidesPerCaseResults(tmp_path, capsys):
 def testMainRejectsFilterOnTestSplit(tmp_path):
   with pytest.raises(SystemExit):
     evalRun.main(["--split", "test", "--filter", "basic", "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+
+def testMainRejectsCloudModelWithoutApiKey(tmp_path, capsys, modelEnv):
+  modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna")
+
+  with pytest.raises(SystemExit):
+    evalRun.main(["--model", "openai/gpt-6-luna", "--filter", "b01", "--out", str(tmp_path)])
+
+  assert "OPENROUTER_API_KEY" in capsys.readouterr().err
+  assert list(tmp_path.iterdir()) == []
+
+
+def testMainUsesOpenRouterForCloudModel(tmp_path, monkeypatch, modelEnv):
+  modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna", OPENROUTER_API_KEY="test-key")
+  calledModels = []
+
+  def fakeCallOpenRouter(messages, model, apiKey=None):
+    calledModels.append(model)
+    return "SELECT 1"
+
+  monkeypatch.setattr(text2sql, "callOpenRouter", fakeCallOpenRouter)
+
+  evalRun.main(["--model", "openai/gpt-6-luna", "--filter", "b01", "--out", str(tmp_path)])
+
+  assert calledModels == ["openai/gpt-6-luna"]
+  # 模型名稱的斜線不能變成子資料夾
+  assert len(list(tmp_path.glob("openai-gpt-6-luna-dev-*.json"))) == 1
