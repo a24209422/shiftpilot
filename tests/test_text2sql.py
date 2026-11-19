@@ -465,3 +465,16 @@ def testCallCloudModelTreatsBlockedAnswerAsEmpty(monkeypatch, modelEnv, choice):
   reply = text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="google", model="gemini-3.5-flash-lite")
 
   assert reply == ""
+
+
+def testCallOllamaFixesContextLength(monkeypatch, modelEnv):
+  sent = {}
+
+  def fakePost(url, json, timeout):
+    sent.update(json)
+    return makeOpenRouterResponse(200, {"message": {"role": "assistant", "content": "SELECT 1"}})
+
+  monkeypatch.setattr(text2sql.requests, "post", fakePost)
+
+  assert text2sql.callOllama([{"role": "user", "content": "問題"}]) == "SELECT 1"
+  assert sent["options"] == {"temperature": 0, "num_ctx": 8192}

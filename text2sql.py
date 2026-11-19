@@ -29,6 +29,11 @@ def getOllamaConfig():
   }
 
 
+# 沒設 num_ctx 時，預設值依 Ollama 版本而定，prompt 超過上限會被默默截掉、不報錯。
+# 這個值會影響分數，所以寫死在程式裡而不是放 .env，才不會因為環境不同讓分數無法比較
+ollamaNumCtx = 8192
+
+
 def callOllama(messages, model=None, url=None):
   config = getOllamaConfig()
   response = requests.post(
@@ -38,7 +43,7 @@ def callOllama(messages, model=None, url=None):
       "messages": messages,
       "stream": False,
       # 溫度設 0：同一個問題盡量產生同一句 SQL，結果比較穩定也比較好除錯
-      "options": {"temperature": 0},
+      "options": {"temperature": 0, "num_ctx": ollamaNumCtx},
     },
     timeout=180,
   )
