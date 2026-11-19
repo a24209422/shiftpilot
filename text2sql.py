@@ -1,6 +1,7 @@
 """自然語言 → PostgreSQL 查詢。只產生並執行唯讀的 SELECT。"""
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from functools import partial
 
@@ -81,16 +82,33 @@ def getLlm(model):
   return partial(callOllama, model=model)
 
 
+openRouterRetryStatuses = {429, 500, 502, 503, 504}
+openRouterRetryWaits = [2, 4]
+
+
+class OpenRouterResponseError(requests.RequestException):
+  pass
+
+
 def callOpenRouter(messages, model, apiKey=None):
-  response = requests.post(
-    openRouterUrl,
-    headers={"Authorization": f"Bearer {apiKey or getOpenRouterConfig()['apiKey']}"},
-    json={"model": model, "messages": messages, "temperature": 0},
-    timeout=60,
-  )
+  # 429 和 5xx 多半是暫時的，等一下再試；401、402 這類重試也沒用，直接往下報錯。最後一次失敗後不再等
+  for waitSeconds in [*openRouterRetryWaits, None]:
+    response = requests.post(
+      openRouterUrl,
+      headers={"Authorization": f"Bearer {apiKey or getOpenRouterConfig()['apiKey']}"},
+      json={"model": model, "messages": messages, "temperature": 0},
+      timeout=60,
+    )
+    if response.status_code not in openRouterRetryStatuses or waitSeconds is None:
+      break
+    time.sleep(waitSeconds)
   response.raise_for_status()
+  payload = response.json()
+  if "choices" not in payload:
+    # 沒有 choices 的回應（例如只有 error 物件）改成 RequestException，app 和評測才會當成連線錯誤，而不是整個當掉
+    raise OpenRouterResponseError("OpenRouter 的回應沒有 choices", response=response)
   # 推理模型有時只回傳思考內容、content 是 null，當成沒產生 SQL 交給後面處理
-  return response.json()["choices"][0]["message"]["content"] or ""
+  return payload["choices"][0]["message"]["content"] or ""
 
 
 def describeModel(model):

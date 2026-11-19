@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+import requests
 from dotenv import load_dotenv
 
 import db
@@ -289,3 +290,24 @@ def testModelEnvStopsDotenvFromRestoringApiKey(modelEnv):
   # evalRun.main 一開始會執行 load_dotenv()；使用者的 .env 填了 key 之後，測試不能因此拿到真的 key
   load_dotenv(stream=io.StringIO("OPENROUTER_API_KEY=real-key"))
   assert text2sql.getOpenRouterConfig()["apiKey"] == ""
+
+
+def testMainMarksConnectionErrorsWithoutCountingThemWrong(tmp_path, capsys):
+  b01Question = next(case["question"] for case in cases.cases if case["id"] == "b01")
+
+  def flakyLlm(messages):
+    if messages[-1]["content"] == b01Question:
+      raise requests.ConnectionError("連不上")
+    return answerWithGoldSql(messages)
+
+  summary = evalRun.main(["--filter", "basic", "--model", "fake:1b", "--out", str(tmp_path)], llm=flakyLlm)
+
+  report = json.loads(next(tmp_path.glob("fake-1b-*.json")).read_text(encoding="utf-8"))
+  output = capsys.readouterr().out
+  # 沒被模型回答的題目不算答錯，也不算進題數，報告照樣寫出來
+  assert summary["passed"] == summary["total"] == 5
+  assert summary["infraErrors"] == 1
+  assert summary["byCategory"]["basic"] == {"passed": 5, "total": 5}
+  assert [result["id"] for result in report["results"] if result["infraError"]] == ["b01"]
+  assert "ERROR b01" in output
+  assert "另有 1 題連線錯誤沒有計分" in output

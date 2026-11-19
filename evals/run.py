@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 
 import db
@@ -28,10 +29,16 @@ def evaluateCase(case, databaseUrl, llm):
   acceptedSqls = [case["goldSql"], *case.get("alsoAccept", [])]
   acceptedResults = [db.runReadOnlyQuery(databaseUrl, sql)[1] for sql in acceptedSqls]
   startedAt = time.perf_counter()
-  # 走跟 app 完全相同的 answerQuestion（含失敗重試），量到的才是使用者實際會遇到的準確率
-  answer = text2sql.answerQuestion(case["question"], databaseUrl, now=fixture.fixedNow, llm=llm)
+  infraError = False
+  try:
+    # 走跟 app 完全相同的 answerQuestion（含失敗重試），量到的才是使用者實際會遇到的準確率
+    answer = text2sql.answerQuestion(case["question"], databaseUrl, now=fixture.fixedNow, llm=llm)
+  except requests.RequestException as error:
+    # 重試後還是叫不到模型：模型根本沒回答這題，不能算答錯，也不能讓整輪白跑
+    infraError = True
+    answer = {"sql": "", "rows": [], "error": f"連線錯誤：{error}", "attempts": 0}
   seconds = time.perf_counter() - startedAt
-  passed = answer["error"] is None and any(
+  passed = not infraError and answer["error"] is None and any(
     scoring.resultsMatch(goldRows, answer["rows"], case.get("compareAsSet", False))
     for goldRows in acceptedResults
   )
@@ -45,21 +52,24 @@ def evaluateCase(case, databaseUrl, llm):
     "goldSql": case["goldSql"],
     "predictedSql": answer["sql"],
     "error": answer["error"],
+    "infraError": infraError,
   }
 
 
 def summarize(results):
+  scoredResults = [result for result in results if not result.get("infraError", False)]
   byCategory = {}
-  for result in results:
+  for result in scoredResults:
     stats = byCategory.setdefault(result["category"], {"passed": 0, "total": 0})
     stats["total"] += 1
     stats["passed"] += int(result["passed"])
   passed = sum(stats["passed"] for stats in byCategory.values())
   return {
     "passed": passed,
-    "total": len(results),
-    "accuracy": round(passed / len(results), 3) if results else 0.0,
+    "total": len(scoredResults),
+    "accuracy": round(passed / len(scoredResults), 3) if scoredResults else 0.0,
     "byCategory": byCategory,
+    "infraErrors": len(results) - len(scoredResults),
   }
 
 
@@ -71,7 +81,9 @@ def selectCases(keyword, split="dev"):
 
 
 def formatCaseLine(result):
-  line = f"{'PASS' if result['passed'] else 'FAIL'} {result['id']} {result['question']} ({result['seconds']}s)"
+  if result.get("infraError"):
+    return f"ERROR {result['id']} {result['question']} ({result['seconds']}s)\n     -> {result['error']}"
+  line =f"{'PASS' if result['passed'] else 'FAIL'} {result['id']} {result['question']} ({result['seconds']}s)"
   if not result["passed"]:
     # 答錯時直接印出模型寫的 SQL，調 prompt 時不用每次都去翻 JSON 報告
     detail = result["error"] or " ".join(result["predictedSql"].split())
@@ -82,6 +94,8 @@ def formatCaseLine(result):
 def formatSummary(summary):
   lines = [f"{category:<10} {stats['passed']}/{stats['total']}" for category, stats in summary["byCategory"].items()]
   lines.append(f"{'total':<10} {summary['passed']}/{summary['total']} ({summary['accuracy']:.1%})")
+  if summary.get("infraErrors"):
+    lines.append(f"另有 {summary['infraErrors']} 題連線錯誤沒有計分，這輪分數不能跟其他輪比較，請重跑")
   return "\n".join(lines)
 
 

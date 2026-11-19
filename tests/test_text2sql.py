@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 
 import psycopg
@@ -143,24 +144,13 @@ def testAnswerQuestionGivesUpAfterMaxRetries(demoDatabaseUrl):
 cloudModels = "anthropic/claude-haiku-5.5,openai/gpt-6-luna"
 
 
-class FakeResponse:
-  def __init__(self, payload):
-    self.payload = payload
-
-  def raise_for_status(self):
-    pass
-
-  def json(self):
-    return self.payload
-
-
 def makeFakePost(content):
   calls = []
 
   def fakePost(url, **kwargs):
     calls.append({"url": url, **kwargs})
     # 照 OpenRouter 實際回傳的結構，不只放程式會讀的欄位
-    return FakeResponse({
+    return makeOpenRouterResponse(200, {
       "id": "gen-1",
       "model": kwargs["json"]["model"],
       "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
@@ -290,3 +280,89 @@ def testDescribeLlmErrorKeepsOllamaHint(modelEnv):
   assert text2sql.describeLlmError(error, "qwen2.5:3b") == (
     "無法呼叫 Ollama：refused\n\n請確認 Ollama 已啟動，且已下載 qwen2.5:3b。"
   )
+
+
+def makeOpenRouterResponse(statusCode, payload):
+  response = requests.Response()
+  response.status_code = statusCode
+  response.encoding = "utf-8"
+  response._content = json.dumps(payload).encode("utf-8")
+  return response
+
+
+def makeSequencePost(responses):
+  calls = []
+
+  def fakePost(url, **kwargs):
+    calls.append(kwargs)
+    return responses[len(calls) - 1]
+
+  fakePost.calls = calls
+  return fakePost
+
+
+def makeSuccessPayload(content):
+  return {
+    "id": "gen-1", "model": "openai/gpt-6-luna",
+    "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
+    "usage": {"prompt_tokens": 2000, "completion_tokens": 20, "total_tokens": 2020},
+  }
+
+
+@pytest.fixture
+def recordedSleeps(monkeypatch):
+  sleeps = []
+  monkeypatch.setattr(text2sql.time, "sleep", sleeps.append)
+  return sleeps
+
+
+def testCallOpenRouterRetriesRateLimitThenSucceeds(monkeypatch, modelEnv, recordedSleeps):
+  modelEnv(OPENROUTER_API_KEY="test-key")
+  fakePost = makeSequencePost([
+    makeOpenRouterResponse(429, {"error": {"code": 429, "message": "Rate limit exceeded"}}),
+    makeOpenRouterResponse(200, makeSuccessPayload("SELECT 1")),
+  ])
+  monkeypatch.setattr(text2sql.requests, "post", fakePost)
+
+  reply = text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+
+  assert reply == "SELECT 1"
+  assert len(fakePost.calls) == 2
+  assert recordedSleeps == [2]
+
+
+def testCallOpenRouterGivesUpAfterThreeAttempts(monkeypatch, modelEnv, recordedSleeps):
+  modelEnv(OPENROUTER_API_KEY="test-key")
+  unavailable = {"error": {"code": 503, "message": "Service unavailable"}}
+  fakePost = makeSequencePost([makeOpenRouterResponse(503, unavailable) for _ in range(3)])
+  monkeypatch.setattr(text2sql.requests, "post", fakePost)
+
+  with pytest.raises(requests.HTTPError):
+    text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+
+  assert len(fakePost.calls) == 3
+  assert recordedSleeps == [2, 4]
+
+
+def testCallOpenRouterDoesNotRetryAuthError(monkeypatch, modelEnv, recordedSleeps):
+  modelEnv(OPENROUTER_API_KEY="wrong-key")
+  fakePost = makeSequencePost([makeOpenRouterResponse(401, {"error": {"code": 401, "message": "No auth credentials found"}})])
+  monkeypatch.setattr(text2sql.requests, "post", fakePost)
+
+  with pytest.raises(requests.HTTPError):
+    text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+
+  assert len(fakePost.calls) == 1
+  assert recordedSleeps == []
+
+
+def testCallOpenRouterRaisesRequestErrorWhenChoicesMissing(monkeypatch, modelEnv, recordedSleeps):
+  modelEnv(OPENROUTER_API_KEY="test-key", OPENROUTER_MODELS="openai/gpt-6-luna")
+  upstreamError = {"error": {"code": 502, "message": "Upstream provider error"}}
+  monkeypatch.setattr(text2sql.requests, "post", makeSequencePost([makeOpenRouterResponse(200, upstreamError)]))
+
+  with pytest.raises(requests.RequestException) as raised:
+    text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+
+  # app 只接 RequestException，訊息要看得出是上游出錯
+  assert "Upstream provider error" in text2sql.describeLlmError(raised.value, "openai/gpt-6-luna")
