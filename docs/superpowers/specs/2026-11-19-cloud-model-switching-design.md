@@ -48,7 +48,7 @@ text2sql 現在只能用本機 Ollama 的小模型（qwen2.5:3b、qwen3-vl:4b-in
 ## Claude 決定的細節
 
 - 模型名稱在 `OPENROUTER_MODELS` 清單裡就走雲端，其他走本機（Ollama 的模型名稱也可能含 `/`，不能用 `/` 判斷）
-- `OLLAMA_MODEL` 不在 `OLLAMA_MODELS` 裡時，放在選單最前面
+- `OLLAMA_MODEL` 不在 `LOCAL_MODELS` 裡時，放在選單最前面
 - 評測指定雲端模型但沒有 key 時直接報錯，不會改用本機模型
 - 選單的選擇只記在這次瀏覽，重新整理回到預設
 - 頁面頂端說明列拿掉「text2sql 模型：…（Ollama）」，改由下拉選單顯示目前的模型
