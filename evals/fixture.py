@@ -92,4 +92,8 @@ def buildDb(databaseUrl):
     # 走 addEvent 而不是直接 INSERT：資料如果不小心排到衝突的時段，建庫時就會報錯
     eventResourceIds = [resourceIds[name] for name in resourceNames]
     db.addEvent(databaseUrl, title, category, eventResourceIds, f"{day} {startTime}", f"{day} {endTime}")
+  with db.openDb(databaseUrl) as conn:
+    # employees.id 從 101 起，跟 resources.id（1–8）錯開：兩邊 id 剛好相同的人，
+    # 把 employee_id 當成 resources.id 去 JOIN 的錯誤寫法也會碰巧答對
+    conn.execute("ALTER TABLE employees ALTER COLUMN id RESTART WITH 101")
   db.addOrganizationData(databaseUrl, organization)

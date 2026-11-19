@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import db
 from evals import ext_heldout_cases, fixture, heldout_cases, scoring
 from evals.cases import cases
+from evals.gold import GoldSqlError, runGoldSql
 
 snapshotPath = Path(__file__).parent / "gold_snapshot.json"
 
@@ -36,10 +37,16 @@ def hashRows(rows):
 
 
 def computeGoldHashes(databaseUrl, caseList):
-  hashes = {}
+  hashes, failedIds = {}, []
   for case in caseList:
     sqls = [case["goldSql"], *case.get("alsoAccept", [])]
-    hashes[case["id"]] = [hashRows(db.runReadOnlyQuery(databaseUrl, sql)[1]) for sql in sqls]
+    try:
+      hashes[case["id"]] = [hashRows(runGoldSql(databaseUrl, case["id"], sql)) for sql in sqls]
+    except GoldSqlError as error:
+      failedIds.extend(error.caseIds)
+  if failedIds:
+    # 一次列出所有出錯的題號，而且只放題號：錯誤訊息帶出 SQL 的話，test 題的內容就洩漏了
+    raise GoldSqlError(failedIds)
   return hashes
 
 
@@ -60,7 +67,11 @@ def main():
     return 1
   with db.temporarySchema(testDatabaseUrl, "snapshot") as databaseUrl:
     fixture.buildDb(databaseUrl)
-    current = computeGoldHashes(databaseUrl, protectedCases())
+    try:
+      current = computeGoldHashes(databaseUrl, protectedCases())
+    except GoldSqlError as error:
+      print(error)
+      return 1
   existing = json.loads(snapshotPath.read_text(encoding="utf-8")) if snapshotPath.exists() else {}
   try:
     merged = mergeSnapshot(existing, current)

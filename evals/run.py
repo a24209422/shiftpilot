@@ -20,6 +20,7 @@ from evals import fixture, scoring
 from evals.cases import cases
 from evals.ext_cases import extCases
 from evals.ext_heldout_cases import extHeldoutCases
+from evals.gold import runGoldSql
 from evals.heldout_cases import heldoutCases
 
 defaultOutDir = Path(__file__).parent / "results"
@@ -31,7 +32,7 @@ hiddenSplits = {"test", "test-ext"}
 def evaluateCase(case, databaseUrl, llm):
   # 有些題目有不只一種合理的答法（見 cases.listTitles），符合其中一種就算對
   acceptedSqls = [case["goldSql"], *case.get("alsoAccept", [])]
-  acceptedResults = [db.runReadOnlyQuery(databaseUrl, sql)[1] for sql in acceptedSqls]
+  acceptedResults = [runGoldSql(databaseUrl, case["id"], sql) for sql in acceptedSqls]
   startedAt = time.perf_counter()
   infraError = False
   try:
@@ -160,7 +161,9 @@ def main(argv=None, llm=None):
       print(line, flush=True)
 
   summary = summarize(results)
-  print(f"\n模型：{args.model}（{args.split}）\n{formatSummary(summary)}")
+  # test 類只印總分：test-ext 每類只有 3 題，類別分數幾乎等於每題的對錯
+  shownSummary = {**summary, "byCategory": {}} if args.split in hiddenSplits else summary
+  print(f"\n模型：{args.model}（{args.split}）\n{formatSummary(shownSummary)}")
   print(f"報告：{writeReport(args.out, args.model, args.split, summary, results)}")
   return summary
 

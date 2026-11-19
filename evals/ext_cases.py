@@ -79,9 +79,12 @@ extCases = [
      JOIN resources r ON r.id = em.resource_id
      WHERE r.name = '王小明' AND w.weekday = 3"""},
   {"id": "e-hours02", "category": "hours", "question": "十一月有哪些假日？",
-   "goldSql": "SELECT day, name FROM holidays WHERE day BETWEEN '2026-11-01' AND '2026-11-30'"},
+   # 「有哪些假日」只回日期或只回名稱都已經回答了問題，所以不要求兩個欄位都有
+   "goldSql": "SELECT day FROM holidays WHERE day BETWEEN '2026-11-01' AND '2026-11-30'",
+   "alsoAccept": ["SELECT name FROM holidays WHERE day BETWEEN '2026-11-01' AND '2026-11-30'"]},
   {"id": "e-hours03", "category": "hours", "question": "今年還沒到的假日有哪些？",
-   "goldSql": "SELECT day, name FROM holidays WHERE day > '2026-11-17' AND day <= '2026-12-31'"},
+   "goldSql": "SELECT day FROM holidays WHERE day > '2026-11-17' AND day <= '2026-12-31'",
+   "alsoAccept": ["SELECT name FROM holidays WHERE day > '2026-11-17' AND day <= '2026-12-31'"]},
   {"id": "e-hours04", "category": "hours", "question": "王小明每週有幾天要上班？",
    "goldSql": """SELECT COUNT(*) FROM work_hours w
      JOIN employees em ON em.id = w.employee_id

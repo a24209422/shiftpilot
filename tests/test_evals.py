@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 import db
 import text2sql
-from evals import cases, ext_cases, ext_heldout_cases, fixture, heldout_cases, scoring, snapshot
+from evals import cases, ext_cases, ext_heldout_cases, fixture, gold, heldout_cases, scoring, snapshot
 from evals import run as evalRun
 
 allCases = cases.cases + heldout_cases.heldoutCases + ext_cases.extCases
@@ -256,10 +256,13 @@ def testMainHiddenSplitsHidePerCaseResults(tmp_path, capsys, split):
   assert "SELECT 1" not in output
 
 
-@pytest.mark.parametrize("split", ["test", "test-ext"])
-def testMainRejectsFilterOnHiddenSplits(tmp_path, split):
+@pytest.mark.parametrize("split, keyword", [("test", "basic"), ("test-ext", "org")])
+def testMainRejectsFilterOnHiddenSplits(tmp_path, capsys, split, keyword):
+  # 要用該 split 真的有的類別：換成不存在的類別時，「沒有符合的題目」也會結束程式，就測不到禁止 --filter 的規則
   with pytest.raises(SystemExit):
-    evalRun.main(["--split", split, "--filter", "org", "--out", str(tmp_path)], llm=answerWithGoldSql)
+    evalRun.main(["--split", split, "--filter", keyword, "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+  assert "不能搭配 --filter" in capsys.readouterr().err
 
 
 def testMainRejectsCloudModelWithoutApiKey(tmp_path, capsys, modelEnv):
@@ -494,3 +497,71 @@ def testMainTestExtPassesEveryCaseWithGoldAnswers(tmp_path):
   summary = evalRun.main(["--split", "test-ext", "--out", str(tmp_path)], llm=answerWithGoldSql)
 
   assert summary["passed"] == summary["total"] == 15
+
+
+@pytest.mark.parametrize("split", ["test", "test-ext"])
+def testMainHiddenSplitsPrintOnlyTotal(tmp_path, capsys, split):
+  summary = evalRun.main(["--split", split, "--out", str(tmp_path)], llm=answerWithGoldSql)
+
+  lines = capsys.readouterr().out.splitlines()
+  # test 集每類只有幾題，類別分數幾乎等於每題的對錯；只印總分
+  assert f"{'total':<10} {summary['passed']}/{summary['total']} (100.0%)" in lines
+  assert [line for line in lines if line.split(" ")[0] in cases.categories + ext_cases.extCategories] == []
+
+
+def testComputeGoldHashesReportsOnlyCaseIdsWhenSqlFails(evalDatabaseUrl):
+  brokenCases = [
+    {"id": "z01", "goldSql": "SELECT secretColumn FROM events"},
+    {"id": "z02", "goldSql": "SELECT 1"},
+    {"id": "z03", "goldSql": "SELECT hiddenColumn FROM events"},
+  ]
+
+  with pytest.raises(gold.GoldSqlError) as error:
+    snapshot.computeGoldHashes(evalDatabaseUrl, brokenCases)
+
+  # psycopg 的錯誤訊息會帶出 SQL 原文，test 題的 SQL 不能因此被印出來
+  assert error.value.caseIds == ["z01", "z03"]
+  assert "secretColumn" not in str(error.value) and "hiddenColumn" not in str(error.value)
+  # 原本的例外不能連鎖在後面，否則 traceback 照樣會印出 SQL
+  assert error.value.__cause__ is None and error.value.__context__ is None
+
+
+def testEvaluateCaseReportsOnlyCaseIdWhenGoldSqlFails(evalDatabaseUrl):
+  brokenCase = {"id": "z01", "category": "basic", "question": "問題", "goldSql": "SELECT secretColumn FROM events"}
+
+  with pytest.raises(gold.GoldSqlError) as error:
+    evalRun.evaluateCase(brokenCase, evalDatabaseUrl, lambda messages: "SELECT 1")
+
+  assert error.value.caseIds == ["z01"]
+  assert "secretColumn" not in str(error.value)
+  assert error.value.__cause__ is None and error.value.__suppress_context__
+
+
+def testSnapshotMainPrintsOnlyCaseIdsWhenGoldSqlFails(tmp_path, monkeypatch, capsys):
+  monkeypatch.setattr(snapshot, "snapshotPath", tmp_path / "gold_snapshot.json")
+  monkeypatch.setattr(snapshot, "protectedCases", lambda: [{"id": "z01", "goldSql": "SELECT secretColumn FROM events"}])
+
+  exitCode = snapshot.main()
+
+  output = capsys.readouterr().out
+  assert exitCode == 1
+  assert "z01" in output and "secretColumn" not in output
+  assert not (tmp_path / "gold_snapshot.json").exists()
+
+
+def testFixtureEmployeeIdsDifferFromResourceIds(evalDatabaseUrl):
+  # 兩邊 id 剛好相同的人，把 employee_id 當成 resources.id 去 JOIN 的錯誤寫法也會碰巧答對
+  assert queryScalar(evalDatabaseUrl, "SELECT COUNT(*) FROM employees WHERE id IN (SELECT id FROM resources)") == 0
+
+
+@pytest.mark.parametrize("caseId, sql", [
+  ("e-hours02", "SELECT day FROM holidays WHERE day BETWEEN '2026-11-01' AND '2026-11-30'"),
+  ("e-hours02", "SELECT name FROM holidays WHERE day BETWEEN '2026-11-01' AND '2026-11-30'"),
+  ("e-hours03", "SELECT day FROM holidays WHERE day > '2026-11-17' AND day <= '2026-12-31'"),
+  ("e-hours03", "SELECT name FROM holidays WHERE day > '2026-11-17' AND day <= '2026-12-31'"),
+])
+def testHolidayListQuestionsAcceptDateOrNameAlone(evalDatabaseUrl, caseId, sql):
+  # 「有哪些假日」只回日期或只回名稱都已經回答了問題，標準答案不能要求兩個欄位都有
+  case = next(case for case in ext_cases.extCases if case["id"] == caseId)
+
+  assert evalRun.evaluateCase(case, evalDatabaseUrl, lambda messages: sql)["passed"]
