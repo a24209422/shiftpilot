@@ -124,10 +124,10 @@ def main(argv=None, llm=None):
   parser.add_argument("--out", type=Path, default=defaultOutDir, help="報告輸出資料夾")
   args = parser.parse_args(argv)
 
-  needsApiKey = llm is None and text2sql.getProvider(args.model) == "openrouter"
-  if needsApiKey and not text2sql.getOpenRouterConfig()["apiKey"]:
+  provider = text2sql.getProvider(args.model)
+  if llm is None and provider != "ollama" and not text2sql.getCloudConfig(provider)["apiKey"]:
     # 沒有 key 就直接停下來：每題都打出 401，跑完只會得到一份全錯的報告
-    parser.error("請在 .env 設定 OPENROUTER_API_KEY 才能評測雲端模型")
+    parser.error(f"請在 .env 設定 {text2sql.cloudProviders[provider]['apiKeyEnv']} 才能評測雲端模型")
   if args.split == "test" and args.filter:
     # 篩出單一題就看得到那題的對錯，等於拿 test 題來調 prompt
     parser.error("test 集不能搭配 --filter")

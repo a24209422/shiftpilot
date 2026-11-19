@@ -46,17 +46,29 @@ def callOllama(messages, model=None, url=None):
   return response.json()["message"]["content"]
 
 
-openRouterUrl = "https://openrouter.ai/api/v1/chat/completions"
+# 每一家雲端供應商的設定都在這張表；新增供應商只要加一筆，呼叫、重試和錯誤處理共用同一份
+cloudProviders = {
+  "openrouter": {
+    "label": "OpenRouter",
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "modelsEnv": "OPENROUTER_MODELS",
+    "errorHints": {401: "API key 錯誤，請確認 .env 的 OPENROUTER_API_KEY", 402: "OpenRouter 餘額不足"},
+  },
+}
+cloudRetryStatuses = {429, 500, 502, 503, 504}
+cloudRetryWaits = [2, 4]
 
 
 def parseModelList(text):
   return [name.strip() for name in (text or "").split(",") if name.strip()]
 
 
-def getOpenRouterConfig():
+def getCloudConfig(provider):
+  config = cloudProviders[provider]
   return {
-    "apiKey": os.getenv("OPENROUTER_API_KEY", "").strip(),
-    "models": parseModelList(os.getenv("OPENROUTER_MODELS")),
+    "apiKey": os.getenv(config["apiKeyEnv"], "").strip(),
+    "models": parseModelList(os.getenv(config["modelsEnv"])),
   }
 
 
@@ -65,66 +77,71 @@ def listModels():
   localModels = parseModelList(os.getenv("LOCAL_MODELS"))
   if defaultModel not in localModels:
     localModels.insert(0, defaultModel)
-  openRouter = getOpenRouterConfig()
-  # 沒有 key 就選不到雲端模型，免得使用者選了之後才看到 401
-  cloudModels = openRouter["models"] if openRouter["apiKey"] else []
+  cloudModels = []
+  for provider in cloudProviders:
+    config = getCloudConfig(provider)
+    # 沒有 key 就選不到這一家的模型，免得使用者選了之後才看到 401
+    if config["apiKey"]:
+      cloudModels += config["models"]
   return list(dict.fromkeys(localModels + cloudModels))
 
 
 def getProvider(model):
   # 只看清單、不看名稱有沒有斜線：Ollama 的模型名稱也可能是 hf.co/... 這種格式
-  return "openrouter" if model in getOpenRouterConfig()["models"] else "ollama"
+  for provider in cloudProviders:
+    if model in getCloudConfig(provider)["models"]:
+      return provider
+  return "ollama"
 
 
 def getLlm(model):
-  if getProvider(model) == "openrouter":
-    return partial(callOpenRouter, model=model)
-  return partial(callOllama, model=model)
+  provider = getProvider(model)
+  if provider == "ollama":
+    return partial(callOllama, model=model)
+  return partial(callCloudModel, provider=provider, model=model)
 
 
-openRouterRetryStatuses = {429, 500, 502, 503, 504}
-openRouterRetryWaits = [2, 4]
-
-
-class OpenRouterResponseError(requests.RequestException):
+class CloudResponseError(requests.RequestException):
   pass
 
 
-def callOpenRouter(messages, model, apiKey=None):
+def callCloudModel(messages, provider, model, apiKey=None):
+  config = cloudProviders[provider]
   # 429 和 5xx 多半是暫時的，等一下再試；401、402 這類重試也沒用，直接往下報錯。最後一次失敗後不再等
-  for waitSeconds in [*openRouterRetryWaits, None]:
+  for waitSeconds in [*cloudRetryWaits, None]:
     response = requests.post(
-      openRouterUrl,
-      headers={"Authorization": f"Bearer {apiKey or getOpenRouterConfig()['apiKey']}"},
+      config["url"],
+      headers={"Authorization": f"Bearer {apiKey or getCloudConfig(provider)['apiKey']}"},
       json={"model": model, "messages": messages, "temperature": 0},
       timeout=60,
     )
-    if response.status_code not in openRouterRetryStatuses or waitSeconds is None:
+    if response.status_code not in cloudRetryStatuses or waitSeconds is None:
       break
     time.sleep(waitSeconds)
   response.raise_for_status()
   payload = response.json()
   if "choices" not in payload:
     # 沒有 choices 的回應（例如只有 error 物件）改成 RequestException，app 和評測才會當成連線錯誤，而不是整個當掉
-    raise OpenRouterResponseError("OpenRouter 的回應沒有 choices", response=response)
+    raise CloudResponseError(f"{config['label']} 的回應沒有 choices", response=response)
   # 推理模型有時只回傳思考內容、content 是 null，當成沒產生 SQL 交給後面處理
   return payload["choices"][0]["message"]["content"] or ""
 
 
 def describeModel(model):
-  return f"{model}（{'雲端' if getProvider(model) == 'openrouter' else '本機'}）"
+  return f"{model}（{'本機' if getProvider(model) == 'ollama' else '雲端'}）"
 
 
 def describeLlmError(error, model):
-  if getProvider(model) == "ollama":
+  provider = getProvider(model)
+  if provider == "ollama":
     return f"無法呼叫 Ollama：{error}\n\n請確認 Ollama 已啟動，且已下載 {model}。"
+  config = cloudProviders[provider]
   response = getattr(error, "response", None)
   if response is None:
-    return f"無法呼叫 OpenRouter：{error}"
-  hints = {401: "API key 錯誤，請確認 .env 的 OPENROUTER_API_KEY", 402: "OpenRouter 餘額不足"}
+    return f"無法呼叫 {config['label']}：{error}"
   # 閘道錯誤常回整頁 HTML，只留開頭，畫面才不會被塞滿
-  detail = hints.get(response.status_code, response.text[:300])
-  return f"無法呼叫 OpenRouter（HTTP {response.status_code}）：{detail}"
+  detail = config["errorHints"].get(response.status_code, response.text[:300])
+  return f"無法呼叫 {config['label']}（HTTP {response.status_code}）：{detail}"
 
 
 def extractSql(text):

@@ -273,15 +273,15 @@ def testMainUsesOpenRouterForCloudModel(tmp_path, monkeypatch, modelEnv):
   modelEnv(OPENROUTER_MODELS="openai/gpt-6-luna", OPENROUTER_API_KEY="test-key")
   calledModels = []
 
-  def fakeCallOpenRouter(messages, model, apiKey=None):
-    calledModels.append(model)
+  def fakeCallCloudModel(messages, provider, model, apiKey=None):
+    calledModels.append((provider, model))
     return "SELECT 1"
 
-  monkeypatch.setattr(text2sql, "callOpenRouter", fakeCallOpenRouter)
+  monkeypatch.setattr(text2sql, "callCloudModel", fakeCallCloudModel)
 
   evalRun.main(["--model", "openai/gpt-6-luna", "--filter", "b01", "--out", str(tmp_path)])
 
-  assert calledModels == ["openai/gpt-6-luna"]
+  assert calledModels == [("openrouter", "openai/gpt-6-luna")]
   # 模型名稱的斜線不能變成子資料夾
   assert len(list(tmp_path.glob("openai-gpt-6-luna-dev-*.json"))) == 1
 
@@ -289,7 +289,7 @@ def testMainUsesOpenRouterForCloudModel(tmp_path, monkeypatch, modelEnv):
 def testModelEnvStopsDotenvFromRestoringApiKey(modelEnv):
   # evalRun.main 一開始會執行 load_dotenv()；使用者的 .env 填了 key 之後，測試不能因此拿到真的 key
   load_dotenv(stream=io.StringIO("OPENROUTER_API_KEY=real-key"))
-  assert text2sql.getOpenRouterConfig()["apiKey"] == ""
+  assert text2sql.getCloudConfig("openrouter")["apiKey"] == ""
 
 
 def testMainMarksConnectionErrorsWithoutCountingThemWrong(tmp_path, capsys):

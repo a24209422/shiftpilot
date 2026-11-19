@@ -208,8 +208,8 @@ def testGetLlmRoutesByProvider(modelEnv):
   modelEnv(OPENROUTER_MODELS=cloudModels)
   cloudLlm = text2sql.getLlm("openai/gpt-6-luna")
   localLlm = text2sql.getLlm("qwen2.5:3b")
-  assert cloudLlm.func is text2sql.callOpenRouter
-  assert cloudLlm.keywords == {"model": "openai/gpt-6-luna"}
+  assert cloudLlm.func is text2sql.callCloudModel
+  assert cloudLlm.keywords == {"provider": "openrouter", "model": "openai/gpt-6-luna"}
   assert localLlm.func is text2sql.callOllama
   assert localLlm.keywords == {"model": "qwen2.5:3b"}
 
@@ -220,7 +220,7 @@ def testCallOpenRouterSendsChatRequest(monkeypatch, modelEnv):
   monkeypatch.setattr(text2sql.requests, "post", fakePost)
   messages = [{"role": "user", "content": "問題"}]
 
-  reply = text2sql.callOpenRouter(messages, model="openai/gpt-6-luna")
+  reply = text2sql.callCloudModel(messages, provider="openrouter", model="openai/gpt-6-luna")
 
   call = fakePost.calls[0]
   assert reply == "```sql\nSELECT 1\n```"
@@ -233,7 +233,7 @@ def testCallOpenRouterSendsChatRequest(monkeypatch, modelEnv):
 def testCallOpenRouterTreatsNullContentAsEmpty(monkeypatch, modelEnv):
   modelEnv(OPENROUTER_API_KEY="test-key")
   monkeypatch.setattr(text2sql.requests, "post", makeFakePost(None))
-  assert text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna") == ""
+  assert text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="openrouter", model="openai/gpt-6-luna") == ""
 
 
 def makeHttpError(statusCode, body):
@@ -324,7 +324,7 @@ def testCallOpenRouterRetriesRateLimitThenSucceeds(monkeypatch, modelEnv, record
   ])
   monkeypatch.setattr(text2sql.requests, "post", fakePost)
 
-  reply = text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+  reply = text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="openrouter", model="openai/gpt-6-luna")
 
   assert reply == "SELECT 1"
   assert len(fakePost.calls) == 2
@@ -338,7 +338,7 @@ def testCallOpenRouterGivesUpAfterThreeAttempts(monkeypatch, modelEnv, recordedS
   monkeypatch.setattr(text2sql.requests, "post", fakePost)
 
   with pytest.raises(requests.HTTPError):
-    text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+    text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="openrouter", model="openai/gpt-6-luna")
 
   assert len(fakePost.calls) == 3
   assert recordedSleeps == [2, 4]
@@ -350,7 +350,7 @@ def testCallOpenRouterDoesNotRetryAuthError(monkeypatch, modelEnv, recordedSleep
   monkeypatch.setattr(text2sql.requests, "post", fakePost)
 
   with pytest.raises(requests.HTTPError):
-    text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+    text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="openrouter", model="openai/gpt-6-luna")
 
   assert len(fakePost.calls) == 1
   assert recordedSleeps == []
@@ -362,7 +362,7 @@ def testCallOpenRouterRaisesRequestErrorWhenChoicesMissing(monkeypatch, modelEnv
   monkeypatch.setattr(text2sql.requests, "post", makeSequencePost([makeOpenRouterResponse(200, upstreamError)]))
 
   with pytest.raises(requests.RequestException) as raised:
-    text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna")
+    text2sql.callCloudModel([{"role": "user", "content": "問題"}], provider="openrouter", model="openai/gpt-6-luna")
 
   # app 只接 RequestException，訊息要看得出是上游出錯
   assert "Upstream provider error" in text2sql.describeLlmError(raised.value, "openai/gpt-6-luna")
