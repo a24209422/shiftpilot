@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 import db
 import text2sql
-from evals import cases, fixture, heldout_cases, scoring
+from evals import cases, fixture, heldout_cases, scoring, snapshot
 from evals import run as evalRun
 
 allCases = cases.cases + heldout_cases.heldoutCases
@@ -337,3 +337,28 @@ def testEvaluateCaseKeepsResponseBodyOfConnectionError(evalDatabaseUrl):
   # HTTPError 的字串只有狀態和網址；模型 ID 打錯或 key 無效時，原因只在回應內文裡
   assert result["infraError"] is True
   assert "models/gemini-x is not found" in result["error"]
+
+
+def testHashRowsIgnoresRowOrder():
+  assert snapshot.hashRows([("早班", 1), ("晚班", 2)]) == snapshot.hashRows([("晚班", 2), ("早班", 1)])
+  assert snapshot.hashRows([("早班",)]) != snapshot.hashRows([("晚班",)])
+
+
+def testMergeSnapshotAddsNewIds():
+  merged = snapshot.mergeSnapshot({"b01": ["aa"]}, {"b01": ["aa"], "h-org01": ["bb"]})
+
+  assert merged == {"b01": ["aa"], "h-org01": ["bb"]}
+
+
+def testMergeSnapshotRefusesChangedHash():
+  with pytest.raises(snapshot.SnapshotMismatchError) as error:
+    snapshot.mergeSnapshot({"b01": ["aa"], "b02": ["cc"]}, {"b01": ["zz"], "b02": ["cc"]})
+
+  assert error.value.changedIds == ["b01"]
+
+
+def testGoldAnswersMatchSnapshot(evalDatabaseUrl):
+  # 只比 hash：失敗時只看得到題號，看不到 test 的答案內容
+  saved = json.loads(snapshot.snapshotPath.read_text(encoding="utf-8"))
+
+  assert snapshot.computeGoldHashes(evalDatabaseUrl, snapshot.protectedCases()) == saved
