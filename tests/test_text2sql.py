@@ -137,3 +137,103 @@ def testAnswerQuestionGivesUpAfterMaxRetries(demoDatabaseUrl):
   assert result["error"] is not None
   assert result["rows"] == []
   assert len(db.listEvents(demoDatabaseUrl, date(2026, 1, 1), date(2026, 12, 31))) > 0
+
+
+cloudModels = "anthropic/claude-haiku-5.5,openai/gpt-6-luna"
+
+
+class FakeResponse:
+  def __init__(self, payload):
+    self.payload = payload
+
+  def raise_for_status(self):
+    pass
+
+  def json(self):
+    return self.payload
+
+
+def makeFakePost(content):
+  calls = []
+
+  def fakePost(url, **kwargs):
+    calls.append({"url": url, **kwargs})
+    # 照 OpenRouter 實際回傳的結構，不只放程式會讀的欄位
+    return FakeResponse({
+      "id": "gen-1",
+      "model": kwargs["json"]["model"],
+      "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
+      "usage": {"prompt_tokens": 2000, "completion_tokens": 20, "total_tokens": 2020},
+    })
+
+  fakePost.calls = calls
+  return fakePost
+
+
+def testParseModelListIgnoresSpacesAndEmptyItems():
+  assert text2sql.parseModelList(" qwen2.5:3b, ,qwen3-vl:4b-instruct,") == ["qwen2.5:3b", "qwen3-vl:4b-instruct"]
+  assert text2sql.parseModelList("") == []
+  assert text2sql.parseModelList(None) == []
+
+
+def testListModelsHidesCloudModelsWithoutApiKey(modelEnv):
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", OLLAMA_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct",
+           OPENROUTER_API_KEY="   ", OPENROUTER_MODELS=cloudModels)
+  assert text2sql.listModels() == ["qwen2.5:3b", "qwen3-vl:4b-instruct"]
+
+
+def testListModelsAddsCloudModelsWhenApiKeySet(modelEnv):
+  modelEnv(OLLAMA_MODEL="qwen2.5:3b", OLLAMA_MODELS="qwen2.5:3b,qwen3-vl:4b-instruct",
+           OPENROUTER_API_KEY="test-key", OPENROUTER_MODELS=cloudModels)
+  assert text2sql.listModels() == [
+    "qwen2.5:3b", "qwen3-vl:4b-instruct", "anthropic/claude-haiku-5.5", "openai/gpt-6-luna",
+  ]
+
+
+def testListModelsPutsDefaultModelFirstWhenMissingFromList(modelEnv):
+  modelEnv(OLLAMA_MODEL="llama3:8b", OLLAMA_MODELS="qwen2.5:3b,qwen2.5:3b")
+  assert text2sql.listModels() == ["llama3:8b", "qwen2.5:3b"]
+
+
+def testListModelsFallsBackToDefaultModel(modelEnv):
+  assert text2sql.listModels() == ["qwen2.5:3b"]
+
+
+def testGetProviderUsesOpenRouterListOnly(modelEnv):
+  modelEnv(OPENROUTER_MODELS="anthropic/claude-haiku-5.5")
+  assert text2sql.getProvider("anthropic/claude-haiku-5.5") == "openrouter"
+  # Ollama 的模型名稱也可能有斜線，不在清單裡就是本機模型
+  assert text2sql.getProvider("hf.co/someone/model") == "ollama"
+  assert text2sql.getProvider("openai/gpt-6-luna") == "ollama"
+
+
+def testGetLlmRoutesByProvider(modelEnv):
+  modelEnv(OPENROUTER_MODELS=cloudModels)
+  cloudLlm = text2sql.getLlm("openai/gpt-6-luna")
+  localLlm = text2sql.getLlm("qwen2.5:3b")
+  assert cloudLlm.func is text2sql.callOpenRouter
+  assert cloudLlm.keywords == {"model": "openai/gpt-6-luna"}
+  assert localLlm.func is text2sql.callOllama
+  assert localLlm.keywords == {"model": "qwen2.5:3b"}
+
+
+def testCallOpenRouterSendsChatRequest(monkeypatch, modelEnv):
+  modelEnv(OPENROUTER_API_KEY="test-key")
+  fakePost = makeFakePost("```sql\nSELECT 1\n```")
+  monkeypatch.setattr(text2sql.requests, "post", fakePost)
+  messages = [{"role": "user", "content": "問題"}]
+
+  reply = text2sql.callOpenRouter(messages, model="openai/gpt-6-luna")
+
+  call = fakePost.calls[0]
+  assert reply == "```sql\nSELECT 1\n```"
+  assert call["url"] == "https://openrouter.ai/api/v1/chat/completions"
+  assert call["headers"] == {"Authorization": "Bearer test-key"}
+  assert call["json"] == {"model": "openai/gpt-6-luna", "messages": messages, "temperature": 0}
+  assert call["timeout"] == 60
+
+
+def testCallOpenRouterTreatsNullContentAsEmpty(monkeypatch, modelEnv):
+  modelEnv(OPENROUTER_API_KEY="test-key")
+  monkeypatch.setattr(text2sql.requests, "post", makeFakePost(None))
+  assert text2sql.callOpenRouter([{"role": "user", "content": "問題"}], model="openai/gpt-6-luna") == ""

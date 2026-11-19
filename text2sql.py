@@ -2,6 +2,7 @@
 import os
 import re
 from datetime import datetime, timedelta
+from functools import partial
 
 import psycopg
 import requests
@@ -42,6 +43,54 @@ def callOllama(messages, model=None, url=None):
   )
   response.raise_for_status()
   return response.json()["message"]["content"]
+
+
+openRouterUrl = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def parseModelList(text):
+  return [name.strip() for name in (text or "").split(",") if name.strip()]
+
+
+def getOpenRouterConfig():
+  return {
+    "apiKey": os.getenv("OPENROUTER_API_KEY", "").strip(),
+    "models": parseModelList(os.getenv("OPENROUTER_MODELS")),
+  }
+
+
+def listModels():
+  defaultModel = getOllamaConfig()["model"]
+  localModels = parseModelList(os.getenv("OLLAMA_MODELS"))
+  if defaultModel not in localModels:
+    localModels.insert(0, defaultModel)
+  openRouter = getOpenRouterConfig()
+  # 沒有 key 就選不到雲端模型，免得使用者選了之後才看到 401
+  cloudModels = openRouter["models"] if openRouter["apiKey"] else []
+  return list(dict.fromkeys(localModels + cloudModels))
+
+
+def getProvider(model):
+  # 只看清單、不看名稱有沒有斜線：Ollama 的模型名稱也可能是 hf.co/... 這種格式
+  return "openrouter" if model in getOpenRouterConfig()["models"] else "ollama"
+
+
+def getLlm(model):
+  if getProvider(model) == "openrouter":
+    return partial(callOpenRouter, model=model)
+  return partial(callOllama, model=model)
+
+
+def callOpenRouter(messages, model, apiKey=None):
+  response = requests.post(
+    openRouterUrl,
+    headers={"Authorization": f"Bearer {apiKey or getOpenRouterConfig()['apiKey']}"},
+    json={"model": model, "messages": messages, "temperature": 0},
+    timeout=60,
+  )
+  response.raise_for_status()
+  # 推理模型有時只回傳思考內容、content 是 null，當成沒產生 SQL 交給後面處理
+  return response.json()["choices"][0]["message"]["content"] or ""
 
 
 def extractSql(text):

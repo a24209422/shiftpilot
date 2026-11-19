@@ -16,6 +16,22 @@ def testDatabaseUrl():
   return url
 
 
+modelEnvNames = ["OLLAMA_MODEL", "OLLAMA_MODELS", "OPENROUTER_API_KEY", "OPENROUTER_MODELS"]
+
+
+@pytest.fixture
+def modelEnv(monkeypatch):
+  # 上面的 load_dotenv 會載入真正的 .env，使用者填了 key 之後測試結果不能跟著變
+  for name in modelEnvNames:
+    monkeypatch.delenv(name, raising=False)
+
+  def setEnv(**values):
+    for name, value in values.items():
+      monkeypatch.setenv(name, value)
+
+  return setEnv
+
+
 @pytest.fixture
 def databaseUrl(testDatabaseUrl):
   # 每個測試用自己的 schema，彼此的資料不會互相影響，自動編號也都從 1 開始
