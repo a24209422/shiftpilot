@@ -190,7 +190,10 @@ def getSummary(conn: Connection, now: datetime) -> dict:
 # ---------- 檢查 ----------
 
 
-def dedupe(ids) -> list:
+def dedupe(ids, label: str) -> list:
+  # PATCH 可以帶 null：沒擋下來會在這裡變成 TypeError（500），要明確回 422
+  if not isinstance(ids, list) or not all(isinstance(item, int) and not isinstance(item, bool) for item in ids):
+    raise AppError("VALIDATION", f"{label} 必須是整數清單", 422, {"field": label})
   return list(dict.fromkeys(ids))
 
 
@@ -308,8 +311,8 @@ def createBooking(conn: Connection, actor: Actor, data: BookingInput) -> dict:
   organizerId = data.organizerEmployeeId or actor.employeeId
   if organizerId is None:
     raise AppError("ORGANIZER_REQUIRED", "這個帳號沒有對應的員工，請指定主辦人", 422, {"field": "organizerEmployeeId"})
-  resourceIds = dedupe(data.resourceIds)
-  attendeeIds = [item for item in dedupe(data.participantEmployeeIds) if item != organizerId]
+  resourceIds = dedupe(data.resourceIds, "resourceIds")
+  attendeeIds = [item for item in dedupe(data.participantEmployeeIds, "participantEmployeeIds") if item != organizerId]
   participantIds = [organizerId, *attendeeIds]
   checkReferences(conn, "resources", "資源", resourceIds)
   checkReferences(conn, "employees", "員工", participantIds)
@@ -361,13 +364,13 @@ def updateBooking(conn: Connection, actor: Actor, bookingId: int, fields: dict) 
   endAt = fields.get("endAt", current["end_at"])
   note = fields["note"] if "note" in fields else current["note"]
   checkTimes(startAt, endAt)
-  resourceIds = dedupe(fields["resourceIds"]) if "resourceIds" in fields else oldResourceIds
+  resourceIds = dedupe(fields["resourceIds"], "resourceIds") if "resourceIds" in fields else oldResourceIds
   organizerId = fields.get("organizerEmployeeId") or oldOrganizerId
   if "participantEmployeeIds" in fields:
-    attendeeIds = [item for item in dedupe(fields["participantEmployeeIds"]) if item != organizerId]
+    attendeeIds = [item for item in dedupe(fields["participantEmployeeIds"], "participantEmployeeIds") if item != organizerId]
   else:
     # 沒有重新指定參加者時，原本的主辦人換人後仍留在名單裡
-    attendeeIds = [item for item in dedupe([*oldAttendeeIds, oldOrganizerId]) if item != organizerId]
+    attendeeIds = [item for item in dedupe([*oldAttendeeIds, oldOrganizerId], "participantEmployeeIds") if item != organizerId]
   participantIds = [organizerId, *attendeeIds]
   oldParticipantIds = [oldOrganizerId, *oldAttendeeIds]
 
