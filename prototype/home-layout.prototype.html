@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>排程工具 首頁原型</title>
+<!--
+  PROTOTYPE（一次性，用完就丟）
+  問題：iPhone 式的「首頁＋獨立模組」結構，拿來當排程工具的主介面，行不行？
+  怎麼看：直接雙擊用瀏覽器開。資料全是假的，存在記憶體裡，重新整理就還原。
+  可以試：
+    1. 左側導覽、首頁的模組圖示：點進去看「列表 → 詳情」的統一格式
+    2. 頂端搜尋列（按 / 也能focus）：點範例問題看全域查詢的樣子
+    3. 左下角「模擬新增一個模組」：看新增功能只要登記一筆
+    4. 把視窗縮到手機寬度：側邊導覽會變成底部分頁列
+-->
+<style>
+:root {
+  --bg: #f2f2f7;
+  --surface: #ffffff;
+  --text: #1c1c1e;
+  --muted: #6e6e73;
+  --line: #e5e5ea;
+  --accent: #0a84ff;
+  --accent-soft: #e6f1ff;
+  --danger: #ff453a;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --text: #f5f5f7;
+    --muted: #98989d;
+    --line: #38383a;
+    --accent: #0a84ff;
+    --accent-soft: #0b2a4a;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+.app { display: grid; grid-template-columns: 224px 1fr; height: 100vh; height: 100dvh; }
+
+/* ---- 側邊導覽 ---- */
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+.brand { font-weight: 700; font-size: 17px; padding: 4px 10px 14px; }
+.navItem {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 0; border-radius: 10px;
+  background: none; text-align: left; font-size: 15px;
+}
+.navItem:hover { background: var(--bg); }
+.navItem.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.navIcon {
+  width: 26px; height: 26px; flex: none;
+  border-radius: 7px; display: grid; place-items: center;
+  font-size: 15px; color: #fff;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tile, #8e8e93) 75%, white), var(--tile, #8e8e93));
+}
+.navIcon.big { width: 38px; height: 38px; border-radius: 10px; font-size: 21px; }
+.sidebarFoot { margin-top: auto; padding: 10px; font-size: 12px; color: var(--muted); display: grid; gap: 8px; }
+.ghostBtn {
+  border: 1px dashed var(--line); background: none; border-radius: 10px;
+  padding: 8px; color: var(--muted); font-size: 13px;
+}
+.ghostBtn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ghostBtn:disabled { opacity: 0.6; cursor: default; }
+
+/* ---- 主區域 ---- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 28px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.searchWrap { position: relative; flex: 1; max-width: 660px; }
+.searchWrap input {
+  width: 100%; border: 0; border-radius: 12px; background: var(--bg); color: var(--text);
+  padding: 11px 44px 11px 40px; font: inherit; outline: 2px solid transparent;
+}
+.searchWrap input:focus { outline-color: var(--accent); }
+.searchIcon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); opacity: 0.6; pointer-events: none; }
+.slashHint {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  border: 1px solid var(--line); border-radius: 6px; padding: 0 7px;
+  font-size: 12px; color: var(--muted); pointer-events: none;
+}
+.askPanel {
+  position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 30;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.2); padding: 16px; max-height: 70vh; overflow: auto;
+}
+.askPanel[hidden] { display: none; }
+.askQuestion { font-weight: 600; margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chip {
+  border: 1px solid var(--line); background: var(--bg); border-radius: 999px;
+  padding: 6px 12px; font-size: 13px;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.sql {
+  margin: 0 0 12px; padding: 12px; border-radius: 10px; background: var(--bg);
+  font: 12.5px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-x: auto;
+}
+.protoTag {
+  margin-left: auto; font-size: 12px; color: #b25e00; background: #fff1dc;
+  border-radius: 999px; padding: 4px 10px; white-space: nowrap;
+}
+@media (prefers-color-scheme: dark) { .protoTag { background: #3a2a10; color: #ffb454; } }
+
+.body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.content { height: 100%; overflow: auto; padding: 28px; }
+.inner { max-width: 1100px; margin: 0 auto; }
+
+/* ---- 首頁 ---- */
+.hello h1 { margin: 0; font-size: 28px; }
+.hello p { margin: 4px 0 22px; color: var(--muted); }
+.widgets { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+.card { background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); }
+.widget { padding: 18px; text-align: left; border: 0; color: inherit; }
+button.widget:hover { outline: 2px solid var(--accent-soft); }
+.widget h3 { margin: 0 0 12px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; }
+.bigNumber { font-size: 44px; font-weight: 700; line-height: 1; }
+.bigNumber small { font-size: 15px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+.todayItem { display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.todayItem:first-of-type { border-top: 0; padding-top: 0; }
+.todayTime { width: 92px; flex: none; color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 600; }
+.todayMeta { color: var(--muted); font-size: 13px; }
+.roomRow { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; }
+.sectionTitle { font-size: 20px; margin: 0 0 16px; }
+.launcher { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 24px 12px; }
+.appIcon { display: grid; justify-items: center; gap: 8px; border: 0; background: none; padding: 4px; }
+.appTile {
+  width: 68px; height: 68px; border-radius: 17px; display: grid; place-items: center; font-size: 32px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tile) 70%, white), var(--tile));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--tile) 40%, transparent);
+  transition: transform 0.12s;
+}
+.appIcon:hover .appTile { transform: scale(1.06); }
+.appIcon span:last-child { font-size: 13px; }
+
+/* ---- 模組頁（所有模組共用） ---- */
+.pageHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.pageHead h1 { margin: 0; font-size: 26px; display: flex; align-items: center; gap: 12px; }
+.toolbar { margin-bottom: 14px; }
+.toolbar input {
+  width: 100%; max-width: 320px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); color: var(--text); padding: 9px 12px; font: inherit;
+}
+.primary { border: 0; background: var(--accent); color: #fff; border-radius: 10px; padding: 9px 16px; font-weight: 600; white-space: nowrap; }
+.primary:hover { filter: brightness(1.08); }
+.danger { border: 1px solid var(--danger); background: none; color: var(--danger); border-radius: 10px; padding: 9px 16px; font-weight: 600; }
+.tableWrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 12px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--bg); }
+tbody tr.selected { background: var(--accent-soft); }
+tbody tr:last-child td { border-bottom: 0; }
+.hint { color: var(--muted); font-size: 13px; margin: 14px 2px 0; }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pill.ok { background: #d9f5e1; color: #1a7f37; }
+.pill.warn { background: #ffecd1; color: #b25e00; }
+.pill.bad { background: #ffe0de; color: #c0221a; }
+.pill.info { background: #dcecff; color: #0a64c8; }
+.pill.mute { background: #ececef; color: #555; }
+@media (prefers-color-scheme: dark) {
+  .pill.ok { background: #12351d; color: #5fdc82; }
+  .pill.warn { background: #3a2a10; color: #ffb454; }
+  .pill.bad { background: #3d1614; color: #ff8a80; }
+  .pill.info { background: #10284a; color: #6cb2ff; }
+  .pill.mute { background: #2c2c2e; color: #aaa; }
+}
+
+/* ---- 右側滑出的詳情面板 ---- */
+.drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 360px; max-width: 100%; z-index: 10;
+  background: var(--surface); border-left: 1px solid var(--line);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.1);
+  transform: translateX(105%); transition: transform 0.2s ease;
+  display: flex; flex-direction: column;
+}
+.drawer.open { transform: none; }
+.drawerHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.drawerHead h2 { margin: 0; font-size: 18px; }
+.iconBtn { border: 0; background: var(--bg); border-radius: 999px; width: 30px; height: 30px; }
+.drawer dl { margin: 0; padding: 8px 20px; overflow: auto; flex: 1; }
+.drawer dt { font-size: 12px; color: var(--muted); margin-top: 14px; }
+.drawer dd { margin: 3px 0 0; }
+.drawerFoot { display: flex; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--line); }
+
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 50;
+  background: #1c1c1e; color: #fff; border-radius: 12px; padding: 11px 18px; font-size: 14px;
+  max-width: min(92vw, 520px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+.toast[hidden] { display: none; }
+
+/* ---- 窄螢幕：側邊導覽變成底部分頁列（這才是 iPhone 原本的樣子） ---- */
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .sidebar {
+    order: 2; flex-direction: row; gap: 0; padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    border-right: 0; border-top: 1px solid var(--line); overflow-x: auto;
+  }
+  .brand, .sidebarFoot { display: none; }
+  .navItem { flex-direction: column; gap: 2px; font-size: 11px; padding: 6px 10px; min-width: 62px; justify-content: center; }
+  .topbar { padding: 10px 16px; }
+  .protoTag, .slashHint { display: none; }
+  .searchWrap input { padding-right: 14px; }
+  .content { padding: 18px 16px; }
+  .widgets { grid-template-columns: 1fr; }
+  .drawer { width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar" id="nav"></nav>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="searchWrap">
+        <span class="searchIcon">🔍</span>
+        <input id="askInput" type="text" placeholder="問任何問題… 例如「明天有哪些行程？」" autocomplete="off">
+        <span class="slashHint">/</span>
+        <div class="askPanel" id="askPanel" hidden></div>
+      </div>
+      <span class="protoTag">原型・資料是假的・重新整理就還原</span>
+    </header>
+    <div class="body">
+      <main class="content" id="content"></main>
+      <aside class="drawer" id="drawer" aria-label="詳情"></aside>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+// ---------- 假資料 ----------
+// 日期都以「今天」為基準，這樣每次打開，畫面上的「今天」「明天」都剛好有東西
+const now = new Date();
+const dayAt = (offsetDays, hour, minute = 0) => {
+  const date = new Date(now);
+  date.setDate(date.getDate() + offsetDays);
+  date.setHours(hour, minute, 0, 0);
+  return date;
+};
+const minutesFromNow = (minutes) => new Date(now.getTime() + minutes * 60000);
+
+const resources = [
+  { name: '王小明', type: 'person', note: '營運部' },
+  { name: '李小華', type: 'person', note: '營運部' },
+  { name: '陳大文', type: 'person', note: '客服部（輪班）' },
+  { name: 'A 會議室', type: 'room', note: '3 樓・12 人・有視訊設備' },
+  { name: 'B 會議室', type: 'room', note: '2 樓・6 人' },
+  { name: '公務車', type: 'equipment', note: '' },
+];
+const events = [
+  { title: '每週例會', category: 'meeting', start: dayAt(0, 9), end: dayAt(0, 10), resources: ['王小明', '李小華', 'A 會議室'] },
+  // 這一筆固定包住「現在」，首頁的會議室小工具才看得到「使用中」
+  { title: '站立會議', category: 'meeting', start: minutesFromNow(-20), end: minutesFromNow(40), resources: ['李小華', 'B 會議室'] },
+  { title: '客戶簡報', category: 'meeting', start: dayAt(0, 14), end: dayAt(0, 15, 30), resources: ['陳大文', 'A 會議室'] },
+  { title: '設備巡檢', category: 'maintenance', start: dayAt(0, 16), end: dayAt(0, 17), resources: ['李小華'] },
+  { title: '教育訓練', category: 'training', start: dayAt(1, 10), end: dayAt(1, 12), resources: ['王小明', '陳大文', 'A 會議室'] },
+  { title: '晚班', category: 'shift', start: dayAt(1, 18), end: dayAt(1, 22), resources: ['陳大文'] },
+  { title: '公務車外出', category: 'trip', start: dayAt(2, 13), end: dayAt(2, 17), resources: ['王小明', '公務車'] },
+];
+// 列表要照時間排，不然「現在」那筆（站立會議）會插在中間亂序
+events.sort((a, b) => a.start - b.start);
+const employees = [
+  { name: '王小明', dept: '營運部', job: '專員', manager: '李小華', hired: '2023-03-01' },
+  { name: '李小華', dept: '營運部', job: '主任', manager: '—', hired: '2021-08-16' },
+  { name: '陳大文', dept: '客服部', job: '客服專員', manager: '李小華', hired: '2024-01-08' },
+];
+const leaves = [
+  { who: '王小明', type: '特休', from: dayAt(5, 0), to: dayAt(6, 0), status: 'pending' },
+  { who: '李小華', type: '事假', from: dayAt(8, 0), to: dayAt(8, 0), status: 'pending' },
+  { who: '陳大文', type: '病假', from: dayAt(-1, 0), to: dayAt(-1, 0), status: 'approved' },
+];
+
+// ---------- 小工具 ----------
+const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+const pad = (number) => String(number).padStart(2, '0');
+const formatDay = (date) => `${date.getMonth() + 1}/${date.getDate()}（${weekdayNames[date.getDay()]}）`;
+const formatTime = (date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+const formatRange = (from, to) => (from.toDateString() === to.toDateString() ? formatDay(from) : `${formatDay(from)} – ${formatDay(to)}`);
+const isSameDay = (a, b) => a.toDateString() === b.toDateString();
+// 使用者輸入的搜尋文字會被印回畫面，所以一律跳脫，避免被當成 HTML
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]
+));
+
+const typeLabels = { person: '人', room: '會議室', equipment: '設備' };
+const typeTones = { person: 'info', room: 'ok', equipment: 'warn' };
+const leaveLabels = { pending: '審核中', approved: '核准', rejected: '駁回' };
+const leaveTones = { pending: 'warn', approved: 'ok', rejected: 'bad' };
+
+// ---------- 模組登記表 ----------
+// 導覽列、首頁的圖示格子、列表頁都從這份清單長出來。
+// 新增功能 = 在這裡加一筆（名稱、圖示、欄位、資料來源），舊的畫面完全不用動
+const modules = [
+  {
+    key: 'events', name: '排程', icon: '📅', color: '#ff453a', addLabel: '新增排程',
+    rows: () => events,
+    title: (row) => row.title,
+    columns: [
+      { label: '標題', value: (row) => row.title },
+      { label: '日期', value: (row) => formatDay(row.start) },
+      { label: '時間', value: (row) => `${formatTime(row.start)}–${formatTime(row.end)}` },
+      { label: '資源', value: (row) => row.resources.join('、') },
+      { label: '分類', value: (row) => row.category },
+    ],
+  },
+  {
+    key: 'resources', name: '資源', icon: '🧰', color: '#ff9f0a', addLabel: '新增資源',
+    rows: () => resources,
+    title: (row) => row.name,
+    columns: [
+      { label: '名稱', value: (row) => row.name },
+      { label: '種類', value: (row) => ({ text: typeLabels[row.type], tone: typeTones[row.type] }) },
+      { label: '備註', value: (row) => row.note || '—' },
+    ],
+  },
+  {
+    key: 'people', name: '人員', icon: '👥', color: '#30b0c7', addLabel: '新增員工',
+    rows: () => employees,
+    title: (row) => row.name,
+    columns: [
+      { label: '姓名', value: (row) => row.name },
+      { label: '部門', value: (row) => row.dept },
+      { label: '職稱', value: (row) => row.job },
+      { label: '主管', value: (row) => row.manager },
+      { label: '到職日', value: (row) => row.hired },
+    ],
+  },
+  {
+    key: 'leave', name: '請假', icon: '🌴', color: '#34c759', addLabel: '申請請假',
+    rows: () => leaves,
+    title: (row) => `${row.who}・${row.type}`,
+    columns: [
+      { label: '員工', value: (row) => row.who },
+      { label: '假別', value: (row) => row.type },
+      { label: '日期', value: (row) => formatRange(row.from, row.to) },
+      { label: '狀態', value: (row) => ({ text: leaveLabels[row.status], tone: leaveTones[row.status] }) },
+    ],
+  },
+];
+
+// 左下角按鈕會把這筆加進登記表，用來示範「之後多一個功能」要做的事
+const extraModule = {
+  key: 'borrow', name: '設備借用', icon: '🔧', color: '#af52de', addLabel: '新增借用',
+  rows: () => [
+    { item: '公務車', who: '王小明', due: dayAt(2, 17) },
+    { item: '投影機', who: '李小華', due: dayAt(1, 12) },
+    { item: '筆記型電腦', who: '陳大文', due: dayAt(4, 18) },
+  ],
+  title: (row) => row.item,
+  columns: [
+    { label: '品項', value: (row) => row.item },
+    { label: '借用人', value: (row) => row.who },
+    { label: '應歸還', value: (row) => `${formatDay(row.due)} ${formatTime(row.due)}` },
+  ],
+};
+
+// ---------- 畫面 ----------
+const navEl = document.getElementById('nav');
+const contentEl = document.getElementById('content');
+const drawerEl = document.getElementById('drawer');
+const askInput = document.getElementById('askInput');
+const askPanel = document.getElementById('askPanel');
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+let extraAdded = false;
+
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3200);
+}
+
+// 格子可以是純文字，也可以是 { text, tone } 的標籤
+const plainText = (value) => (typeof value === 'object' ? value.text : String(value));
+const renderCell = (value) => (
+  typeof value === 'object'
+    ? `<span class="pill ${value.tone}">${escapeHtml(value.text)}</span>`
+    : escapeHtml(value)
+);
+
+function renderNav(activeKey) {
+  const items = [{ key: 'home', name: '首頁', icon: '🏠', color: '#0a84ff' }, ...modules];
+  navEl.innerHTML = `
+    <div class="brand">📅 排程工具</div>
+    ${items.map((item) => `
+      <button class="navItem ${item.key === activeKey ? 'active' : ''}" data-go="${item.key}">
+        <span class="navIcon" style="--tile:${item.color}">${item.icon}</span>${item.name}
+      </button>`).join('')}
+    <div class="sidebarFoot">
+      <button class="ghostBtn" data-addmodule ${extraAdded ? 'disabled' : ''}>
+        ${extraAdded ? '已新增（重新整理可還原）' : '＋ 模擬新增一個模組'}
+      </button>
+      <span>模組登記表：${modules.length} 筆</span>
+    </div>`;
+}
+
+function renderHome() {
+  const hour = now.getHours();
+  const greeting = hour < 12 ? '早安' : hour < 18 ? '午安' : '晚安';
+  const dateText = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} 星期${weekdayNames[now.getDay()]}`;
+  const todayEvents = events.filter((event) => isSameDay(event.start, now)).sort((a, b) => a.start - b.start);
+  const pendingCount = leaves.filter((leave) => leave.status === 'pending').length;
+  const rooms = resources.filter((resource) => resource.type === 'room');
+
+  const todayHtml = todayEvents.length
+    ? todayEvents.map((event) => `
+        <div class="todayItem">
+          <span class="todayTime">${formatTime(event.start)}–${formatTime(event.end)}</span>
+          <div><div>${escapeHtml(event.title)}</div><div class="todayMeta">${escapeHtml(event.resources.join('、'))}</div></div>
+        </div>`).join('')
+    : '<div class="todayMeta">今天沒有排程</div>';
+
+  const roomHtml = rooms.map((room) => {
+    const current = events.find((event) => event.resources.includes(room.name) && event.start <= now && now < event.end);
+    const status = current
+      ? `<span class="pill warn">使用中</span>`
+      : `<span class="pill ok">空著</span>`;
+    return `<div class="roomRow"><span>${escapeHtml(room.name)}</span>${status}</div>`;
+  }).join('');
+
+  contentEl.innerHTML = `
+    <div class="inner">
+      <div class="hello"><h1>${greeting}</h1><p>${dateText}</p></div>
+      <section class="widgets">
+        <button class="card widget" data-go="events">
+          <h3>今天的排程</h3>${todayHtml}
+        </button>
+        <button class="card widget" data-go="leave">
+          <h3>待處理</h3>
+          <div class="bigNumber">${pendingCount}<small>筆請假待審核</small></div>
+        </button>
+        <div class="card widget">
+          <h3>會議室現況</h3>${roomHtml}
+        </div>
+      </section>
+      <h2 class="sectionTitle">所有功能</h2>
+      <section class="launcher">
+        ${modules.map((mod) => `
+          <button class="appIcon" data-go="${mod.key}">
+            <span class="appTile" style="--tile:${mod.color}">${mod.icon}</span>
+            <span>${mod.name}</span>
+          </button>`).join('')}
+      </section>
+    </div>`;
+}
+
+function renderModule(mod) {
+  contentEl.innerHTML = `
+    <div class="inner">
+      <div class="pageHead">
+        <h1><span class="navIcon big" style="--tile:${mod.color}">${mod.icon}</span>${mod.name}</h1>
+        <button class="primary" data-toast="原型：這裡會開「${escapeHtml(mod.addLabel)}」表單，真的專案送出前要先做衝突檢查">＋ ${escapeHtml(mod.addLabel)}</button>
+      </div>
+      <div class="toolbar"><input id="filterInput" type="search" placeholder="篩選${mod.name}…"></div>
+      <div class="card tableWrap">
+        <table>
+          <thead><tr>${mod.columns.map((column) => `<th>${column.label}</th>`).join('')}</tr></thead>
+          <tbody id="rowsBody"></tbody>
+        </table>
+      </div>
+      <p class="hint">每個模組都長這樣：上方篩選與新增、中間列表、點一列從右側開詳情。</p>
+    </div>`;
+  const filterInput = document.getElementById('filterInput');
+  filterInput.addEventListener('input', () => renderRows(mod));
+  renderRows(mod);
+}
+
+function renderRows(mod, selectedIndex = null) {
+  const keyword = document.getElementById('filterInput').value.trim().toLowerCase();
+  const body = document.getElementById('rowsBody');
+  // 篩選後列的順序會變，所以 data-row 記的是原本的索引，點開詳情才不會開錯那一列
+  const visible = mod.rows()
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => !keyword || mod.columns.some((column) => plainText(column.value(row)).toLowerCase().includes(keyword)));
+  body.innerHTML = visible.length
+    ? visible.map(({ row, index }) => `
+        <tr data-row="${index}" class="${index === selectedIndex ? 'selected' : ''}">
+          ${mod.columns.map((column) => `<td>${renderCell(column.value(row))}</td>`).join('')}
+        </tr>`).join('')
+    : `<tr><td colspan="${mod.columns.length}" style="color:var(--muted)">沒有符合的資料</td></tr>`;
+}
+
+function openDrawer(mod, index) {
+  const row = mod.rows()[index];
+  drawerEl.innerHTML = `
+    <div class="drawerHead"><h2>${escapeHtml(mod.title(row))}</h2><button class="iconBtn" data-close aria-label="關閉">✕</button></div>
+    <dl>${mod.columns.map((column) => `<dt>${column.label}</dt><dd>${renderCell(column.value(row))}</dd>`).join('')}</dl>
+    <div class="drawerFoot">
+      <button class="primary" data-toast="原型：這裡會開編輯表單（改時間時，衝突檢查要排除排程自己）">編輯</button>
+      <button class="danger" data-toast="原型：刪除前要先檢查有沒有關聯資料，例如已有排程的資源只能停用">刪除</button>
+    </div>`;
+  drawerEl.classList.add('open');
+  renderRows(mod, index);
+}
+
+function closeDrawer() {
+  drawerEl.classList.remove('open');
+  document.querySelectorAll('#rowsBody tr.selected').forEach((row) => row.classList.remove('selected'));
+}
+
+function currentModule() {
+  const key = location.hash.slice(1) || 'home';
+  return modules.find((mod) => mod.key === key) || null;
+}
+
+function render() {
+  const mod = currentModule();
+  closeDrawer();
+  renderNav(mod ? mod.key : 'home');
+  if (mod) renderModule(mod); else renderHome();
+  contentEl.scrollTop = 0;
+}
+
+function navigate(key) {
+  // 網址放 hash：重新整理會停在同一頁，也方便把某一頁直接傳給別人看
+  if (location.hash.slice(1) === key) render(); else location.hash = key;
+}
+
+// ---------- 全域查詢（示意） ----------
+// 真的專案這裡會把問題交給 text2sql；原型只有三題寫死的範例，結果用上面的假資料算出來
+const cannedQuestions = [
+  {
+    question: '明天有哪些行程？',
+    sql: `SELECT e.title, e.start_at, e.end_at, STRING_AGG(r.name, '、') AS resources
+FROM events e
+JOIN event_resources er ON er.event_id = e.id
+JOIN resources r ON r.id = er.resource_id
+WHERE e.start_at >= CURRENT_DATE + 1 AND e.start_at < CURRENT_DATE + 2
+GROUP BY e.id ORDER BY e.start_at;`,
+    columns: ['標題', '時間', '資源'],
+    run: () => events
+      .filter((event) => isSameDay(event.start, dayAt(1, 0)))
+      .map((event) => [event.title, `${formatTime(event.start)}–${formatTime(event.end)}`, event.resources.join('、')]),
+  },
+  {
+    question: '每個人各有幾筆排程？',
+    sql: `SELECT r.name, COUNT(DISTINCT e.id) AS event_count
+FROM resources r
+JOIN event_resources er ON er.resource_id = r.id
+JOIN events e ON e.id = er.event_id
+WHERE r.type = 'person'
+GROUP BY r.name ORDER BY event_count DESC;`,
+    columns: ['姓名', '排程數'],
+    run: () => {
+      const counts = new Map(resources.filter((resource) => resource.type === 'person').map((resource) => [resource.name, 0]));
+      events.forEach((event) => event.resources.forEach((name) => {
+        if (counts.has(name)) counts.set(name, counts.get(name) + 1);
+      }));
+      return [...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => [name, String(count)]);
+    },
+  },
+  {
+    question: '有哪些請假還在審核中？',
+    sql: `SELECT r.name, l.leave_type, l.start_at, l.end_at
+FROM leave_requests l
+JOIN employees emp ON emp.id = l.employee_id
+JOIN resources r ON r.id = emp.resource_id
+WHERE l.status = 'pending';`,
+    columns: ['員工', '假別', '日期'],
+    run: () => leaves.filter((leave) => leave.status === 'pending').map((leave) => [leave.who, leave.type, formatRange(leave.from, leave.to)]),
+  },
+];
+
+const chipsHtml = () => `
+  <div class="chips">
+    ${cannedQuestions.map((canned) => `<button class="chip" data-ask="${escapeHtml(canned.question)}">${escapeHtml(canned.question)}</button>`).join('')}
+  </div>`;
+
+function renderAnswerTable(columns, rows) {
+  if (!rows.length) return '<p class="todayMeta">查詢成功，但沒有符合的資料。</p>';
+  return `<div class="tableWrap"><table>
+    <thead><tr>${columns.map((column) => `<th>${column}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => `<tr style="cursor:default">${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function showSuggestions() {
+  askPanel.innerHTML = `<div class="todayMeta">試試看這些問題</div>${chipsHtml()}`;
+  askPanel.hidden = false;
+}
+
+function runAsk(rawQuestion) {
+  const question = rawQuestion.trim();
+  if (!question) { showSuggestions(); return; }
+  const canned = cannedQuestions.find((item) => item.question === question);
+  askPanel.innerHTML = `
+    <div class="askQuestion">你問：${escapeHtml(question)}</div>
+    ${canned
+      ? `<pre class="sql">${escapeHtml(canned.sql)}</pre>
+         ${renderAnswerTable(canned.columns, canned.run())}
+         <p class="hint">原型：SQL 是寫死的示意，結果是用假資料算的，不是模型產生的。</p>`
+      : '<p>原型沒有接模型。真的專案這裡會把問題交給 text2sql，回傳 SQL 與結果表格。</p>'}
+    ${chipsHtml()}`;
+  askPanel.hidden = false;
+}
+
+// ---------- 事件 ----------
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.searchWrap')) askPanel.hidden = true;
+
+  const addModuleButton = event.target.closest('[data-addmodule]');
+  if (addModuleButton && !extraAdded) {
+    modules.push(extraModule);
+    extraAdded = true;
+    navigate(extraModule.key);
+    showToast('已在登記表加一筆「設備借用」：導覽列、首頁圖示、列表頁都自己長出來，舊的畫面一行都沒改');
+    return;
+  }
+  const goTarget = event.target.closest('[data-go]');
+  if (goTarget) { navigate(goTarget.dataset.go); return; }
+
+  const askTarget = event.target.closest('[data-ask]');
+  if (askTarget) { askInput.value = askTarget.dataset.ask; runAsk(askInput.value); return; }
+
+  if (event.target.closest('[data-close]')) { closeDrawer(); return; }
+
+  const toastTarget = event.target.closest('[data-toast]');
+  if (toastTarget) { showToast(toastTarget.dataset.toast); return; }
+
+  const rowTarget = event.target.closest('#rowsBody tr[data-row]');
+  const mod = currentModule();
+  if (rowTarget && mod) openDrawer(mod, Number(rowTarget.dataset.row));
+});
+
+askInput.addEventListener('focus', () => { if (!askInput.value.trim()) showSuggestions(); });
+askInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') runAsk(askInput.value);
+  if (event.key === 'Escape') { askPanel.hidden = true; askInput.blur(); }
+});
+
+document.addEventListener('keydown', (event) => {
+  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
+  if (event.key === '/' && !typing) { event.preventDefault(); askInput.focus(); }
+  if (event.key === 'Escape' && !typing) closeDrawer();
+});
+
+window.addEventListener('hashchange', render);
+render();
+</script>
+</body>
+</html>

@@ -3,3 +3,6 @@
 __pycache__/
 .pytest_cache/
 legacy/evals/results/
+
+frontend/node_modules/
+frontend/dist/

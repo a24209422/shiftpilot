@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>排程工具 首頁原型 聊天面板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300..700&family=Special+Elite&display=swap" rel="stylesheet">
+<!--
+  PROTOTYPE（一次性，用完就丟）
+  問題：把 text2sql 做成「右側停靠的聊天面板」，可以收合、可以拉寬，用起來怎麼樣？
+  基底：home-layout.indie-sleaze.prototype.html（外觀同一套 Indie Sleaze 風格）。
+  跟上一版的差別：頂端的搜尋列拿掉了，右側面板是聊天機器人唯一的入口。
+  怎麼看：直接雙擊用瀏覽器開。資料全是假的，存在記憶體裡，重新整理就還原。
+  可以試：
+    1. 右側面板：點範例問題或自己打字（Enter 送出、Shift+Enter 換行）。
+       只有三題有寫死的答案；問完「明天有哪些行程？」之後可以接著問「那後天呢？」
+    2. 拉寬／拉窄：拖曳面板左邊緣（也可以 focus 後按 ←／→，雙擊還原預設寬度）
+    3. 收合：面板右上角的「›」會收成右邊一條細欄，點細欄再展開
+    4. 按 / 會展開面板並跳到輸入框
+    5. 縮到手機寬度：面板變成全螢幕，入口變成右下角的「ASK」按鈕
+  字體要連網才載得到（Google Fonts）；離線時退回系統字體，版面一樣。
+-->
+<style>
+/* ---- 色票：直接用 daisyUI Indie Sleaze demo 主題的 oklch 值 ---- */
+:root {
+  --base-100: oklch(94% .012 85);      /* 髒白 */
+  --base-200: oklch(78% .035 75);      /* 尼古丁米色 */
+  --base-300: oklch(49% .04 70);       /* 褐灰，次要文字 */
+  --ink: oklch(9% .015 255);           /* 近黑，文字與邊線 */
+  --paper: oklch(97% .008 85);         /* 比底色亮一點，聊天面板用，才跟主畫面分得開 */
+  --neutral: oklch(7% .012 255);       /* sidebar 的黑 */
+  --neutral-content: oklch(93% .015 85);
+  --primary: oklch(64% .22 25);        /* 唇紅 */
+  --primary-content: oklch(96% .02 80);
+  --accent: oklch(68% .19 250);        /* 閃光藍 */
+  --accent-content: oklch(96% .02 85);
+  --success: oklch(63% .15 145);
+  --success-content: oklch(8% .02 145);
+  --error: oklch(58% .23 24);
+  --error-content: oklch(96% .02 85);
+  --stamp: oklch(75% .17 60);          /* 數位相機的橘色日期戳記 */
+  --rule: color-mix(in oklch, var(--ink) 16%, transparent);
+  --font-display: "Oswald", "Arial Narrow", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  --font-accent: "Special Elite", "Courier New", "Microsoft JhengHei", "PingFang TC", monospace;
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+* { box-sizing: border-box; border-radius: 0; }   /* 主題的 --radius-* 全是 0 */
+/* 捲軸照 daisyUI demo 的做法：細窄、滑塊是「該區塊文字色的 35%」、軌道透明。
+   寫在 * 上而不是 :root，是因為 scrollbar-color 會繼承，寫在 :root 的話黑色的側邊欄會拿到近黑的滑塊，看不見 */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in oklch, currentColor 35%, transparent) transparent; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font-display);
+  font-weight: 400;
+  background: var(--base-100);
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 100; pointer-events: none;
+  background-image: var(--grain); opacity: 0.07;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ico { display: block; flex: none; }
+
+/* 三欄：側邊導覽｜主內容｜聊天面板。聊天面板的寬度由 --chat-w 控制，拖曳時 JS 會改這個變數 */
+.app { --chat-w: 400px; display: grid; grid-template-columns: 224px minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
+.app.dragging { user-select: none; cursor: col-resize; }
+
+/* ---- 側邊導覽：近黑底，米色方塊標示目前頁面 ---- */
+.sidebar {
+  background: var(--neutral); color: var(--neutral-content);
+  padding: 22px 16px 16px; display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: auto;
+}
+.brand { font-size: 30px; font-weight: 700; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; padding: 0 6px; }
+.brandNote { font: 12px var(--font-accent); color: var(--base-200); padding: 12px 6px 18px; display: flex; gap: 8px; align-items: center; }
+.brandNote::before { content: ""; width: 7px; height: 7px; background: var(--success); }
+.navItem {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 8px 10px; border: 0; background: none; text-align: left; color: inherit;
+  font-size: 15px; font-weight: 400; letter-spacing: 0.03em;
+}
+.navItem:hover { background: color-mix(in oklch, var(--neutral-content) 12%, transparent); }
+.navItem.active { background: var(--base-200); color: var(--ink); font-weight: 500; }
+.navLabel { flex: 1; }
+.navCount { font: 12px var(--font-accent); opacity: 0.7; }
+.sidebarFoot { margin-top: auto; padding: 14px 6px 0; display: grid; gap: 10px; font: 12px var(--font-accent); color: var(--base-200); }
+.ghostBtn { border: 1px dashed color-mix(in oklch, var(--neutral-content) 40%, transparent); background: none; padding: 9px; color: var(--neutral-content); font: 13px var(--font-accent); }
+.ghostBtn:hover:not(:disabled) { background: var(--base-200); color: var(--ink); border-color: var(--base-200); }
+.ghostBtn:disabled { opacity: 0.5; cursor: default; }
+.protoTag { font: 12px var(--font-accent); background: var(--base-200); color: var(--ink); padding: 5px 8px; letter-spacing: 0.04em; }
+
+/* ---- 主區域 ---- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+/* 主內容的版面隨「自己的寬度」變化，不是視窗寬度：聊天面板拉寬時，這裡會變窄，4 欄要能自己改成 2 欄 */
+.content { height: 100%; overflow: auto; padding: 32px; container-type: inline-size; }
+.inner { max-width: 1120px; margin: 0 auto; }
+
+/* ---- 頁首：巨大窄體標題＋粗黑線 ---- */
+.pageHead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 5px solid var(--ink); margin-bottom: 28px; }
+.headline { margin: 0; font-size: clamp(46px, 8vw, 88px); font-size: clamp(42px, 9cqi, 88px); font-weight: 700; line-height: 0.92; letter-spacing: -0.01em; text-transform: uppercase; }
+.sub { margin: 12px 0 0; color: color-mix(in oklch, var(--ink) 75%, transparent); font-size: 15px; }
+.primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; background: var(--primary); color: var(--primary-content);
+  padding: 11px 18px; font-weight: 500; letter-spacing: 0.04em; white-space: nowrap;
+}
+.primary:hover { filter: brightness(1.08); }
+.danger { border: 1px solid var(--error); background: none; color: var(--error); padding: 11px 18px; font-weight: 500; letter-spacing: 0.04em; }
+.danger:hover { background: var(--error); color: var(--error-content); }
+
+/* ---- 數字格子：用 1px 縫隙讓邊線在任何欄數都對齊 ---- */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--ink); border: 1px solid var(--ink); margin-bottom: 36px; }
+.stat { background: var(--base-100); padding: 18px 20px 16px; }
+.statLabel { font-size: 14px; color: color-mix(in oklch, var(--ink) 80%, transparent); }
+.statValue { font-size: 46px; font-weight: 600; line-height: 1.15; }
+.statNote { font: 12px var(--font-accent); color: var(--base-300); }
+.statNote::before { content: "↗ "; }
+
+.sectionTitle { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px; font-size: 15px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+.sectionTitle small { font: 12px var(--font-accent); letter-spacing: 0; color: var(--base-300); }
+
+/* ---- 模組方塊：像底片的接觸印樣，每格一個功能 ---- */
+.modulesBlock { margin-bottom: 40px; }
+.launcher { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 14px; }
+.tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0; text-align: left;
+  border: 1px solid var(--ink); background: none; padding: 12px 14px 14px; min-height: 176px;
+}
+.tile:hover { background: var(--ink); color: var(--base-100); }
+.tile:hover .tileNo, .tile:hover .tileZh { color: var(--base-200); }
+.tileTop { display: flex; justify-content: space-between; width: 100%; font: 12px var(--font-accent); }
+.tileNo { color: var(--base-300); }
+.tileIcon { margin: 18px 0 auto; }
+.tileName { font-size: 28px; font-weight: 700; text-transform: uppercase; line-height: 1; margin-top: 18px; }
+.tileZh { font-size: 14px; color: var(--base-300); margin-top: 4px; }
+
+.split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; margin-bottom: 40px; align-items: start; }
+.panel { border-top: 1px solid var(--ink); padding-top: 16px; min-width: 0; }
+
+/* 米色重點卡片＋歪斜裁切的黑白閃光照 */
+.feature { background: var(--base-200); overflow: hidden; }
+.photo { height: 190px; overflow: hidden; position: relative; }
+.photoInner {
+  position: absolute; inset: -14px; transform: rotate(-1.6deg);
+  background: radial-gradient(circle at 36% 40%, #fff 0, #ecebe6 9%, #8d8b86 30%, #302f2d 58%, #0c0c0c 82%);
+  filter: contrast(1.25);
+}
+.photoInner::after { content: ""; position: absolute; inset: 0; background-image: var(--grain); opacity: 0.55; mix-blend-mode: multiply; }
+.stamp { position: absolute; right: 14px; bottom: 10px; z-index: 2; font: 15px var(--font-accent); color: var(--stamp); letter-spacing: 0.1em; text-shadow: 0 0 2px rgba(0, 0, 0, 0.6); }
+.featureBody { padding: 20px 22px 22px; }
+.featureBody h3 { margin: 0 0 6px; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600; }
+.featureTitle { margin: 0; font-size: 30px; font-weight: 600; line-height: 1.1; }
+.featureMeta { margin: 8px 0 18px; font: 13px var(--font-accent); }
+.textLink { border: 0; background: none; padding: 0; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 13px; }
+.textLink:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+.roomRow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.roomRow:last-child { border-bottom: 0; }
+.roomName { font-size: 18px; font-weight: 500; }
+.roomNote { font: 12px var(--font-accent); color: var(--base-300); }
+
+.attentionItem { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--rule); width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0; text-align: left; }
+.attentionItem:last-child { border-bottom: 0; }
+.attentionItem:hover .attentionTitle { text-decoration: underline; text-underline-offset: 3px; }
+.dot { width: 7px; height: 7px; background: var(--primary); margin-top: 8px; flex: none; }
+.attentionTitle { font-size: 17px; font-weight: 500; }
+.attentionMeta { font: 12px var(--font-accent); color: var(--base-300); }
+.attentionItem .tag { margin-left: auto; }
+.empty { font: 13px var(--font-accent); color: var(--base-300); padding: 6px 0; }
+
+/* ---- 表格與標籤 ---- */
+.toolbar { margin-bottom: 16px; }
+.toolbar input { width: 100%; max-width: 340px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); padding: 10px 12px; font: 13px var(--font-accent); }
+.toolbar input::placeholder { color: var(--base-300); opacity: 1; }
+.tableWrap { overflow-x: auto; border-top: 1px solid var(--ink); }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-size: 13px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--base-300); padding: 14px 14px 12px; border-bottom: 1px solid var(--ink); white-space: nowrap; }
+td { padding: 13px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+td.mono, .mono { font: 13px var(--font-accent); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: color-mix(in oklch, var(--base-200) 38%, transparent); }
+tbody tr.selected { background: var(--base-200); }
+.hint { font: 12.5px var(--font-accent); color: var(--base-300); margin: 14px 0 0; }
+.tag { display: inline-block; padding: 2px 9px; font-size: 12px; font-weight: 500; letter-spacing: 0.06em; white-space: nowrap; }
+.tag.ok { background: var(--success); color: var(--success-content); }
+.tag.warn { background: var(--base-200); color: var(--ink); }
+.tag.bad { background: var(--error); color: var(--error-content); }
+.tag.info { background: var(--accent); color: var(--accent-content); }
+.tag.mute { background: color-mix(in oklch, var(--ink) 12%, transparent); color: var(--ink); }
+
+/* ---- 資料的詳情面板：蓋在主內容上，不會跟右邊的聊天面板重疊 ---- */
+.drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 380px; max-width: 100%; z-index: 10;
+  background: var(--base-100); border-left: 2px solid var(--ink);
+  transform: translateX(105%); transition: transform 0.16s steps(4); /* 階梯式動畫，有手動換片的卡頓感 */
+  display: flex; flex-direction: column;
+}
+.drawer.open { transform: none; }
+.drawerHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 22px 22px 16px; border-bottom: 5px solid var(--ink); }
+.drawerHead h2 { margin: 0; font-size: 32px; font-weight: 700; line-height: 1; text-transform: uppercase; }
+.iconBtn { border: 1px solid var(--ink); background: none; width: 32px; height: 32px; display: grid; place-items: center; flex: none; padding: 0; }
+.iconBtn:hover { background: var(--ink); color: var(--base-100); }
+.drawer dl { margin: 0; padding: 6px 22px 16px; overflow: auto; flex: 1; }
+.drawer dt { font: 12px var(--font-accent); color: var(--base-300); margin-top: 16px; }
+.drawer dd { margin: 4px 0 0; font-size: 18px; }
+.drawerFoot { display: flex; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--ink); }
+
+/* ---- 聊天面板（右側停靠，可收合、可拉寬） ---- */
+.chat {
+  position: relative; width: var(--chat-w); min-height: 0; height: 100%;
+  background: var(--paper); border-left: 2px solid var(--ink);
+  transition: width 0.18s steps(5);
+}
+.app.dragging .chat { transition: none; }       /* 拖曳時不能有動畫，不然寬度會追不上滑鼠 */
+.chat.collapsed { width: 46px; }
+.chatFull { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; }
+.chat.collapsed .chatFull, .chat.collapsed .resizer { display: none; }
+
+/* 拖曳把手：視覺上只有 2px，但可點的範圍有 10px，比較好抓 */
+.resizer { position: absolute; left: -6px; top: 0; bottom: 0; width: 10px; cursor: col-resize; z-index: 5; touch-action: none; }
+.resizer::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: transparent; }
+.resizer:hover::after, .resizer:focus-visible::after, .app.dragging .resizer::after { background: var(--primary); }
+.resizer:focus-visible { outline: none; }
+
+/* 收合後的細欄 */
+.chatRail { display: none; width: 100%; height: 100%; flex-direction: column; align-items: center; gap: 16px; padding: 18px 0; border: 0; background: none; }
+.chat.collapsed .chatRail { display: flex; }
+.chatRail:hover { background: var(--base-200); }
+.chatRail .vertical { writing-mode: vertical-rl; font-size: 16px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
+
+.chatHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 18px 16px 14px; border-bottom: 5px solid var(--ink); }
+.chatTitle { font-size: 30px; font-weight: 700; line-height: 1; text-transform: uppercase; }
+.chatSub { font: 12px/1.4 var(--font-accent); color: var(--base-300); margin-top: 8px; }
+.chatActions { display: flex; gap: 6px; }
+.onMobile { display: none; }
+
+.chatLog { flex: 1; min-height: 0; overflow: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 16px; }
+.msg { display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
+.msg.user { align-items: flex-end; }
+.msgMeta { font: 11px var(--font-accent); color: var(--base-300); letter-spacing: 0.06em; }
+.bubble { padding: 10px 13px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--ink); color: var(--base-100); max-width: 88%; }
+.msg.bot { align-items: stretch; }
+.msg.bot .bubble { background: var(--base-100); border: 1px solid var(--ink); }
+.bubble .tableWrap { margin-top: 8px; }
+.bubble th { padding: 8px 10px 7px; font-size: 12px; }
+/* 中文預設可以在任何字之間斷行，窄面板裡「教育訓練」會被切成兩半；改成只在標點和空白斷，放不下就讓表格橫向捲動 */
+.bubble td { padding: 8px 10px; font-size: 14px; word-break: keep-all; overflow-wrap: normal; }
+.nowrap { white-space: nowrap; }
+.bubble tbody tr { cursor: default; }
+.bubble tbody tr:hover { background: none; }
+.answerLead { font: 13px var(--font-accent); }
+.thinking .caret { display: inline-block; width: 8px; height: 1em; margin-left: 4px; vertical-align: -2px; background: var(--ink); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip { border: 1px solid var(--ink); background: var(--paper); padding: 5px 11px; font: 12.5px var(--font-accent); text-align: left; }
+.chip:hover { background: var(--base-200); }
+.sqlBox { margin-top: 10px; }
+.sqlBox summary { cursor: pointer; font: 12px var(--font-accent); color: var(--base-300); }
+.sqlBox summary:hover { color: var(--ink); }
+.sql { margin: 8px 0 0; padding: 12px; background: var(--neutral); color: var(--base-200); font: 12px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-x: auto; }
+
+.chatForm { display: flex; gap: 8px; align-items: flex-end; padding: 12px 16px 6px; border-top: 1px solid var(--ink); }
+.chatForm textarea {
+  flex: 1; min-width: 0; resize: none; min-height: 42px; max-height: 120px; overflow-y: auto;
+  border: 1px solid var(--ink); background: var(--base-100); color: var(--ink); padding: 10px 12px; font: 14px/1.4 var(--font-display);
+}
+.chatForm textarea::placeholder { font-family: var(--font-accent); font-size: 13px; color: var(--base-300); opacity: 1; }
+.chatForm .primary { height: 42px; padding: 0 14px; }
+.chatHint { padding: 0 16px 12px; font: 11px var(--font-accent); color: var(--base-300); }
+
+/* 手機上聊天面板收起來時的入口 */
+.fab {
+  display: none; position: fixed; right: 14px; bottom: calc(78px + env(safe-area-inset-bottom)); z-index: 50;
+  align-items: center; gap: 8px; border: 0; background: var(--primary); color: var(--primary-content);
+  padding: 12px 16px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+}
+
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 110;
+  background: var(--neutral); color: var(--neutral-content); border-left: 5px solid var(--primary);
+  padding: 12px 18px; font: 13px/1.5 var(--font-accent); max-width: min(92vw, 540px);
+}
+.toast[hidden] { display: none; }
+
+/* 主內容自己的寬度不夠時才換版面（聊天面板拉寬也會讓它變窄） */
+@container (max-width: 700px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .split { grid-template-columns: 1fr; }
+}
+@container (max-width: 560px) {
+  .pageHead { flex-direction: column; align-items: flex-start; }
+}
+
+/* ---- 窄螢幕：側邊導覽變成底部分頁列，聊天面板變成全螢幕 ---- */
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .sidebar { order: 2; flex-direction: row; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); overflow-x: auto; }
+  .brand, .brandNote, .sidebarFoot, .navCount { display: none; }
+  .navItem { flex-direction: column; gap: 3px; font-size: 11px; padding: 7px 12px; min-width: 64px; justify-content: center; width: auto; }
+  .navLabel { flex: none; }
+  .content { padding: 20px 16px; }
+  .drawer { width: 100%; }
+
+  .chat { position: fixed; inset: 0; z-index: 60; width: 100%; border-left: 0; transition: none; }
+  .chat.collapsed { display: none; }
+  .resizer, .chatHint { display: none; }
+  .onDesktop { display: none; }
+  .onMobile { display: block; }
+  .fab:not([hidden]) { display: flex; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat, .drawer { transition: none; }
+  .thinking .caret { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <nav class="sidebar" id="nav"></nav>
+
+  <div class="main">
+    <div class="body">
+      <main class="content" id="content"></main>
+      <aside class="drawer" id="drawer" aria-label="詳情"></aside>
+    </div>
+  </div>
+
+  <aside class="chat" id="chat" aria-label="聊天機器人">
+    <div class="resizer" id="chatResizer" role="separator" aria-orientation="vertical" aria-label="調整聊天面板寬度" aria-valuemin="320" tabindex="0"></div>
+    <button class="chatRail" data-chat-open aria-label="展開聊天面板" title="展開聊天面板">
+      <span data-icon="chat" data-size="20"></span>
+      <span class="vertical">Ask the desk</span>
+    </button>
+    <div class="chatFull">
+      <header class="chatHead">
+        <div>
+          <div class="chatTitle">Ask the desk</div>
+          <div class="chatSub">用中文問排程，轉成 SQL 查詢（唯讀）</div>
+        </div>
+        <div class="chatActions">
+          <button class="iconBtn" data-chat-clear title="清除對話" aria-label="清除對話"><span data-icon="trash" data-size="16"></span></button>
+          <button class="iconBtn" data-chat-toggle title="收合" aria-label="收合聊天面板">
+            <span class="onDesktop" data-icon="chevron" data-size="16"></span>
+            <span class="onMobile" data-icon="close" data-size="16"></span>
+          </button>
+        </div>
+      </header>
+      <div class="chatLog" id="chatLog" aria-live="polite"></div>
+      <form class="chatForm" id="chatForm">
+        <textarea id="chatInput" rows="1" placeholder="問任何問題… 例如「明天有哪些行程？」"></textarea>
+        <button class="primary" type="submit" aria-label="送出"><span data-icon="send" data-size="18"></span></button>
+      </form>
+      <div class="chatHint">Enter 送出 ・ Shift+Enter 換行 ・ 按 / 跳到這裡</div>
+    </div>
+  </aside>
+</div>
+<button class="fab" id="chatFab" data-chat-open hidden><span data-icon="chat" data-size="18"></span>Ask</button>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+// ---------- 假資料 ----------
+// 日期都以「今天」為基準，這樣每次打開，畫面上的「今天」「明天」都剛好有東西
+const now = new Date();
+const dayAt = (offsetDays, hour, minute = 0) => {
+  const date = new Date(now);
+  date.setDate(date.getDate() + offsetDays);
+  date.setHours(hour, minute, 0, 0);
+  return date;
+};
+const minutesFromNow = (minutes) => new Date(now.getTime() + minutes * 60000);
+
+const resources = [
+  { name: '王小明', type: 'person', note: '營運部' },
+  { name: '李小華', type: 'person', note: '營運部' },
+  { name: '陳大文', type: 'person', note: '客服部（輪班）' },
+  { name: 'A 會議室', type: 'room', note: '3 樓・12 人・有視訊設備' },
+  { name: 'B 會議室', type: 'room', note: '2 樓・6 人' },
+  { name: '公務車', type: 'equipment', note: '' },
+];
+const events = [
+  { title: '每週例會', category: 'meeting', start: dayAt(0, 9), end: dayAt(0, 10), resources: ['王小明', '李小華', 'A 會議室'] },
+  // 這一筆固定包住「現在」，首頁的會議室才看得到「使用中」
+  { title: '站立會議', category: 'meeting', start: minutesFromNow(-20), end: minutesFromNow(40), resources: ['李小華', 'B 會議室'] },
+  { title: '客戶簡報', category: 'meeting', start: dayAt(0, 14), end: dayAt(0, 15, 30), resources: ['陳大文', 'A 會議室'] },
+  { title: '設備巡檢', category: 'maintenance', start: dayAt(0, 16), end: dayAt(0, 17), resources: ['李小華'] },
+  { title: '教育訓練', category: 'training', start: dayAt(1, 10), end: dayAt(1, 12), resources: ['王小明', '陳大文', 'A 會議室'] },
+  { title: '晚班', category: 'shift', start: dayAt(1, 18), end: dayAt(1, 22), resources: ['陳大文'] },
+  { title: '公務車外出', category: 'trip', start: dayAt(2, 13), end: dayAt(2, 17), resources: ['王小明', '公務車'] },
+];
+// 列表要照時間排，不然「現在」那筆（站立會議）會插在中間亂序
+events.sort((a, b) => a.start - b.start);
+const employees = [
+  { name: '王小明', dept: '營運部', job: '專員', manager: '李小華', hired: '2023-03-01' },
+  { name: '李小華', dept: '營運部', job: '主任', manager: '—', hired: '2021-08-16' },
+  { name: '陳大文', dept: '客服部', job: '客服專員', manager: '李小華', hired: '2024-01-08' },
+];
+const leaves = [
+  { who: '王小明', type: '特休', from: dayAt(5, 0), to: dayAt(6, 0), status: 'pending' },
+  { who: '李小華', type: '事假', from: dayAt(8, 0), to: dayAt(8, 0), status: 'pending' },
+  { who: '陳大文', type: '病假', from: dayAt(-1, 0), to: dayAt(-1, 0), status: 'approved' },
+];
+
+// ---------- 小工具 ----------
+const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+const pad = (number) => String(number).padStart(2, '0');
+const formatDay = (date) => `${date.getMonth() + 1}/${date.getDate()}（${weekdayNames[date.getDay()]}）`;
+const formatTime = (date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+const formatRange = (from, to) => (from.toDateString() === to.toDateString() ? formatDay(from) : `${formatDay(from)} – ${formatDay(to)}`);
+const isSameDay = (a, b) => a.toDateString() === b.toDateString();
+// 使用者輸入的問題會被印回畫面，所以一律跳脫，避免被當成 HTML
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]
+));
+
+// 線條圖示：直角、不填色，跟整體的方正風格一致；用 currentColor，反白時會跟著變色
+const iconPaths = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  events: '<rect x="3" y="5" width="18" height="16"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  resources: '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/>',
+  people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.6 0 4.5 1.8 4.5 5"/>',
+  leave: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
+  out: '<path d="M7 17L17 7M9 7h8v8"/><path d="M3 21h18"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  close: '<path d="M5 5l14 14M19 5L5 19"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4V5z"/>',
+  send: '<path d="M12 20V5M5 12l7-7 7 7"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  chevron: '<path d="M9 5l7 7-7 7"/>',
+};
+const iconSvg = (name, size = 20) => (
+  `<svg class="ico" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">${iconPaths[name]}</svg>`
+);
+// HTML 裡寫死的位置用 data-icon 標記，開頁時一次換成 SVG
+document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = iconSvg(el.dataset.icon, Number(el.dataset.size || 18)); });
+
+const typeLabels = { person: '人', room: '會議室', equipment: '設備' };
+const typeTones = { person: 'info', room: 'ok', equipment: 'warn' };
+const leaveLabels = { pending: '審核中', approved: '核准', rejected: '駁回' };
+const leaveTones = { pending: 'warn', approved: 'ok', rejected: 'bad' };
+const pendingLeaves = () => leaves.filter((leave) => leave.status === 'pending');
+
+// ---------- 模組登記表 ----------
+// 導覽列、首頁的方塊、列表頁都從這份清單長出來。
+// 新增功能 = 在這裡加一筆（名稱、圖示、欄位、資料來源），舊的畫面完全不用動
+const modules = [
+  {
+    key: 'events', name: '排程', en: 'Events', icon: 'events', addLabel: '新增排程',
+    desc: '一筆排程可以有多個資源，新增時會先檢查衝突',
+    count: () => events.length,
+    rows: () => events,
+    title: (row) => row.title,
+    columns: [
+      { label: '標題', value: (row) => row.title },
+      { label: '日期', value: (row) => formatDay(row.start) },
+      { label: '時間', value: (row) => `${formatTime(row.start)}–${formatTime(row.end)}` },
+      { label: '資源', value: (row) => row.resources.join('、') },
+      { label: '分類', value: (row) => row.category },
+    ],
+  },
+  {
+    key: 'resources', name: '資源', en: 'Resources', icon: 'resources', addLabel: '新增資源',
+    desc: '可以被排程的人、會議室與設備',
+    count: () => resources.length,
+    rows: () => resources,
+    title: (row) => row.name,
+    columns: [
+      { label: '名稱', value: (row) => row.name },
+      { label: '種類', value: (row) => ({ text: typeLabels[row.type], tone: typeTones[row.type] }) },
+      { label: '備註', value: (row) => row.note || '—' },
+    ],
+  },
+  {
+    key: 'people', name: '人員', en: 'People', icon: 'people', addLabel: '新增員工',
+    desc: '部門、職稱、主管與到職日',
+    count: () => employees.length,
+    rows: () => employees,
+    title: (row) => row.name,
+    columns: [
+      { label: '姓名', value: (row) => row.name },
+      { label: '部門', value: (row) => row.dept },
+      { label: '職稱', value: (row) => row.job },
+      { label: '主管', value: (row) => row.manager },
+      { label: '到職日', value: (row) => row.hired },
+    ],
+  },
+  {
+    key: 'leave', name: '請假', en: 'Time off', icon: 'leave', addLabel: '申請請假',
+    desc: '請假申請與審核狀態，只有核准的才算真的請假',
+    count: () => pendingLeaves().length,
+    rows: () => leaves,
+    title: (row) => `${row.who}・${row.type}`,
+    columns: [
+      { label: '員工', value: (row) => row.who },
+      { label: '假別', value: (row) => row.type },
+      { label: '日期', value: (row) => formatRange(row.from, row.to) },
+      { label: '狀態', value: (row) => ({ text: leaveLabels[row.status], tone: leaveTones[row.status] }) },
+    ],
+  },
+];
+
+// 左下角按鈕會把這筆加進登記表，用來示範「之後多一個功能」要做的事
+const extraModule = {
+  key: 'borrow', name: '設備借用', en: 'Gear out', icon: 'out', addLabel: '新增借用',
+  desc: '設備借出與歸還',
+  rows: () => [
+    { item: '公務車', who: '王小明', due: dayAt(2, 17) },
+    { item: '投影機', who: '李小華', due: dayAt(1, 12) },
+    { item: '筆記型電腦', who: '陳大文', due: dayAt(4, 18) },
+  ],
+  count: () => extraModule.rows().length,
+  title: (row) => row.item,
+  columns: [
+    { label: '品項', value: (row) => row.item },
+    { label: '借用人', value: (row) => row.who },
+    { label: '應歸還', value: (row) => `${formatDay(row.due)} ${formatTime(row.due)}` },
+  ],
+};
+
+// ---------- 主畫面 ----------
+const navEl = document.getElementById('nav');
+const contentEl = document.getElementById('content');
+const drawerEl = document.getElementById('drawer');
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+let extraAdded = false;
+
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3200);
+}
+
+// 格子可以是純文字，也可以是 { text, tone } 的標籤
+const plainText = (value) => (typeof value === 'object' ? value.text : String(value));
+const renderCell = (value) => (
+  typeof value === 'object'
+    ? `<span class="tag ${value.tone}">${escapeHtml(value.text)}</span>`
+    : escapeHtml(value)
+);
+
+function renderNav(activeKey) {
+  const items = [{ key: 'home', name: '首頁', icon: 'home' }, ...modules];
+  const dateStamp = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${String(now.getFullYear()).slice(2)}`;
+  navEl.innerHTML = `
+    <div class="brand">Schedule<br>Desk</div>
+    <div class="brandNote">${dateStamp} ${['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][now.getDay()]}</div>
+    ${items.map((item) => `
+      <button class="navItem ${item.key === activeKey ? 'active' : ''}" data-go="${item.key}">
+        ${iconSvg(item.icon, 18)}<span class="navLabel">${item.name}</span>
+        ${item.count ? `<span class="navCount">${item.count()}</span>` : ''}
+      </button>`).join('')}
+    <div class="sidebarFoot">
+      <span class="protoTag">DEMO DATA ・ 假資料</span>
+      <button class="ghostBtn" data-addmodule ${extraAdded ? 'disabled' : ''}>
+        ${extraAdded ? '已新增（重新整理可還原）' : '＋ 模擬新增一個模組'}
+      </button>
+      <span>模組登記表：${modules.length} 筆</span>
+    </div>`;
+}
+
+function pageHead(headline, subtitle, addLabel) {
+  return `
+    <header class="pageHead">
+      <div>
+        <h1 class="headline">${escapeHtml(headline)}</h1>
+        <p class="sub">${escapeHtml(subtitle)}</p>
+      </div>
+      <button class="primary" data-toast="原型：這裡會開「${escapeHtml(addLabel)}」表單，真的專案送出前要先做衝突檢查">${iconSvg('plus', 16)}${escapeHtml(addLabel)}</button>
+    </header>`;
+}
+
+function renderHome() {
+  const todayEvents = events.filter((event) => isSameDay(event.start, now));
+  const pending = pendingLeaves().sort((a, b) => a.from - b.from);
+  const rooms = resources.filter((resource) => resource.type === 'room');
+  const roomStates = rooms.map((room) => ({
+    room,
+    current: events.find((event) => event.resources.includes(room.name) && event.start <= now && now < event.end),
+  }));
+  const busyCount = roomStates.filter((state) => state.current).length;
+  const nextEvent = events.find((event) => event.start > now) || null;
+  // 數位相機那種「'26 11 20  15:13」的橘色日期戳記
+  const stamp = `'${String(now.getFullYear()).slice(2)}  ${pad(now.getMonth() + 1)}  ${pad(now.getDate())}  ${formatTime(now)}`;
+  const dateText = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} 星期${weekdayNames[now.getDay()]}`;
+
+  const stats = [
+    {
+      label: '今天的排程', value: todayEvents.length,
+      note: nextEvent && isSameDay(nextEvent.start, now) ? `下一場 ${formatTime(nextEvent.start)}` : '今天沒有下一場了',
+    },
+    { label: '待審核請假', value: pending.length, note: pending.length ? `最早 ${formatDay(pending[0].from)}` : '都處理完了' },
+    { label: '會議室使用中', value: `${busyCount}/${rooms.length}`, note: '此刻' },
+    { label: '排程總數', value: events.length, note: `${resources.length} 個資源可以排` },
+  ];
+
+  const featureHtml = nextEvent
+    ? `<p class="featureTitle">${escapeHtml(nextEvent.title)}</p>
+       <p class="featureMeta">${formatDay(nextEvent.start)} ${formatTime(nextEvent.start)}–${formatTime(nextEvent.end)} ／ ${escapeHtml(nextEvent.resources.join('、'))}</p>`
+    : '<p class="featureTitle">沒有接下來的排程</p><p class="featureMeta">&nbsp;</p>';
+
+  const roomsHtml = roomStates.map(({ room, current }) => `
+    <div class="roomRow">
+      <div>
+        <div class="roomName">${escapeHtml(room.name)}</div>
+        <div class="roomNote">${current ? escapeHtml(current.title) : escapeHtml(room.note)}</div>
+      </div>
+      <span class="tag ${current ? 'warn' : 'ok'}">${current ? '使用中' : '空著'}</span>
+    </div>`).join('');
+
+  const runSheetHtml = todayEvents.length
+    ? `<div class="tableWrap"><table>
+        <thead><tr><th>時間</th><th>標題</th><th>資源</th></tr></thead>
+        <tbody>${todayEvents.map((event) => `
+          <tr data-go="events">
+            <td class="mono">${formatTime(event.start)}–${formatTime(event.end)}</td>
+            <td>${escapeHtml(event.title)}</td>
+            <td>${escapeHtml(event.resources.join('、'))}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>`
+    : '<div class="empty">今天沒有排程</div>';
+
+  const attentionHtml = pending.length
+    ? pending.map((leave) => `
+        <button class="attentionItem" data-go="leave">
+          <span class="dot"></span>
+          <span>
+            <div class="attentionTitle">${escapeHtml(leave.who)}・${escapeHtml(leave.type)}</div>
+            <div class="attentionMeta">${escapeHtml(formatRange(leave.from, leave.to))}</div>
+          </span>
+          <span class="tag warn">審核中</span>
+        </button>`).join('')
+    : '<div class="empty">沒有待處理的項目</div>';
+
+  contentEl.innerHTML = `
+    <div class="inner">
+      ${pageHead('No double bookings.', `${dateText}。今天 ${todayEvents.length} 場排程，${pending.length} 筆請假等你審核。`, '新增排程')}
+
+      <section class="stats">
+        ${stats.map((stat) => `
+          <div class="stat">
+            <div class="statLabel">${stat.label}</div>
+            <div class="statValue">${stat.value}</div>
+            <div class="statNote">${escapeHtml(stat.note)}</div>
+          </div>`).join('')}
+      </section>
+
+      <section class="modulesBlock">
+        <h2 class="sectionTitle">All modules <small>(${modules.length})</small></h2>
+        <div class="launcher">
+          ${modules.map((mod, index) => `
+            <button class="tile" data-go="${mod.key}">
+              <span class="tileTop"><span class="tileNo">No.${pad(index + 1)}</span><span>↗</span></span>
+              <span class="tileIcon">${iconSvg(mod.icon, 34)}</span>
+              <span class="tileName">${escapeHtml(mod.en)}</span>
+              <span class="tileZh">${escapeHtml(mod.name)}</span>
+            </button>`).join('')}
+        </div>
+      </section>
+
+      <section class="split">
+        <article class="feature">
+          <div class="photo"><div class="photoInner"></div><span class="stamp">${stamp}</span></div>
+          <div class="featureBody">
+            <h3>Next up</h3>
+            ${featureHtml}
+            <button class="textLink" data-go="events">View all events →</button>
+          </div>
+        </article>
+        <div class="panel">
+          <h2 class="sectionTitle">Rooms right now</h2>
+          ${roomsHtml}
+        </div>
+      </section>
+
+      <section class="split">
+        <div class="panel">
+          <h2 class="sectionTitle">On the run sheet <small>(${todayEvents.length})</small></h2>
+          ${runSheetHtml}
+        </div>
+        <div class="panel">
+          <h2 class="sectionTitle">Needs a decision <small>(${pending.length})</small></h2>
+          ${attentionHtml}
+        </div>
+      </section>
+    </div>`;
+}
+
+function renderModule(mod) {
+  contentEl.innerHTML = `
+    <div class="inner">
+      ${pageHead(`${mod.en}.`, `${mod.name}・共 ${mod.rows().length} 筆。${mod.desc}`, mod.addLabel)}
+      <div class="toolbar"><input id="filterInput" type="search" placeholder="篩選${mod.name}…"></div>
+      <div class="tableWrap">
+        <table>
+          <thead><tr>${mod.columns.map((column) => `<th>${column.label}</th>`).join('')}</tr></thead>
+          <tbody id="rowsBody"></tbody>
+        </table>
+      </div>
+      <p class="hint">每個模組都長這樣：上方篩選與新增、中間列表、點一列從右側開詳情。</p>
+    </div>`;
+  const filterInput = document.getElementById('filterInput');
+  filterInput.addEventListener('input', () => renderRows(mod));
+  renderRows(mod);
+}
+
+function renderRows(mod, selectedIndex = null) {
+  const keyword = document.getElementById('filterInput').value.trim().toLowerCase();
+  const body = document.getElementById('rowsBody');
+  // 篩選後列的順序會變，所以 data-row 記的是原本的索引，點開詳情才不會開錯那一列
+  const visible = mod.rows()
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => !keyword || mod.columns.some((column) => plainText(column.value(row)).toLowerCase().includes(keyword)));
+  body.innerHTML = visible.length
+    ? visible.map(({ row, index }) => `
+        <tr data-row="${index}" class="${index === selectedIndex ? 'selected' : ''}">
+          ${mod.columns.map((column) => `<td>${renderCell(column.value(row))}</td>`).join('')}
+        </tr>`).join('')
+    : `<tr><td colspan="${mod.columns.length}" class="empty">沒有符合的資料</td></tr>`;
+}
+
+function openDrawer(mod, index) {
+  const row = mod.rows()[index];
+  drawerEl.innerHTML = `
+    <div class="drawerHead"><h2>${escapeHtml(mod.title(row))}</h2><button class="iconBtn" data-close aria-label="關閉">${iconSvg('close', 16)}</button></div>
+    <dl>${mod.columns.map((column) => `<dt>${column.label}</dt><dd>${renderCell(column.value(row))}</dd>`).join('')}</dl>
+    <div class="drawerFoot">
+      <button class="primary" data-toast="原型：這裡會開編輯表單（改時間時，衝突檢查要排除排程自己）">編輯</button>
+      <button class="danger" data-toast="原型：刪除前要先檢查有沒有關聯資料，例如已有排程的資源只能停用">刪除</button>
+    </div>`;
+  drawerEl.classList.add('open');
+  renderRows(mod, index);
+}
+
+function closeDrawer() {
+  drawerEl.classList.remove('open');
+  document.querySelectorAll('#rowsBody tr.selected').forEach((row) => row.classList.remove('selected'));
+}
+
+function currentModule() {
+  const key = location.hash.slice(1) || 'home';
+  return modules.find((mod) => mod.key === key) || null;
+}
+
+function render() {
+  const mod = currentModule();
+  closeDrawer();
+  renderNav(mod ? mod.key : 'home');
+  if (mod) renderModule(mod); else renderHome();
+  contentEl.scrollTop = 0;
+}
+
+function navigate(key) {
+  // 網址放 hash：重新整理會停在同一頁，也方便把某一頁直接傳給別人看
+  if (location.hash.slice(1) === key) render(); else location.hash = key;
+}
+
+// ---------- 聊天面板：收合與拖曳調整寬度 ----------
+const appEl = document.getElementById('app');
+const chatEl = document.getElementById('chat');
+const chatLog = document.getElementById('chatLog');
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
+const resizerEl = document.getElementById('chatResizer');
+const fabEl = document.getElementById('chatFab');
+const mobileQuery = window.matchMedia('(max-width: 760px)');
+const chatDefaultWidth = 400;
+const chatMinWidth = 320;
+// 上限取視窗的 60%，不然拉太寬會把主內容擠到看不見
+const chatMaxWidth = () => Math.max(chatMinWidth, Math.min(760, Math.round(window.innerWidth * 0.6)));
+let chatWidth = chatDefaultWidth;
+let chatOpen = !mobileQuery.matches;   // 桌面預設展開，手機預設收起來（展開會蓋滿整個畫面）
+
+function setChatWidth(width) {
+  chatWidth = Math.min(chatMaxWidth(), Math.max(chatMinWidth, Math.round(width)));
+  appEl.style.setProperty('--chat-w', `${chatWidth}px`);
+  resizerEl.setAttribute('aria-valuenow', String(chatWidth));
+  resizerEl.setAttribute('aria-valuemax', String(chatMaxWidth()));
+}
+
+function setChatOpen(open, { focus = false } = {}) {
+  chatOpen = open;
+  chatEl.classList.toggle('collapsed', !open);
+  fabEl.hidden = open;
+  // 收合時輸入框會被隱藏，但 focus 不一定馬上移走；不主動放掉的話，之後按 / 會被當成「正在打字」而忽略
+  if (!open && chatEl.contains(document.activeElement)) document.activeElement.blur();
+  if (open && focus) chatInput.focus();
+}
+
+resizerEl.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = chatWidth;
+  appEl.classList.add('dragging');
+  // 面板在右邊，把手往左拖 = 變寬，所以是「起點 − 現在」
+  // 監聽加在 window 而不是把手上：滑鼠快速甩出把手範圍時才不會中斷
+  const onMove = (moveEvent) => setChatWidth(startWidth + (startX - moveEvent.clientX));
+  const onUp = () => {
+    appEl.classList.remove('dragging');
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+});
+// 鍵盤也能調：focus 把手後按 ←／→，Home 還原
+resizerEl.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowLeft') { event.preventDefault(); setChatWidth(chatWidth + 24); }
+  if (event.key === 'ArrowRight') { event.preventDefault(); setChatWidth(chatWidth - 24); }
+  if (event.key === 'Home') { event.preventDefault(); setChatWidth(chatDefaultWidth); }
+});
+resizerEl.addEventListener('dblclick', () => setChatWidth(chatDefaultWidth));
+window.addEventListener('resize', () => setChatWidth(chatWidth));   // 視窗縮小時，上限會跟著變，要重新夾一次
+mobileQuery.addEventListener('change', () => setChatOpen(!mobileQuery.matches));
+
+// ---------- 聊天面板：對話（示意） ----------
+// 真的專案這裡會把問題交給 text2sql；原型只有三題寫死的答案，結果用上面的假資料算出來
+let lastTopic = null;   // 追問要靠上一題問了什麼；真的 text2sql 要支援追問，得把前面的問答一起帶進 prompt
+
+function eventsOnDay(offset) {
+  return {
+    topic: 'eventsByDay',
+    sql: `SELECT e.title, e.start_at, e.end_at, STRING_AGG(r.name, '、') AS resources
+FROM events e
+JOIN event_resources er ON er.event_id = e.id
+JOIN resources r ON r.id = er.resource_id
+WHERE e.start_at >= CURRENT_DATE + ${offset} AND e.start_at < CURRENT_DATE + ${offset + 1}
+GROUP BY e.id ORDER BY e.start_at;`,
+    columns: ['標題', '時間', '資源'],
+    rows: events
+      .filter((event) => isSameDay(event.start, dayAt(offset, 0)))
+      .map((event) => [event.title, `${formatTime(event.start)}–${formatTime(event.end)}`, event.resources.join('、')]),
+    followUp: offset === 1 ? '那後天呢？' : null,
+  };
+}
+
+function eventsPerPerson() {
+  const counts = new Map(resources.filter((resource) => resource.type === 'person').map((resource) => [resource.name, 0]));
+  events.forEach((event) => event.resources.forEach((name) => {
+    if (counts.has(name)) counts.set(name, counts.get(name) + 1);
+  }));
+  return {
+    topic: 'eventsPerPerson',
+    sql: `SELECT r.name, COUNT(DISTINCT e.id) AS event_count
+FROM resources r
+JOIN event_resources er ON er.resource_id = r.id
+JOIN events e ON e.id = er.event_id
+WHERE r.type = 'person'
+GROUP BY r.name ORDER BY event_count DESC;`,
+    columns: ['姓名', '排程數'],
+    rows: [...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => [name, String(count)]),
+    followUp: null,
+  };
+}
+
+function pendingLeaveAnswer() {
+  return {
+    topic: 'pendingLeaves',
+    sql: `SELECT r.name, l.leave_type, l.start_at, l.end_at
+FROM leave_requests l
+JOIN employees emp ON emp.id = l.employee_id
+JOIN resources r ON r.id = emp.resource_id
+WHERE l.status = 'pending';`,
+    columns: ['員工', '假別', '日期'],
+    rows: pendingLeaves().map((leave) => [leave.who, leave.type, formatRange(leave.from, leave.to)]),
+    followUp: null,
+  };
+}
+
+const cannedAnswers = [
+  { question: '明天有哪些行程？', build: () => eventsOnDay(1) },
+  { question: '每個人各有幾筆排程？', build: eventsPerPerson },
+  { question: '有哪些請假還在審核中？', build: pendingLeaveAnswer },
+];
+// 追問只有在上一題的主題對得上時才答得出來，示範「接著問」需要對話紀錄
+const followUpAnswers = [
+  { question: '那後天呢？', needsTopic: 'eventsByDay', build: () => eventsOnDay(2) },
+];
+
+const chipsHtml = (questions) => `
+  <div class="chips">
+    ${questions.map((question) => `<button class="chip" data-ask="${escapeHtml(question)}">${escapeHtml(question)}</button>`).join('')}
+  </div>`;
+const canned = () => cannedAnswers.map((item) => item.question);
+
+// 時間範圍（例如 10:00–12:00）不該在中間斷行，所以這種格子固定不換行
+const isTimeRange = (cell) => /^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(cell);
+
+function renderAnswerTable(columns, rows) {
+  if (!rows.length) return '';
+  return `<div class="tableWrap"><table>
+    <thead><tr>${columns.map((column) => `<th>${column}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td class="${isTimeRange(cell) ? 'mono nowrap' : ''}">${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function appendMessage(role, html) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.innerHTML = html;
+  chatLog.appendChild(el);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return el;
+}
+
+function botReplyHtml(text) {
+  const meta = `<div class="msgMeta">DESK ${formatTime(new Date())}</div>`;
+  const direct = cannedAnswers.find((item) => item.question === text);
+  const followUp = followUpAnswers.find((item) => item.question === text);
+
+  if (followUp && lastTopic !== followUp.needsTopic) {
+    return `${meta}<div class="bubble">這句要接在上一個問題後面。原型裡請先問「明天有哪些行程？」，再問「${escapeHtml(followUp.question)}」。</div>`;
+  }
+  const answer = direct ? direct.build() : followUp ? followUp.build() : null;
+  if (!answer) {
+    return `${meta}<div class="bubble">原型沒有接模型，這題我答不出來。真的專案這裡會把問題交給 text2sql。</div>${chipsHtml(canned())}`;
+  }
+  lastTopic = answer.topic;
+  const lead = answer.rows.length ? `找到 ${answer.rows.length} 筆。` : '查詢成功，但沒有符合的資料。';
+  return `${meta}
+    <div class="bubble">
+      <div class="answerLead">${lead}</div>
+      ${renderAnswerTable(answer.columns, answer.rows)}
+      <details class="sqlBox"><summary>SQL</summary><pre class="sql">${escapeHtml(answer.sql)}</pre></details>
+    </div>
+    ${answer.followUp ? chipsHtml([answer.followUp]) : ''}`;
+}
+
+function sendMessage(rawText) {
+  const text = rawText.trim();
+  if (!text) return;
+  appendMessage('user', `<div class="msgMeta">YOU ${formatTime(new Date())}</div><div class="bubble">${escapeHtml(text)}</div>`);
+  const thinking = appendMessage('bot', '<div class="msgMeta">DESK</div><div class="bubble thinking">查詢中<span class="caret"></span></div>');
+  // 假裝模型在想：真的 text2sql 要等幾秒，面板要有「處理中」的樣子
+  setTimeout(() => {
+    thinking.innerHTML = botReplyHtml(text);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }, 600);
+}
+
+function resetChat() {
+  chatLog.innerHTML = '';
+  lastTopic = null;
+  appendMessage('bot', `
+    <div class="msgMeta">DESK</div>
+    <div class="bubble">問我排程相關的問題。<br><span class="mono">原型：只有下面幾題有寫死的答案，結果是用假資料算的，不是模型產生的。</span></div>
+    ${chipsHtml(canned())}`);
+}
+
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = `${Math.min(chatInput.scrollHeight, 120)}px`;
+});
+chatInput.addEventListener('keydown', (event) => {
+  // 中文輸入法選字時按 Enter 是「確定選字」，不是送出，要用 isComposing 擋掉
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    chatForm.requestSubmit();
+  }
+  if (event.key === 'Escape') chatInput.blur();
+});
+chatForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = chatInput.value;
+  chatInput.value = '';
+  chatInput.style.height = 'auto';
+  sendMessage(text);
+});
+
+// ---------- 事件 ----------
+document.addEventListener('click', (event) => {
+  const addModuleButton = event.target.closest('[data-addmodule]');
+  if (addModuleButton && !extraAdded) {
+    modules.push(extraModule);
+    extraAdded = true;
+    navigate(extraModule.key);
+    showToast('已在登記表加一筆「設備借用」：導覽列、首頁方塊、列表頁都自己長出來，舊的畫面一行都沒改');
+    return;
+  }
+  const goTarget = event.target.closest('[data-go]');
+  if (goTarget) {
+    navigate(goTarget.dataset.go);
+    // 手機上聊天面板是全螢幕，不收起來的話點了導覽也看不到頁面
+    if (mobileQuery.matches) setChatOpen(false);
+    return;
+  }
+
+  const askTarget = event.target.closest('[data-ask]');
+  if (askTarget) { sendMessage(askTarget.dataset.ask); return; }
+  if (event.target.closest('[data-chat-clear]')) { resetChat(); return; }
+  if (event.target.closest('[data-chat-toggle]')) { setChatOpen(!chatOpen); return; }
+  if (event.target.closest('[data-chat-open]')) { setChatOpen(true, { focus: true }); return; }
+
+  if (event.target.closest('[data-close]')) { closeDrawer(); return; }
+
+  const toastTarget = event.target.closest('[data-toast]');
+  if (toastTarget) { showToast(toastTarget.dataset.toast); return; }
+
+  const rowTarget = event.target.closest('#rowsBody tr[data-row]');
+  const mod = currentModule();
+  if (rowTarget && mod) openDrawer(mod, Number(rowTarget.dataset.row));
+});
+
+document.addEventListener('keydown', (event) => {
+  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
+  if (event.key === '/' && !typing) { event.preventDefault(); setChatOpen(true, { focus: true }); }
+  if (event.key === 'Escape' && !typing) closeDrawer();
+});
+
+window.addEventListener('hashchange', render);
+setChatWidth(chatDefaultWidth);
+setChatOpen(chatOpen);
+resetChat();
+render();
+</script>
+</body>
+</html>
