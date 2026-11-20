@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -72,6 +72,31 @@ def testSeedDemoNeedsAnAdminBecauseBookingsNeedACreator(migratedUrl):
     cli.seedDemoCommand(migratedUrl)
   assert info.value.code == "NO_ADMIN"
   assert countRows(migratedUrl, "employees") == 0
+
+
+def testSeedDemoBookingsFillsComingWeekAndSkipsConflicts(migratedUrl):
+  cli.createUserCommand(migratedUrl, "admin@example.com", "admin", "correct-horse")
+  cli.seedDemoCommand(migratedUrl)
+  before = countRows(migratedUrl, "bookings")
+  created, skipped = cli.seedDemoBookingsCommand(migratedUrl)
+  assert created > 0
+  assert countRows(migratedUrl, "bookings") == before + created
+  with openDb(migratedUrl) as conn:
+    days = {row["day"] for row in conn.execute("SELECT DISTINCT start_at::date AS day FROM bookings WHERE created_at IS NOT NULL").fetchall()}
+    audits = [row for row in listAudit(conn, module="booking", limit=500) if row["action"] == "createBooking"]
+  assert {date.today() + timedelta(days=offset) for offset in range(7)} <= days
+  assert len(audits) == before + created
+  # 第二次執行時每一筆都會撞到第一次寫入的，全部略過，不會重複新增
+  assert cli.seedDemoBookingsCommand(migratedUrl) == (0, created + skipped)
+  assert countRows(migratedUrl, "bookings") == before + created
+
+
+def testSeedDemoBookingsNeedsEmployees(migratedUrl):
+  cli.createUserCommand(migratedUrl, "admin@example.com", "admin", "correct-horse")
+  with pytest.raises(AppError) as info:
+    cli.seedDemoBookingsCommand(migratedUrl)
+  assert info.value.code == "NO_EMPLOYEES"
+  assert countRows(migratedUrl, "bookings") == 0
 
 
 def testMainRejectsPasswordOnCommandLine(capsys):

@@ -89,6 +89,65 @@ def seedDemoCommand(databaseUrl: str) -> None:
     book(8, 15, 1, "面試", "面談", [smallRoom], chang, [lin])
 
 
+# 每種資源三種「一天的排法」，依日期與資源輪流套用，畫面上每天每列看起來才不會一樣
+# 每一項：(開始的小時, 時數, 標題, 類別)
+demoDayPatterns = {
+  "room": [
+    [(9, 1, "晨會", "會議"), (13.5, 1.5, "專案討論", "會議"), (16, 1, "一對一面談", "面談")],
+    [(10, 2, "客戶簡報", "簡報"), (14, 1, "跨部門協調", "會議")],
+    [(8.5, 1, "晨會", "會議"), (11, 1, "面試", "面談"), (15, 2, "設計審查", "會議")],
+  ],
+  "equipment": [
+    [(10, 2, "客戶簡報", "簡報")],
+    [(13, 3, "教育訓練", "訓練")],
+    [(9, 1.5, "產品展示", "簡報"), (15, 1, "內部分享", "簡報")],
+  ],
+  "vehicle": [
+    [(9, 4, "客戶拜訪", "外出")],
+    [(13, 4.5, "送件", "外出")],
+    [(8, 3, "廠商會勘", "外出"), (14, 2, "銀行洽公", "外出")],
+  ],
+}
+demoDays = 7
+
+
+def seedDemoBookingsCommand(databaseUrl: str) -> tuple[int, int]:
+  """從今天起寫入 7 天的示範排程，回傳（新增幾筆、略過幾筆）。跟既有排程撞期的略過，所以可以重複執行。"""
+  with openDb(databaseUrl) as conn:
+    admin = conn.execute("SELECT id FROM users WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1").fetchone()
+    if admin is None:
+      raise AppError("NO_ADMIN", "示範排程需要一個建立者：請先用 createUser 建立管理員", 409)
+    employeeIds = [row["id"] for row in conn.execute("SELECT id FROM employees WHERE is_active ORDER BY id").fetchall()]
+    if not employeeIds:
+      raise AppError("NO_EMPLOYEES", "示範排程需要主辦人：請先建立員工（或在空的資料庫執行 seedDemo）", 409)
+    resources = conn.execute("SELECT id, kind FROM resources WHERE is_active ORDER BY id").fetchall()
+    if not resources:
+      raise AppError("NO_RESOURCES", "示範排程需要資源：請先建立資源（或在空的資料庫執行 seedDemo）", 409)
+    # 經過 service 寫入：會留稽核紀錄、會檢查撞期，跟從畫面新增的排程走同一條路
+    actor = Actor(userId=admin["id"], role="admin", employeeId=None)
+    today = datetime.combine(date.today(), time.min)
+    created = skipped = 0
+    for day in range(demoDays):
+      for index, resource in enumerate(resources):
+        patterns = demoDayPatterns[resource["kind"]]
+        for slot, (hour, hours, title, category) in enumerate(patterns[(day + index) % len(patterns)]):
+          startAt = today + timedelta(days=day, hours=hour)
+          organizerId = employeeIds[(day + index + slot) % len(employeeIds)]
+          attendeeIds = [employeeId for employeeId in employeeIds[:2] if employeeId != organizerId]
+          data = BookingInput(
+            title, category, startAt, startAt + timedelta(hours=hours), [resource["id"]], attendeeIds,
+            organizerEmployeeId=organizerId, acknowledgeWarnings=True,
+          )
+          try:
+            bookingService.createBooking(conn, actor, data)
+            created += 1
+          except AppError as error:
+            if error.code != "RESOURCE_CONFLICT":
+              raise
+            skipped += 1
+  return created, skipped
+
+
 def buildParser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="python -m app.cli", description="請假排班系統的管理指令（在 backend/ 目錄執行）")
   commands = parser.add_subparsers(dest="command", required=True)
@@ -98,6 +157,7 @@ def buildParser() -> argparse.ArgumentParser:
   createUser.add_argument("--role", required=True, choices=roleChoices)
   createUser.add_argument("--employee-no", dest="employeeNo", help="連到這個員工編號的員工")
   commands.add_parser("seedDemo", help="寫入示範資料（只能用在沒有員工的開發資料庫）")
+  commands.add_parser("seedDemoBookings", help="從今天起寫入 7 天的示範排程（跟既有排程撞期的略過，可以重複執行）")
   return parser
 
 
@@ -126,6 +186,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "seedDemo":
       seedDemoCommand(databaseUrl)
       print("已寫入示範資料")
+    elif args.command == "seedDemoBookings":
+      created, skipped = seedDemoBookingsCommand(databaseUrl)
+      print(f"已新增 {created} 筆示範排程，略過 {skipped} 筆（跟既有排程撞期）")
   except AppError as error:
     print(f"錯誤：{error.message}", file=sys.stderr)
     return 1

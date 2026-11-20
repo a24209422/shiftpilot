@@ -13,10 +13,12 @@ python -m pip install -r requirements.txt
 python -m app.cli migrate                  # 建立資料表（已套用過的會跳過）
 python -m app.cli createUser --email admin@example.com --role admin   # 會互動輸入兩次密碼
 python -m app.cli seedDemo                 # 選用：寫入示範的部門、員工、資源、排程
+python -m app.cli seedDemoBookings         # 選用：從今天起寫入 7 天的示範排程，讓時間軸有東西看
 ```
 
 - 密碼只能互動輸入，不接受命令列參數（命令列會留在 shell 歷史裡）。
 - `seedDemo` 只能用在沒有任何員工的開發資料庫，而且要先有管理員（示範排程的建立者）。它不會建立帳號。
+- `seedDemoBookings` 可以用在已經有資料的開發資料庫，需要管理員、員工、資源都至少有一個。排程經過一般的新增流程寫入（有稽核紀錄、檢查撞期），跟既有排程撞期的那筆會略過，所以重複執行不會重複新增；隔幾天再執行，會補上新的日期。
 - 資料庫裡如果還有**舊版**（Streamlit 版本）的資料表，名稱會和新結構衝突，`migrate` 會失敗。舊版只有示範資料，可以用 `docker compose down -v` 清掉整個資料庫再重來（會刪除資料庫裡的所有資料）。
 
 ## 啟動
