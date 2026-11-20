@@ -42,9 +42,10 @@ def writeAudit(
   after: dict | None,
 ) -> int:
   row = conn.execute(
-    "INSERT INTO audit_log (user_id, module, action, entity, entity_id, before, after) "
-    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) RETURNING id",
-    (actor.userId if actor else None, module, action, entity, str(entityId), toJson(before), toJson(after)),
+    "INSERT INTO audit_log (at, user_id, module, action, entity, entity_id, before, after) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) RETURNING id",
+    # 時間由應用程式給，不用資料庫的 now()：資料庫容器是 UTC，和排程使用的本地時間會差上好幾個小時
+    (datetime.now(), actor.userId if actor else None, module, action, entity, str(entityId), toJson(before), toJson(after)),
   ).fetchone()
   return row["id"]
 
@@ -96,8 +97,8 @@ def createUser(
   checkPasswordLength(password)
   with mapDbErrors(conn):
     row = conn.execute(
-      "INSERT INTO users (email, password_hash, role, employee_id) VALUES (%s, %s, %s, %s) RETURNING id",
-      (email, hashPassword(password), role, employeeId),
+      "INSERT INTO users (email, password_hash, role, employee_id, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+      (email, hashPassword(password), role, employeeId, datetime.now()),
     ).fetchone()
   user = getUser(conn, row["id"])
   # 稽核只放 getUser 的欄位：那裡沒有密碼也沒有雜湊

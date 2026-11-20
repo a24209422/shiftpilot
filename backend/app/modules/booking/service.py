@@ -318,8 +318,9 @@ def createBooking(conn: Connection, actor: Actor, data: BookingInput) -> dict:
   try:
     with savepoint(conn):
       bookingId = conn.execute(
-        "INSERT INTO bookings (title, category, start_at, end_at, note, created_by) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-        (title, category, data.startAt, data.endAt, data.note, actor.userId),
+        "INSERT INTO bookings (title, category, start_at, end_at, note, created_by, created_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (title, category, data.startAt, data.endAt, data.note, actor.userId, datetime.now()),
       ).fetchone()["id"]
       insertResources(conn, bookingId, resourceIds)
       insertParticipants(conn, bookingId, organizerId, attendeeIds)
