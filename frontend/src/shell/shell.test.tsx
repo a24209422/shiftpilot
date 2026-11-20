@@ -82,3 +82,14 @@ test("testLogoutReturnsToLogin", async () => {
   expect(api.calls.some((call) => call.path === "/api/auth/logout")).toBe(true);
   expect(screen.queryByText("登入已過期，請重新登入")).toBeNull();
 });
+
+test("testSidebarDateStampIsYearMonthDay", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 21, 9, 0));
+  try {
+    renderApp({ permissions: ["booking.read"], registrations });
+    expect(await screen.findByText("2026.11.21 SAT")).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});

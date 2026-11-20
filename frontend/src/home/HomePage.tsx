@@ -4,11 +4,11 @@ import { apiGet } from "../api/client";
 import type { BookingSummary } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
 import { formatRange, formatTime, toLocalDate } from "../forms/time";
-import { visiblePages, type ModuleRegistration } from "../modules/registry";
+import { navPages, type ModuleRegistration } from "../modules/registry";
 import { Icon } from "../shell/icons";
 import { PageHead } from "../shell/PageHead";
+import { MonthCalendar } from "./MonthCalendar";
 
-const weekdayNames = ["日", "一", "二", "三", "四", "五", "六"];
 const pad = (value: number) => String(value).padStart(2, "0");
 
 export function HomePage({ registrations }: { registrations: ModuleRegistration[] }) {
@@ -16,12 +16,11 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
   const navigate = useNavigate();
   const canSee = can("booking.read");
   const { data: summary } = useQuery({ queryKey: ["summary"], queryFn: () => apiGet<BookingSummary>("/api/booking/summary"), enabled: canSee });
-  const pages = visiblePages(registrations, can);
+  const pages = navPages(registrations, can);
 
   const now = new Date();
   const today = toLocalDate(now);
   const stamp = `'${String(now.getFullYear()).slice(2)}  ${pad(now.getMonth() + 1)}  ${pad(now.getDate())}  ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const dateText = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} 星期${weekdayNames[now.getDay()]}`;
 
   const todayBookings = summary?.todayBookings ?? [];
   const next = summary?.nextBooking ?? null;
@@ -39,8 +38,7 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
   return (
     <div className="inner">
       <PageHead
-        headline="No double bookings."
-        sub={`${dateText}。今天 ${todayBookings.length} 場排程。`}
+        headline="Ask, don’t dig."
         action={can("booking.write") && (
           <button className="primary" type="button" onClick={() => navigate("/bookings?new=1")}><Icon name="plus" size={16} />新增排程</button>
         )}
@@ -59,7 +57,7 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
       )}
 
       <section className="modulesBlock">
-        <h2 className="sectionTitle">All modules <small>({pages.length})</small></h2>
+        <h2 className="sectionTitle big">All modules</h2>
         <div className="launcher">
           {pages.map((page, index) => (
             <button className="tile" type="button" key={page.key} onClick={() => navigate(page.path)}>
@@ -109,7 +107,7 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
           </section>
 
           <section className="panel">
-            <h2 className="sectionTitle">On the run sheet <small>({todayBookings.length})</small></h2>
+            <h2 className="sectionTitle big">On the run sheet <small>({todayBookings.length})</small></h2>
             {todayBookings.length === 0 ? <div className="empty">今天沒有排程</div> : (
               <div className="tableWrap">
                 <table>
@@ -129,6 +127,7 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
           </section>
         </>
       )}
+      <MonthCalendar />
     </div>
   );
 }

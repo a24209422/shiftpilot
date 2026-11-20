@@ -6,3 +6,5 @@ legacy/evals/results/
 
 frontend/node_modules/
 frontend/dist/
+
+.webtoagent/

@@ -11,6 +11,8 @@ export interface PageRegistration {
   requires: string;
   element: ReactNode;
   order: number;
+  // 不放在左側導覽與首頁方塊（例如行事曆改由首頁月曆進入）；頁面本身仍然存在
+  hideFromNav?: boolean;
 }
 
 export interface ModuleRegistration {
@@ -24,3 +26,6 @@ export function visiblePages(registrations: ModuleRegistration[], can: (permissi
     .filter((page) => can(page.requires))
     .sort((a, b) => a.order - b.order);
 }
+
+export const navPages = (registrations: ModuleRegistration[], can: (permission: string) => boolean) =>
+  visiblePages(registrations, can).filter((page) => !page.hideFromNav);

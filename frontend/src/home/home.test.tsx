@@ -1,6 +1,7 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Booking, BookingSummary } from "../api/types";
+import { allRegistrations } from "../modules";
 import { bookingRegistration } from "../modules/booking";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp } from "../test/renderApp";
@@ -78,4 +79,97 @@ test("testNoLeaveOrDemoContent", async () => {
   open();
   await screen.findByText("Next up");
   expect(document.body.textContent).not.toMatch(/請假|DEMO|Needs a decision/);
+});
+
+const monthRoutes: MockRoutes = {
+  "GET /api/org/calendarDays": () => ({ body: [{ day: "2026-11-27", kind: "holiday", name: "測試假日" }] }),
+  "GET /api/booking/bookings": () => ({ body: [today1, today2, booking(3, "跨日", "2026-11-21T22:00:00", "2026-11-22T06:00:00")] }),
+};
+
+const openWithOrg = () =>
+  renderApp({
+    route: "/", permissions: ["booking.read", "booking.write", "org.read"], registrations: allRegistrations,
+    routes: {
+      "GET /api/booking/summary": () => ({ body: summary }),
+      "GET /api/booking/resources": () => ({ body: [] }),
+      "GET /api/org/employees": () => ({ body: [] }),
+      ...monthRoutes,
+    },
+  });
+
+test("testCalendarIsNotATile", async () => {
+  openWithOrg();
+  const launcher = (await screen.findByText("All modules")).closest(".modulesBlock") as HTMLElement;
+  expect(within(launcher).queryByText("行事曆")).toBeNull();
+  expect(within(launcher).getByText("排程")).toBeInTheDocument();
+});
+
+test("testMonthCalendarShowsHolidaysAndBookingCounts", async () => {
+  const { api } = openWithOrg();
+  const calendar = (await screen.findByText("2026 / 11")).closest(".monthBlock") as HTMLElement;
+  expect(await within(calendar).findByText("測試假日")).toBeInTheDocument();
+  const cell = (day: string) => calendar.querySelector(`[data-day="${day}"]`) as HTMLElement;
+  await waitFor(() => expect(within(cell("2026-11-20")).getByText("2 筆")).toBeInTheDocument());
+  // 跨日的排程兩天都要算到
+  expect(within(cell("2026-11-21")).getByText("1 筆")).toBeInTheDocument();
+  expect(within(cell("2026-11-22")).getByText("1 筆")).toBeInTheDocument();
+  const days = api.calls.find((call) => call.path === "/api/org/calendarDays")!;
+  expect([days.params.get("from"), days.params.get("to")]).toEqual(["2026-11-01", "2026-11-30"]);
+});
+
+test("testClickingDayOpensThatWeek", async () => {
+  openWithOrg();
+  const calendar = (await screen.findByText("2026 / 11")).closest(".monthBlock") as HTMLElement;
+  await userEvent.setup().click(calendar.querySelector('[data-day="2026-11-27"]') as HTMLElement);
+  await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/bookings?week=2026-11-23"));
+});
+
+test("testMonthNavigation", async () => {
+  const { api } = openWithOrg();
+  await screen.findByText("2026 / 11");
+  await userEvent.setup().click(screen.getByRole("button", { name: "下個月" }));
+  expect(await screen.findByText("2026 / 12")).toBeInTheDocument();
+  await waitFor(() => expect(api.calls.some((call) => call.path === "/api/org/calendarDays" && call.params.get("from") === "2026-12-01")).toBe(true));
+});
+
+test("testCalendarNotInSidebarButManageButtonForHr", async () => {
+  renderApp({
+    route: "/", permissions: ["booking.read", "org.read", "org.manage"], registrations: allRegistrations,
+    routes: { "GET /api/booking/summary": () => ({ body: summary }), ...monthRoutes },
+  });
+  await screen.findByText("2026 / 11");
+  expect(screen.queryByRole("link", { name: /行事曆/ })).toBeNull();
+  await userEvent.setup().click(screen.getByRole("button", { name: "管理假日" }));
+  await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/calendar"));
+});
+
+test("testManageHolidaysHiddenWithoutPermission", async () => {
+  openWithOrg();
+  await screen.findByText("2026 / 11");
+  expect(screen.queryByRole("button", { name: "管理假日" })).toBeNull();
+});
+
+test("testDayPopoverListsThatDaysBookings", async () => {
+  openWithOrg();
+  const calendar = (await screen.findByText("2026 / 11")).closest(".monthBlock") as HTMLElement;
+  const cell = () => calendar.querySelector('[data-day="2026-11-20"]') as HTMLElement;
+  await waitFor(() => expect(cell().querySelector(".dayPopover")).not.toBeNull());
+  const popover = cell().querySelector(".dayPopover") as HTMLElement;
+  expect(within(popover).getByText("晨會")).toBeInTheDocument();
+  expect(within(popover).getByText("09:00–10:00")).toBeInTheDocument();
+  expect(within(popover).getByText("客戶簡報")).toBeInTheDocument();
+  // 跨日的排程顯示完整日期時間
+  const crossPopover = calendar.querySelector('[data-day="2026-11-22"] .dayPopover') as HTMLElement;
+  expect(within(crossPopover).getByText("11/21（六） 22:00 – 11/22（日） 06:00")).toBeInTheDocument();
+  // 沒有排程的日子沒有小框
+  expect(calendar.querySelector('[data-day="2026-11-25"] .dayPopover')).toBeNull();
+});
+
+test("testBusyDaysMarkedAndHomeHasNoSubtitle", async () => {
+  openWithOrg();
+  const calendar = (await screen.findByText("2026 / 11")).closest(".monthBlock") as HTMLElement;
+  await waitFor(() => expect(calendar.querySelector('[data-day="2026-11-20"]')).toHaveClass("busy"));
+  expect(calendar.querySelector('[data-day="2026-11-25"]')).not.toHaveClass("busy");
+  expect(document.querySelector(".pageHead .sub")).toBeNull();
+  expect(screen.getByText("All modules").textContent).toBe("All modules");
 });

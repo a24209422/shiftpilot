@@ -12,10 +12,10 @@ const navClass = ({ isActive }: { isActive: boolean }) => `navItem${isActive ? "
 export function Sidebar({ pages, onChangePassword }: { pages: PageRegistration[]; onChangePassword(): void }) {
   const { user, logout } = useAuth();
   const now = new Date();
-  const stamp = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${String(now.getFullYear()).slice(2)} ${dayNames[now.getDay()]}`;
+  const stamp = `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} ${dayNames[now.getDay()]}`;
   return (
     <nav className="sidebar">
-      <div className="brand">Schedule<br />Desk</div>
+      <div className="brand">Ops<br />Desk</div>
       <div className="brandNote">{stamp}</div>
       <NavLink to="/" end className={navClass}><Icon name="home" size={18} /><span className="navLabel">首頁</span></NavLink>
       {pages.map((page) => (

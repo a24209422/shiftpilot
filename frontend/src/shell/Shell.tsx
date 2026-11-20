@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Outlet } from "react-router";
 import { usePermissions } from "../auth/usePermissions";
 import type { ModuleRegistration } from "../modules/registry";
-import { visiblePages } from "../modules/registry";
+import { navPages } from "../modules/registry";
 import { ChangePasswordDrawer } from "./ChangePasswordForm";
 import { DrawerHostContext } from "./Drawer";
 import { SidePanel } from "./SidePanel";
@@ -17,7 +17,7 @@ export function Shell({ registrations }: { registrations: ModuleRegistration[] }
     <ToastProvider>
       <DrawerHostContext.Provider value={host}>
         <div className="app">
-          <Sidebar pages={visiblePages(registrations, can)} onChangePassword={() => setPasswordOpen(true)} />
+          <Sidebar pages={navPages(registrations, can)} onChangePassword={() => setPasswordOpen(true)} />
           <div className="main">
             <div className="body" ref={setHost}>
               <main className="content">{isLoading ? <div className="empty">載入中…</div> : <Outlet />}</main>
