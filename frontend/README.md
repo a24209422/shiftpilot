@@ -23,6 +23,7 @@ src/
   shell/      側邊欄、詳情面板（drawer）、表格、提示訊息；詳情面板的狀態放網址（?id=3、?id=3&edit=1、?new=1）
   forms/      表單欄位、useSubmit（防連點、欄位錯誤）、時間格式（全部用本地時間，不經過 UTC）
   home/       首頁
+  timeline/   時間軸頁與時間計算；資料由各模組登記的檢視、來源提供
   modules/    每個後端模組一個資料夾，裡面是頁面與 index.ts 登記
   styles/     global.css（從原型搬來的樣式）
 ```
@@ -33,6 +34,10 @@ src/
 2. 把它加進 `src/modules/index.ts` 的 `allRegistrations`。
 
 導覽列與首頁方塊會自己長出來；沒有權限的人看不到，直接輸入網址會看到「沒有權限看這個頁面」。
+
+## 讓模組的資料出現在時間軸
+
+在模組的 `ModuleRegistration` 加 `timelineSources`（提供長條）；如果模組擁有一種新的「列」（例如員工），再加 `timelineViews`。型別在 `src/timeline/types.ts`，範例是 `src/modules/booking/timeline.ts`。查詢的 `queryKey` 要放在模組既有的前綴底下（例如 `["bookings", …]`），寫入後現有的 invalidate 才會順便更新時間軸。設計見 `docs/superpowers/specs/2026-11-20-timeline-design.md`。
 
 ## 注意
 
