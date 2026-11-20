@@ -6,6 +6,8 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
+from app.infra.errors import AppError
+
 
 @contextmanager
 def openDb(databaseUrl: str):
@@ -33,3 +35,17 @@ def temporarySchema(databaseUrl: str, prefix: str):
   finally:
     with psycopg.connect(databaseUrl, autocommit=True) as conn:
       conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(identifier))
+
+
+@contextmanager
+def mapDbErrors(conn):
+  """把資料庫限制錯誤轉成 AppError。包在 savepoint 裡：失敗只回復這一段，同一條連線之後還能繼續用。"""
+  try:
+    with conn.transaction():
+      yield
+  except psycopg.errors.UniqueViolation as error:
+    raise AppError("DUPLICATE", "資料重複：名稱或編號已經被使用", 409, {"constraint": error.diag.constraint_name})
+  except (psycopg.errors.CheckViolation, psycopg.errors.NotNullViolation) as error:
+    raise AppError("VALIDATION", "欄位內容不符合規則", 422, {"constraint": error.diag.constraint_name})
+  except psycopg.errors.ForeignKeyViolation as error:
+    raise AppError("VALIDATION", "參照的資料不存在或仍被使用", 422, {"constraint": error.diag.constraint_name})
