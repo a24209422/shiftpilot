@@ -1,3 +1,45 @@
+/* ---- 數字專用字型：只負責 0-9 與 : / . , % - –，其他字元落到後面原本的字型 ----
+   檔案來自 @fontsource/google-sans（OFL 授權）；unicode-range 限定範圍，所以中文與英文字母不受影響 ---- */
+@font-face {
+  font-family: "Google Sans Digits"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039, U+002C-002F, U+003A, U+0025, U+2013;
+}
+@font-face {
+  font-family: "Google Sans Digits"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039, U+002C-002F, U+003A, U+0025, U+2013;
+}
+@font-face {
+  font-family: "Google Sans Digits"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039, U+002C-002F, U+003A, U+0025, U+2013;
+}
+@font-face {
+  font-family: "Google Sans Digits"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039, U+002C-002F, U+003A, U+0025, U+2013;
+}
+@font-face {
+  font-family: "Google Sans Latin"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0041-005A, U+0061-007A;
+}
+@font-face {
+  font-family: "Google Sans Latin"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0041-005A, U+0061-007A;
+}
+@font-face {
+  font-family: "Google Sans Latin"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0041-005A, U+0061-007A;
+}
+@font-face {
+  font-family: "Google Sans Latin"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("../../node_modules/@fontsource/google-sans/files/google-sans-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0041-005A, U+0061-007A;
+}
 /* ---- 色票：直接用 daisyUI Indie Sleaze demo 主題的 oklch 值 ---- */
 :root {
   --base-100: oklch(94% .012 85);      /* 髒白 */
@@ -17,8 +59,9 @@
   --error-content: oklch(96% .02 85);
   --stamp: oklch(75% .17 60);          /* 數位相機的橘色日期戳記 */
   --rule: color-mix(in oklch, var(--ink) 16%, transparent);
-  --font-display: "Oswald Variable", "Oswald", "Arial Narrow", "Microsoft JhengHei", "PingFang TC", sans-serif;
-  --font-accent: "Special Elite", "Courier New", "Microsoft JhengHei", "PingFang TC", monospace;
+  --font-display: "Google Sans Digits", "Google Sans Latin", "Oswald Variable", "Oswald", "Arial Narrow", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  --font-heading: "Google Sans Digits", "Oswald Variable", "Oswald", "Arial Narrow", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  --font-accent: "Google Sans Digits", "Google Sans Latin", "Special Elite", "Courier New", "Microsoft JhengHei", "PingFang TC", monospace;
   --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 * { box-sizing: border-box; border-radius: 0; }   /* 主題的 --radius-* 全是 0 */
@@ -50,7 +93,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--neutral); color: var(--neutral-content);
   padding: 22px 16px 16px; display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: auto;
 }
-.brand { font-size: 30px; font-weight: 700; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; padding: 0 6px; }
+.brand { font-family: var(--font-heading); font-size: 30px; font-weight: 700; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; padding: 0 6px; }
 .brandNote { font: 15px var(--font-accent); color: var(--base-200); padding: 12px 6px 18px; display: flex; gap: 8px; align-items: center; }
 .brandNote::before { content: ""; width: 7px; height: 7px; background: var(--success); }
 .navItem {
@@ -76,7 +119,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---- 頁首：巨大窄體標題＋粗黑線 ---- */
 .pageHead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 5px solid var(--ink); margin-bottom: 28px; }
-.headline { margin: 0; font-size: clamp(46px, 8vw, 88px); font-size: clamp(42px, 9cqi, 88px); font-weight: 700; line-height: 0.92; letter-spacing: -0.01em; text-transform: uppercase; }
+.headline { font-family: var(--font-heading); margin: 0; font-size: clamp(46px, 8vw, 88px); font-size: clamp(42px, 9cqi, 88px); font-weight: 700; line-height: 0.92; letter-spacing: -0.01em; text-transform: uppercase; }
 .sub { margin: 12px 0 0; color: color-mix(in oklch, var(--ink) 75%, transparent); font-size: 15px; }
 .primary {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; background: var(--primary); color: var(--primary-content);
@@ -94,7 +137,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .statNote { font: 12px var(--font-accent); color: var(--base-300); }
 .statNote::before { content: "↗ "; }
 
-.sectionTitle { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px; font-size: 15px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+.sectionTitle { font-family: var(--font-heading); display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px; font-size: 15px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
 .sectionTitle small { font: 12px var(--font-accent); letter-spacing: 0; color: var(--base-300); }
 /* 首頁的大區塊標題 */
 .sectionTitle.big { font-size: 24px; letter-spacing: 0.1em; }
@@ -113,7 +156,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tileTop { display: flex; justify-content: space-between; width: 100%; font: 12px var(--font-accent); }
 .tileNo { color: var(--base-300); }
 .tileIcon { margin: 18px 0 auto; }
-.tileName { font-size: 28px; font-weight: 700; text-transform: uppercase; line-height: 1; margin-top: 18px; }
+.tileName { font-family: var(--font-heading); font-size: 28px; font-weight: 700; text-transform: uppercase; line-height: 1; margin-top: 18px; }
 .tileZh { font-size: 14px; color: var(--base-300); margin-top: 4px; }
 
 .split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; margin-bottom: 40px; align-items: start; }
@@ -130,8 +173,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .photoInner::after { content: ""; position: absolute; inset: 0; background-image: var(--grain); opacity: 0.55; mix-blend-mode: multiply; }
 .stamp { position: absolute; right: 14px; bottom: 10px; z-index: 2; font: 15px var(--font-accent); color: var(--stamp); letter-spacing: 0.1em; text-shadow: 0 0 2px rgba(0, 0, 0, 0.6); }
 .featureBody { padding: 20px 22px 22px; }
-.featureBody h3 { margin: 0 0 6px; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600; }
-.featureTitle { margin: 0; font-size: 30px; font-weight: 600; line-height: 1.1; }
+.featureBody h3 { font-family: var(--font-heading); margin: 0 0 6px; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600; }
+.featureTitle { font-family: var(--font-heading); margin: 0; font-size: 30px; font-weight: 600; line-height: 1.1; }
 .featureMeta { margin: 8px 0 18px; font: 13px var(--font-accent); }
 .textLink { border: 0; background: none; padding: 0; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 13px; }
 .textLink:hover { text-decoration: underline; text-underline-offset: 4px; }
@@ -179,7 +222,7 @@ tbody tr.selected { background: var(--base-200); }
 }
 .drawer.open { transform: none; }
 .drawerHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 22px 22px 16px; border-bottom: 5px solid var(--ink); }
-.drawerHead h2 { margin: 0; font-size: 32px; font-weight: 700; line-height: 1; text-transform: uppercase; }
+.drawerHead h2 { font-family: var(--font-heading); margin: 0; font-size: 32px; font-weight: 700; line-height: 1; text-transform: uppercase; }
 .iconBtn { border: 1px solid var(--ink); background: none; width: 32px; height: 32px; display: grid; place-items: center; flex: none; padding: 0; }
 .iconBtn:hover { background: var(--ink); color: var(--base-100); }
 .drawer dl { margin: 0; padding: 6px 22px 16px; overflow: auto; flex: 1; }
@@ -244,7 +287,7 @@ body.dragging .chat { transition: none; }       /* 拖曳時不能有動畫，�
 .chatRail { display: none; width: 100%; height: 100%; flex-direction: column; align-items: center; gap: 16px; padding: 18px 0; border: 0; background: none; }
 .chat.collapsed .chatRail { display: flex; }
 .chatRail:hover { background: var(--base-200); }
-.chatRail .vertical { writing-mode: vertical-rl; font-size: 16px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
+.chatRail .vertical { font-family: var(--font-heading); writing-mode: vertical-rl; font-size: 16px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
 
 .chatHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 18px 16px 14px; border-bottom: 5px solid var(--ink); }
 /* 標題列跟側邊欄同一套黑底淺字；副標與按鈕框線也要換成淺色，不然在黑底上看不見 */
@@ -252,7 +295,7 @@ body.dragging .chat { transition: none; }       /* 拖曳時不能有動畫，�
 .chatHead .chatSub { color: var(--base-200); }
 .chatHead .iconBtn { border-color: var(--neutral-content); }
 .chatHead .iconBtn:hover { background: var(--neutral-content); color: var(--ink); }
-.chatTitle { font-size: 30px; font-weight: 700; line-height: 1; text-transform: uppercase; }
+.chatTitle { font-family: var(--font-heading); font-size: 30px; font-weight: 700; line-height: 1; text-transform: uppercase; }
 .chatSub { font: 12px/1.4 var(--font-accent); color: var(--base-300); margin-top: 8px; }
 .chatActions { display: flex; gap: 6px; }
 .onMobile { display: none; }
@@ -320,8 +363,6 @@ a.navItem { text-decoration: none; }
   border: 0; background: var(--base-100); text-align: left; min-width: 0;
 }
 .monthCell:hover { background: color-mix(in oklch, var(--base-200) 38%, var(--base-100)); }
-.monthCell.weekend { background: color-mix(in oklch, var(--base-200) 18%, var(--base-100)); }
-.monthCell.holiday { background: color-mix(in oklch, var(--success) 14%, var(--base-100)); }
 /* 有排程的日子用導覽列目前頁面的米黃色；假日名稱的標籤仍然顯示 */
 .monthCell.busy { background: var(--base-200); }
 .monthCell.busy:hover { background: color-mix(in oklch, var(--base-200) 85%, var(--ink)); }
@@ -346,20 +387,52 @@ a.navItem { text-decoration: none; }
 .popTitle { font-size: 15px; font-weight: 500; }
 .popMeta { font: 11px var(--font-accent); color: color-mix(in oklch, var(--neutral-content) 70%, transparent); }
 
-/* ---- 時間軸：左欄名稱固定，右側軌道依時間定位；窄螢幕時整塊橫向捲動 ---- */
-.timeline { overflow-x: auto; border-top: 1px solid var(--ink); }
-.tlGroupName { font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 14px 0 6px; }
-.tlRow { display: grid; grid-template-columns: 160px minmax(640px, 1fr); border-bottom: 1px solid var(--rule); }
-.tlName { position: sticky; left: 0; z-index: 3; background: var(--base-100); padding: 12px 10px 12px 0; font-size: 15px; }
-.tlTrack { position: relative; height: 44px; }
-.tlAxis { height: 24px; }
-.tlTick { position: absolute; top: 4px; transform: translateX(-50%); font: 11px var(--font-accent); color: var(--base-300); white-space: nowrap; }
+/* ---- 時間軸：版面照甘特圖範本（圓角外框、兩層表頭、灰白直條、膠囊長條），顏色用本站色票；
+   全站是直角，只有時間軸這一塊用圓角 ---- */
+.timeline { overflow-x: auto; background: var(--paper); border: 1px solid var(--ink); border-radius: 0; padding: 16px 18px 20px; }
+.tlHead, .tlRow { display: grid; grid-template-columns: 170px minmax(640px, 1fr); }
+.tlHead { border: 1.5px solid var(--ink); border-radius: 0; margin-bottom: 8px; }
+.tlHeadName { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; justify-content: center; font-weight: 600; letter-spacing: 0.1em; border-right: 1.5px solid var(--ink); background: var(--paper); border-radius: 0; }
+.tlHeadTrack { position: relative; height: 54px; border-radius: 0; }
+.tlHalves, .tlHours { position: absolute; left: 0; right: 0; border-radius: 0; }
+.tlHalves { top: 0; height: 28px; }
+.tlHours { top: 28px; height: 26px; border-top: 1px solid var(--rule); }
+.tlHalf, .tlHour { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; border-radius: 0; }
+.tlHalf { font-size: 14px; font-weight: 600; letter-spacing: 0.08em; }
+.tlHalf + .tlHalf { border-left: 1.5px solid var(--ink); }
+.tlHour { font: 11px var(--font-accent); color: var(--base-300); }
+.tlHour + .tlHour { border-left: 1px solid var(--rule); }
+.tlGroupName { font: 12px var(--font-accent); color: var(--base-300); letter-spacing: 0.08em; padding: 12px 0 4px 6px; }
+.tlRow { border-bottom: 1px solid var(--ink); }
+.tlName { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; padding: 8px 14px 8px 0; background: var(--paper); border-radius: 0; }
+.tlName span { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 14px; font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tlTrack { position: relative; height: 50px; border-radius: 0; }
+/* 每隔一小時一條灰色直條，跟範本一樣用來對齊時間 */
+.tlStripe { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--base-200) 25%, var(--paper)); border-radius: 0; }
 /* 空檔格子在長條底下：長條蓋住的部分點不到，露出來的才是能預約的時段 */
-.tlCell { position: absolute; top: 0; bottom: 0; z-index: 1; border: 0; padding: 0; background: none; cursor: pointer; }
-.tlCell:hover { background: color-mix(in oklch, var(--ink) 8%, transparent); }
+.tlCell { position: absolute; top: 0; bottom: 0; z-index: 1; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 0; }
+.tlCell:hover { background: color-mix(in oklch, var(--base-200) 25%, var(--paper)); }
 .tlBar {
-  position: absolute; top: 6px; bottom: 6px; z-index: 2; border: 1px solid var(--ink); background: var(--base-200); color: var(--ink);
-  padding: 0 6px; font-size: 12px; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+  position: absolute; top: 10px; bottom: 10px; z-index: 2; border: 0; border-radius: 999px; padding: 0 30px 0 12px;
+  background: var(--tone); color: var(--tone-content); font-size: 12px; font-weight: 600; text-align: left;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
 }
-.tlBar:hover { background: var(--ink); color: var(--base-100); }
-.tlNow { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: var(--primary); pointer-events: none; }
+/* 範本長條尾端的白色圓點 */
+.tlBar::after { content: ""; position: absolute; right: 5px; top: 50%; width: 20px; height: 20px; margin-top: -10px; border-radius: 50%; background: var(--paper); }
+.tlBar:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tlTone0 { --tone: var(--primary); --tone-content: var(--primary-content); }
+.tlTone1 { --tone: var(--accent); --tone-content: var(--accent-content); }
+.tlTone2 { --tone: var(--success); --tone-content: var(--success-content); }
+.tlTone3 { --tone: var(--stamp); --tone-content: var(--ink); }
+.tlTone4 { --tone: var(--base-200); --tone-content: var(--ink); }
+.tlNow { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: var(--ink); pointer-events: none; border-radius: 0; }
+
+/* ---- 問答面板的輸入區：輸入框在上，下面一排左邊選模型、右邊黑色送出 ---- */
+.chatForm { border-top: 1px solid var(--ink); padding: 12px 14px 14px; display: grid; gap: 10px; background: var(--paper); }
+.chatInput { flex: 1; min-width: 0; resize: none; border: 1px solid var(--ink); background: var(--base-100); color: var(--ink); padding: 9px 11px; font: 14px/1.5 var(--font-display); }
+.chatInput:focus-visible, .chatModel:focus-visible, .chatSend:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chatFormRow { display: flex; align-items: stretch; gap: 10px; }
+.chatFormBar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.chatModel { min-width: 0; max-width: 100%; border: 1px solid var(--ink); background: var(--base-100); color: var(--ink); padding: 8px 10px; font: 12px var(--font-accent); }
+.chatSend { display: flex; align-items: center; justify-content: center; flex: none; width: 44px; border: 1px solid var(--ink); background: var(--ink); color: var(--base-100); padding: 0; cursor: pointer; }
+.chatSend:hover { background: color-mix(in oklch, var(--ink) 80%, var(--base-100)); }

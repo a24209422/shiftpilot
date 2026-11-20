@@ -69,8 +69,7 @@ export function ResourcesPage() {
   return (
     <div className="inner">
       <PageHead
-        headline="Resources."
-        sub={`資源・共 ${resources.length} 筆。會議室、設備與公務車`}
+        headline="Resources"
         action={canManage && <button className="primary" type="button" onClick={drawer.openNew}><Icon name="plus" size={16} />新增資源</button>}
       />
       <div className="checkRow"><CheckboxField label="含已停用" checked={includeInactive} onChange={setIncludeInactive} /></div>

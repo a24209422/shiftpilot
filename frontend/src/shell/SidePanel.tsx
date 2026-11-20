@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { Icon } from "./icons";
+import { useToast } from "./Toast";
+
+// 只是介面的樣子：接上後端時換成真的模型清單
+const modelOptions = ["qwen2.5:3b", "qwen3-vl:4b-instruct"];
 
 const defaultWidth = 400;
 const minWidth = 320;
@@ -9,11 +13,20 @@ const clamp = (width: number) => Math.min(maxWidth(), Math.max(minWidth, Math.ro
 const mobileQuery = "(max-width: 760px)";
 const isMobile = () => typeof window.matchMedia === "function" && window.matchMedia(mobileQuery).matches;
 
-// 問答（text2sql）的位置：外殼照原型保留（收合、拖曳寬度），功能還沒做，所以沒有輸入框、也不放假答案
+// 問答（text2sql）的位置：外殼與輸入區的樣子先做好（收合、拖曳寬度、選模型、送出），功能還沒接後端，所以不放假答案
 export function SidePanel() {
   const [width, setWidth] = useState(defaultWidth);
   // 桌面預設展開；手機上展開會蓋滿整個畫面，所以預設收起來
   const [open, setOpen] = useState(() => !isMobile());
+  const [question, setQuestion] = useState("");
+  const [model, setModel] = useState(modelOptions[0]);
+  const toast = useToast();
+
+  // 問答還沒接後端：送出不產生任何回答，輸入的字留著，只說明還沒開放
+  function onSend(event: FormEvent) {
+    event.preventDefault();
+    toast("問答尚未開放");
+  }
 
   useEffect(() => {
     // 視窗縮小時上限會跟著變，要重新夾一次
@@ -69,7 +82,6 @@ export function SidePanel() {
           <header className="chatHead">
             <div>
               <div className="chatTitle">Ask the desk</div>
-              <div className="chatSub">用中文問排程（規劃中）</div>
             </div>
             <div className="chatActions">
               <button className="iconBtn" type="button" title="收合" aria-label="收合問答面板" onClick={() => setOpen(false)}>
@@ -84,6 +96,24 @@ export function SidePanel() {
               <div className="bubble">問答尚未開放。之後可以在這裡用中文查詢排程，例如「明天有哪些會議？」。</div>
             </div>
           </div>
+          <form className="chatForm" onSubmit={onSend}>
+            <div className="chatFormRow">
+              <textarea
+                className="chatInput" aria-label="問題" rows={2} placeholder="用中文問排程，例如「明天有哪些會議？」"
+                value={question} onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  // Enter 送出、Shift+Enter 換行；輸入法選字時的 Enter 不算
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
+                }}
+              />
+              <button className="chatSend" type="submit" aria-label="送出" title="送出"><Icon name="arrowUp" size={20} /></button>
+            </div>
+            <div className="chatFormBar">
+              <select className="chatModel" aria-label="模型" value={model} onChange={(event) => setModel(event.target.value)}>
+                {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </div>
+          </form>
         </div>
       </aside>
       {!open && (

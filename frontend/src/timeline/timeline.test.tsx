@@ -49,6 +49,24 @@ test("testRowsGroupedByKindAndSorted", async () => {
   expect(screen.getByText("設備")).toBeInTheDocument();
 });
 
+test("testHeaderSplitsMorningAndAfternoon", async () => {
+  open();
+  await screen.findByText("3F 大會議室");
+  expect(screen.getByText("上午")).toBeInTheDocument();
+  expect(screen.getByText("下午")).toBeInTheDocument();
+  // 預設 08:00–20:00，一小時一欄
+  expect(Array.from(document.querySelectorAll(".tlHour")).map((item) => item.textContent)).toEqual(
+    ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"],
+  );
+});
+
+test("testEachRowGetsItsOwnTone", async () => {
+  open();
+  await screen.findByText("3F 大會議室");
+  const tones = Array.from(document.querySelectorAll(".tlRow")).map((row) => Array.from(row.classList).find((name) => name.startsWith("tlTone")));
+  expect(tones).toEqual(["tlTone0", "tlTone1", "tlTone2"]);
+});
+
 test("testRequestsOneDay", async () => {
   const { api } = open();
   await screen.findByText("3F 大會議室");

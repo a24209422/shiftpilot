@@ -59,6 +59,17 @@ export const minuteToLocal = (day: Date, minute: number) =>
 
 export const minuteLabel = (minute: number) => `${pad(Math.floor(minute / 60))}:${pad(minute % 60)}`;
 
+// 12:00 到 13:00 那一欄算上午（午休前），下午從 13:00 開始
+const morningEnd = 13 * 60;
+
+// 表頭上層：以 13:00 切成上午、下午；橫軸整段都在 13:00 前（或後）時只有一段
+export function halfDayGroups(axis: Axis): { label: string; startMinute: number; endMinute: number }[] {
+  const groups = [];
+  if (axis.startMinute < morningEnd) groups.push({ label: "上午", startMinute: axis.startMinute, endMinute: Math.min(morningEnd, axis.endMinute) });
+  if (axis.endMinute > morningEnd) groups.push({ label: "下午", startMinute: Math.max(morningEnd, axis.startMinute), endMinute: axis.endMinute });
+  return groups;
+}
+
 // 網址的日期格式錯或不存在（例如 2 月 30 日）時用今天，不讓整頁壞掉
 export function parseDay(value: string | null, now: Date): Date {
   if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {

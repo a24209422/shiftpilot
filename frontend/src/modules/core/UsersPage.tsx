@@ -86,8 +86,7 @@ export function UsersPage() {
   return (
     <div className="inner">
       <PageHead
-        headline="Accounts."
-        sub={`帳號・共 ${users.length} 筆。沒有自助註冊，帳號由管理員建立`}
+        headline="Accounts"
         action={<button className="primary" type="button" onClick={drawer.openNew}><Icon name="plus" size={16} />新增帳號</button>}
       />
       <DataTable

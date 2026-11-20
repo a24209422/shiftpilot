@@ -82,8 +82,7 @@ export function EmployeesPage() {
   return (
     <div className="inner">
       <PageHead
-        headline="People."
-        sub={`員工・共 ${rows.length} 筆。部門、職稱、主管與到職日`}
+        headline="People"
         action={canManage && <button className="primary" type="button" onClick={drawer.openNew}><Icon name="plus" size={16} />新增員工</button>}
       />
       <div className="checkRow"><CheckboxField label="含已停用" checked={includeInactive} onChange={setIncludeInactive} /></div>

@@ -12,6 +12,7 @@ const iconPaths = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   close: '<path d="M5 5l14 14M19 5L5 19"/>',
   chat: '<path d="M4 5h16v11H9l-5 4V5z"/>',
+  arrowUp: '<path d="M12 20V5M5 12l7-7 7 7"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
 };
 

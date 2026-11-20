@@ -38,7 +38,7 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
   return (
     <div className="inner">
       <PageHead
-        headline="Ask, don’t dig."
+        headline="Ask, don’t dig"
         action={can("booking.write") && (
           <button className="primary" type="button" onClick={() => navigate("/bookings?new=1")}><Icon name="plus" size={16} />新增排程</button>
         )}

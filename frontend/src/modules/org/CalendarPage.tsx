@@ -68,8 +68,7 @@ export function CalendarPage() {
   return (
     <div className="inner">
       <PageHead
-        headline="Calendar."
-        sub={`行事曆・${year} 年共 ${days.length} 筆。假日與補班日`}
+        headline="Calendar"
         action={canManage && <button className="primary" type="button" onClick={drawer.openNew}><Icon name="plus" size={16} />新增日期</button>}
       />
       <div className="weekBar">

@@ -1,4 +1,4 @@
-import { axisFor, clipToDay, groupSubjects, minuteLabel, minuteToLocal, parseDay, percentOf, slotFor, type Span } from "./layout";
+import { axisFor, clipToDay, groupSubjects, halfDayGroups, minuteLabel, minuteToLocal, parseDay, percentOf, slotFor, type Span } from "./layout";
 
 const day = new Date(2026, 10, 20);
 const span = (startMinute: number, endMinute: number): Span => ({ startMinute, endMinute, crossesDay: false });
@@ -60,6 +60,15 @@ test("testMinuteToLocalRollsOverToNextDay", () => {
 test("testMinuteLabel", () => {
   expect(minuteLabel(570)).toBe("09:30");
   expect(minuteLabel(1440)).toBe("24:00");
+});
+
+test("testHalfDayGroupsSplitAtNoon", () => {
+  expect(halfDayGroups({ startMinute: 480, endMinute: 1200 })).toEqual([
+    { label: "上午", startMinute: 480, endMinute: 780 },
+    { label: "下午", startMinute: 780, endMinute: 1200 },
+  ]);
+  expect(halfDayGroups({ startMinute: 0, endMinute: 600 })).toEqual([{ label: "上午", startMinute: 0, endMinute: 600 }]);
+  expect(halfDayGroups({ startMinute: 780, endMinute: 1440 })).toEqual([{ label: "下午", startMinute: 780, endMinute: 1440 }]);
 });
 
 test("testParseDayFallsBackToToday", () => {

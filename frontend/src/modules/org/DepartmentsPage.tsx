@@ -35,8 +35,7 @@ export function DepartmentsPage() {
   return (
     <div className="inner">
       <PageHead
-        headline="Departments."
-        sub={`部門・共 ${departments.length} 筆。組織的部門結構`}
+        headline="Departments"
         action={canManage && <button className="primary" type="button" onClick={drawer.openNew}><Icon name="plus" size={16} />新增部門</button>}
       />
       <DataTable

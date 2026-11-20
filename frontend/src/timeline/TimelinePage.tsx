@@ -5,7 +5,7 @@ import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, formatRange, toLocalDate, toLocalString } from "../forms/time";
 import type { ModuleRegistration } from "../modules/registry";
 import { PageHead } from "../shell/PageHead";
-import { axisFor, clipToDay, groupSubjects, minuteLabel, minuteToLocal, parseDay, percentOf, slotFor, slotStep, type Axis } from "./layout";
+import { axisFor, clipToDay, groupSubjects, halfDayGroups, minuteLabel, minuteToLocal, parseDay, percentOf, slotFor, slotStep, type Axis } from "./layout";
 import type { TimelineSource, TimelineView } from "./types";
 
 // 現在時間線要跟著走，一分鐘更新一次就夠
@@ -17,6 +17,9 @@ function useNow() {
   }, []);
   return now;
 }
+
+// 長條顏色的數量，對應 global.css 的 .tlTone0 到 .tlTone4
+const toneCount = 5;
 
 const placeStyle = (axis: Axis, startMinute: number, endMinute: number) => ({
   left: `${percentOf(axis, startMinute)}%`,
@@ -63,15 +66,15 @@ function TimelineBoard({ view, sources, create }: {
   const axis = axisFor(placed.map((entry) => entry.span));
   const cells: number[] = [];
   for (let minute = axis.startMinute; minute < axis.endMinute; minute += slotStep) cells.push(minute);
-  const ticks: number[] = [];
-  for (let minute = axis.startMinute; minute <= axis.endMinute; minute += 60) ticks.push(minute);
+  const hours: number[] = [];
+  for (let minute = axis.startMinute; minute < axis.endMinute; minute += 60) hours.push(minute);
   const nowMinute = now.getHours() * 60 + now.getMinutes();
   const showNow = toLocalDate(day) === toLocalDate(now) && nowMinute >= axis.startMinute && nowMinute <= axis.endMinute;
   const goTo = (date: Date) => setParams({ date: toLocalDate(date) });
 
   return (
     <div className="inner">
-      <PageHead headline="Timeline." sub={`時間軸・${view.name}・${formatDay(from)}`} />
+      <PageHead headline="Timeline" />
       <div className="weekBar">
         <button className="secondary" type="button" onClick={() => goTo(addDays(day, -1))}>前一天</button>
         <button className="secondary" type="button" onClick={() => goTo(now)}>今天</button>
@@ -83,10 +86,19 @@ function TimelineBoard({ view, sources, create }: {
       {subjects.isSuccess && rows.length === 0 && <div className="empty">{view.emptyText}</div>}
       {rows.length > 0 && (
         <div className="timeline">
-          <div className="tlRow tlAxisRow">
-            <div className="tlName" />
-            <div className="tlTrack tlAxis">
-              {ticks.map((minute) => <span key={minute} className="tlTick" style={{ left: `${percentOf(axis, minute)}%` }}>{minuteLabel(minute)}</span>)}
+          <div className="tlHead">
+            <div className="tlHeadName">{view.name}</div>
+            <div className="tlHeadTrack">
+              <div className="tlHalves">
+                {halfDayGroups(axis).map((half) => (
+                  <span key={half.label} className="tlHalf" style={placeStyle(axis, half.startMinute, half.endMinute)}>{half.label}</span>
+                ))}
+              </div>
+              <div className="tlHours">
+                {hours.map((minute) => (
+                  <span key={minute} className="tlHour" style={placeStyle(axis, minute, minute + 60)}>{minuteLabel(minute)}</span>
+                ))}
+              </div>
             </div>
           </div>
           {groupSubjects(rows).map((group) => (
@@ -95,10 +107,15 @@ function TimelineBoard({ view, sources, create }: {
               {group.subjects.map((subject) => {
                 const row = placed.filter((entry) => entry.item.subjectId === subject.id);
                 const spans = row.map((entry) => entry.span);
+                // 跟範本一樣每一列一個顏色；用列在整張圖的順序輪流，換日期也不會變色
+                const tone = rows.indexOf(subject) % toneCount;
                 return (
-                  <div key={subject.id} className="tlRow">
-                    <div className="tlName">{subject.label}</div>
+                  <div key={subject.id} className={`tlRow tlTone${tone}`}>
+                    <div className="tlName"><span>{subject.label}</span></div>
                     <div className="tlTrack">
+                      {hours.map((minute, index) => index % 2 === 1 && (
+                        <div key={minute} className="tlStripe" style={placeStyle(axis, minute, minute + 60)} />
+                      ))}
                       {create && cells.map((cell) => {
                         const slot = slotFor(cell, spans);
                         if (!slot) return null;

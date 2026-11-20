@@ -81,8 +81,7 @@ export function BookingsPage() {
   return (
     <div className="inner">
       <PageHead
-        headline="Events."
-        sub={`排程・本週 ${bookings.length} 筆。一筆排程可以有多個資源，新增時會先檢查衝突`}
+        headline="Events"
         action={can("booking.write") && <button className="primary" type="button" onClick={drawer.openNew}><Icon name="plus" size={16} />新增排程</button>}
       />
       <div className="weekBar">

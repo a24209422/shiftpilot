@@ -33,7 +33,7 @@ export function AuditPage() {
 
   return (
     <div className="inner">
-      <PageHead headline="Audit log." sub={`稽核・已載入 ${entries.length} 筆。每一次寫入都會留下紀錄，只能新增`} />
+      <PageHead headline="Audit log" />
       <div className="weekBar">
         <SelectField label="模組" value={module} onChange={setModule} options={moduleOptions} allowEmpty="全部" />
       </div>
