@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router";
 
 type Mode = "view" | "edit" | "new";
 
+// 新增表單的帶入值（時間軸點空檔時帶來的）也算面板的一部分，關掉面板就要一起清掉
+const panelKeys = ["id", "edit", "new", "resourceId", "startAt", "endAt"];
+
 // 詳情面板的狀態放在網址：?id=3（看）、?id=3&edit=1（編輯）、?new=1（新增），重新整理不會丟
 export function useDrawerParams() {
   const [params, setParams] = useSearchParams();
@@ -13,7 +16,7 @@ export function useDrawerParams() {
   const replacePanel = useCallback((panel: Record<string, string>) => {
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["id", "edit", "new"].forEach((key) => next.delete(key));
+      panelKeys.forEach((key) => next.delete(key));
       Object.entries(panel).forEach(([key, value]) => next.set(key, value));
       return next;
     });

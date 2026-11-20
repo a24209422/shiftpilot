@@ -181,3 +181,40 @@ test("testDoubleClickOnCancelDoesNotSkipConfirmation", async () => {
   expect(api.calls.some((call) => call.path.endsWith("/cancel"))).toBe(false);
   expect(screen.getByRole("button", { name: "確定取消？" })).toBeInTheDocument();
 });
+
+const prefillRoute = (query: string) => `/bookings?week=2026-11-20&new=1&${query}`;
+
+test("testPrefillFromTimelineFillsNewForm", async () => {
+  open({ route: prefillRoute("resourceId=1&startAt=2026-11-20T14:00&endAt=2026-11-20T14:30") });
+  expect(await screen.findByLabelText("開始")).toHaveValue("2026-11-20T14:00");
+  expect(screen.getByLabelText("結束")).toHaveValue("2026-11-20T14:30");
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "3F 大會議室" })).toBeChecked());
+});
+
+test("testInvalidPrefillFallsBackToDefaults", async () => {
+  const { api } = open({
+    route: prefillRoute("resourceId=99&startAt=2026-11-20T15:00&endAt=2026-11-20T14:00"),
+    routes: { "POST /api/booking/bookings": () => ({ status: 201, body: booking }) },
+  });
+  expect(await screen.findByLabelText("開始")).toHaveValue("2026-11-20T10:00");
+  expect(screen.getByLabelText("結束")).toHaveValue("2026-11-20T11:00");
+  const user = userEvent.setup();
+  await fillBasics(user);
+  // 資源清單載入後，不在啟用清單裡的 99 要被拿掉，不能偷偷送出畫面上看不到的資源
+  expect(await screen.findByRole("checkbox", { name: "3F 大會議室" })).not.toBeChecked();
+  await waitFor(() => expect(screen.getByLabelText("主辦人")).toHaveValue("2"));
+  await user.click(screen.getByRole("button", { name: "儲存" }));
+  await waitFor(() => expect(api.calls.some((call) => call.method === "POST")).toBe(true));
+  expect(api.calls.find((call) => call.method === "POST")?.body).toMatchObject({ resourceIds: [] });
+});
+
+test("testClosingPrefilledFormClearsUrl", async () => {
+  open({ route: prefillRoute("resourceId=1&startAt=2026-11-20T14:00&endAt=2026-11-20T15:00") });
+  await userEvent.setup().click(await screen.findByRole("button", { name: "取消" }));
+  const location = screen.getByTestId("location").textContent ?? "";
+  expect(location).toContain("week=2026-11-20");
+  expect(location).not.toContain("new=");
+  expect(location).not.toContain("resourceId");
+  expect(location).not.toContain("startAt");
+  expect(location).not.toContain("endAt");
+});

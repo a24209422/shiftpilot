@@ -16,6 +16,7 @@ import { PageHead } from "../../shell/PageHead";
 import { useToast } from "../../shell/Toast";
 import { useDrawerParams } from "../../shell/useDrawerParams";
 import { BookingForm } from "./BookingForm";
+import { readPrefill } from "./prefill";
 import { useBookings } from "./queries";
 
 const organizerOf = (booking: Booking) => booking.participants.find((item) => item.role === "organizer")?.name ?? "—";
@@ -100,7 +101,7 @@ export function BookingsPage() {
         footer={drawer.mode === "view" && selected && canModify(selected)
           ? <BookingActions key={selected.id} booking={selected} onEdit={() => drawer.openEdit(String(selected.id))} onCancelled={drawer.close} /> : undefined}
       >
-        {drawer.mode === "new" && <BookingForm onDone={drawer.close} />}
+        {drawer.mode === "new" && <BookingForm prefill={readPrefill(params)} onDone={drawer.close} />}
         {drawer.mode === "edit" && selected && <BookingForm key={selected.id} booking={selected} onDone={() => drawer.openView(String(selected.id))} />}
         {drawer.mode === "view" && selected && (
           <DetailList

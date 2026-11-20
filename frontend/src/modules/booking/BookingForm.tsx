@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiSend } from "../../api/client";
 import type { Booking } from "../../api/types";
 import { useAuth } from "../../auth/AuthProvider";
@@ -9,6 +9,7 @@ import { useSubmit } from "../../forms/useSubmit";
 import { useToast } from "../../shell/Toast";
 import { useEmployees } from "../org/queries";
 import { ConflictNotice } from "./ConflictNotice";
+import type { BookingPrefill } from "./prefill";
 import { useResources } from "./queries";
 
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
@@ -21,7 +22,7 @@ function defaultTimes(): [string, string] {
   return [toLocalString(start), toLocalString(end)];
 }
 
-export function BookingForm({ booking, onDone }: { booking?: Booking; onDone(): void }) {
+export function BookingForm({ booking, prefill, onDone }: { booking?: Booking; prefill?: BookingPrefill; onDone(): void }) {
   const toast = useToast();
   const { user } = useAuth();
   const { data: resourceData } = useResources(false);
@@ -38,9 +39,9 @@ export function BookingForm({ booking, onDone }: { booking?: Booking; onDone(): 
 
   const [title, setTitle] = useState(booking?.title ?? "");
   const [category, setCategory] = useState(booking?.category ?? "");
-  const [startAt, setStartAt] = useState(original?.startAt ?? defaultStart);
-  const [endAt, setEndAt] = useState(original?.endAt ?? defaultEnd);
-  const [resourceIds, setResourceIds] = useState<string[]>(original?.resourceIds ?? []);
+  const [startAt, setStartAt] = useState(original?.startAt ?? prefill?.startAt ?? defaultStart);
+  const [endAt, setEndAt] = useState(original?.endAt ?? prefill?.endAt ?? defaultEnd);
+  const [resourceIds, setResourceIds] = useState<string[]>(original?.resourceIds ?? (prefill?.resourceId ? [prefill.resourceId] : []));
   // 沒有對應員工的帳號（例如管理員）不能預設自己，要明確選主辦人
   const [organizerId, setOrganizerId] = useState(original?.organizerId ?? (user?.employeeId ? String(user.employeeId) : ""));
   const [attendeeIds, setAttendeeIds] = useState<string[]>(original?.attendeeIds ?? []);
@@ -48,6 +49,14 @@ export function BookingForm({ booking, onDone }: { booking?: Booking; onDone(): 
   const [organizerMissing, setOrganizerMissing] = useState(false);
   // 「仍要排」只對下一次送出有效，不會悄悄套用到之後改過的內容
   const acknowledge = useRef(false);
+
+  // 帶入的資源不在啟用清單裡時拿掉：清單只列啟用中的資源，留著會送出畫面上看不到的勾選
+  useEffect(() => {
+    if (booking || !prefill?.resourceId || !resourceData) return;
+    if (!resourceData.some((item) => String(item.id) === prefill.resourceId)) {
+      setResourceIds((current) => current.filter((id) => id !== prefill.resourceId));
+    }
+  }, [booking, prefill?.resourceId, resourceData]);
 
   const activeResources = resourceData ?? [];
   const resourceOptions = [
