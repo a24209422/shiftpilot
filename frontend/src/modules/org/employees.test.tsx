@@ -73,3 +73,15 @@ test("testManagerOptionsExcludeSelfAndInactive", async () => {
   const options = within(screen.getByLabelText("主管")).getAllByRole("option").map((item) => item.textContent);
   expect(options).toEqual(["（無）", "陳大文"]);
 });
+
+test("testDeactivateConfirmationDoesNotCarryToAnotherEmployee", async () => {
+  const { api } = open(manage);
+  const user = userEvent.setup();
+  await user.click(await screen.findByText("林小美"));
+  await user.click(await screen.findByRole("button", { name: "停用" }));
+  expect(screen.getByRole("button", { name: "確定停用" })).toBeInTheDocument();
+  await user.click((await screen.findAllByText("陳大文"))[0]);
+  expect(screen.queryByRole("button", { name: "確定停用" })).toBeNull();
+  expect(await screen.findByRole("button", { name: "停用" })).toBeInTheDocument();
+  expect(api.calls.some((call) => call.method === "PATCH")).toBe(false);
+});

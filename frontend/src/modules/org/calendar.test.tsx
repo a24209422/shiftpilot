@@ -68,3 +68,12 @@ test("testEmployeeSeesNoWriteButtons", async () => {
   expect(screen.queryByRole("button", { name: "編輯" })).toBeNull();
   expect(screen.queryByRole("button", { name: "刪除" })).toBeNull();
 });
+
+test("testDoubleClickOnDeleteDoesNotSkipConfirmation", async () => {
+  const { api } = open(["org.read", "org.manage"], { "DELETE /api/org/calendarDays/2026-10-10": () => ({ status: 204 }) });
+  const user = userEvent.setup({ advanceTimers: () => {} });
+  await user.click(await screen.findByText("國慶日"));
+  await user.dblClick(await screen.findByRole("button", { name: "刪除" }));
+  expect(api.calls.some((call) => call.method === "DELETE")).toBe(false);
+  expect(screen.getByRole("button", { name: "確定刪除？" })).toBeInTheDocument();
+});

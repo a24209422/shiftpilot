@@ -172,3 +172,12 @@ test("testEditSendsOnlyChangedFields", async () => {
   await waitFor(() => expect(api.calls.some((call) => call.method === "PATCH")).toBe(true));
   expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({ title: "改過的標題" });
 });
+
+test("testDoubleClickOnCancelDoesNotSkipConfirmation", async () => {
+  const { api } = open({ routes: { "POST /api/booking/bookings/7/cancel": () => ({ body: booking }) } });
+  const user = userEvent.setup();
+  await user.click(await screen.findByText("團隊週會"));
+  await user.dblClick(await screen.findByRole("button", { name: "取消排程" }));
+  expect(api.calls.some((call) => call.path.endsWith("/cancel"))).toBe(false);
+  expect(screen.getByRole("button", { name: "確定取消？" })).toBeInTheDocument();
+});

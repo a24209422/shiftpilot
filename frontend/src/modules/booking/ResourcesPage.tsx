@@ -80,7 +80,7 @@ export function ResourcesPage() {
       />
       <Drawer
         open={open} title={title} onClose={drawer.close}
-        footer={canManage && drawer.mode === "view" && selected ? <ResourceActions resource={selected} onEdit={() => drawer.openEdit(String(selected.id))} /> : undefined}
+        footer={canManage && drawer.mode === "view" && selected ? <ResourceActions key={selected.id} resource={selected} onEdit={() => drawer.openEdit(String(selected.id))} /> : undefined}
       >
         {drawer.mode === "new" && <ResourceForm onDone={drawer.close} />}
         {drawer.mode === "edit" && selected && <ResourceForm key={selected.id} resource={selected} onDone={() => drawer.openView(String(selected.id))} />}

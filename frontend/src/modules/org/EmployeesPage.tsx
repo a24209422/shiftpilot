@@ -93,7 +93,7 @@ export function EmployeesPage() {
       />
       <Drawer
         open={open} title={drawer.mode === "new" ? "新增員工" : selected?.name ?? ""} onClose={drawer.close}
-        footer={canManage && drawer.mode === "view" && selected ? <EmployeeActions employee={selected} onEdit={() => drawer.openEdit(String(selected.id))} /> : undefined}
+        footer={canManage && drawer.mode === "view" && selected ? <EmployeeActions key={selected.id} employee={selected} onEdit={() => drawer.openEdit(String(selected.id))} /> : undefined}
       >
         {drawer.mode === "new" && <EmployeeForm employees={all} departments={departments} onDone={drawer.close} />}
         {drawer.mode === "edit" && selected && (

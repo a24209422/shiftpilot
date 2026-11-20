@@ -36,7 +36,11 @@ function DayActions({ day, onEdit, onDeleted }: { day: CalendarDay; onEdit(): vo
       <FormError error={remove.error} />
       <button className="primary" type="button" onClick={onEdit}>編輯</button>
       {/* 不用 window.confirm：瀏覽器的對話框會擋住自動化與測試 */}
-      <button className="danger" type="button" disabled={remove.pending} onClick={() => (confirming ? void remove.submit() : setConfirming(true))}>
+      <button className="danger" type="button" disabled={remove.pending} onClick={(event) => {
+        // 連點的第二下（detail > 1）不能直接當成「確定」，不然二次確認形同虛設
+        if (event.detail > 1) return;
+        if (confirming) void remove.submit(); else setConfirming(true);
+      }}>
         {confirming ? "確定刪除？" : "刪除"}
       </button>
     </>

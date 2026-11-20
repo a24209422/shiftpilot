@@ -43,7 +43,11 @@ function BookingActions({ booking, onEdit, onCancelled }: { booking: Booking; on
     <>
       <FormError error={cancel.error} />
       <button className="primary" type="button" onClick={onEdit}>編輯</button>
-      <button className="danger" type="button" disabled={cancel.pending} onClick={() => (confirming ? void cancel.submit() : setConfirming(true))}>
+      <button className="danger" type="button" disabled={cancel.pending} onClick={(event) => {
+        // 連點的第二下（detail > 1）不能直接當成「確定」，不然二次確認形同虛設
+        if (event.detail > 1) return;
+        if (confirming) void cancel.submit(); else setConfirming(true);
+      }}>
         {confirming ? "確定取消？" : "取消排程"}
       </button>
     </>
