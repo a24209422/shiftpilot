@@ -28,6 +28,10 @@ def mountModuleRouters(app: FastAPI) -> None:
         continue
       raise
     app.include_router(module.router, prefix=f"/api/{manifest.name}")
+    # 模組要在 app 建立時登記的東西（例如「不可用」提供者）放在 router.py 的 onAppCreated
+    onAppCreated = getattr(module, "onAppCreated", None)
+    if onAppCreated is not None:
+      onAppCreated()
 
 
 def createApp(databaseUrl: str, sessionHours: int = 12, frontendDir: Path | None = None) -> FastAPI:

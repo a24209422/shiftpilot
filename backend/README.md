@@ -52,6 +52,7 @@ app/
     org/      部門、員工、行事曆
     core/     帳號、登入（session）、稽核紀錄
     booking/  資源、排程（資源撞期由資料庫的排除限制擋下）
+    leave/    假別、請假申請與核准、特休（週年制）、額度調整、未休報表
 ```
 
 ### 新增一個模組
@@ -60,7 +61,7 @@ app/
 2. 把 manifest 加進 `app/modules/__init__.py` 的 `allModules`；路由會自動掛在 `/api/<名稱>`，遷移會依 `dependsOn` 排序。
 3. 把新的權限加進 `app/infra/permissions.py` 的角色表，並在 `tests/infra/test_permissions.py` 補上那一格。
 
-「不可用」提供者：請假、排班這類模組可以用 `registerUnavailabilityProvider` 登記，資源預約檢查參加者時就會自動帶出警告，不用改資源預約的程式。
+「不可用」提供者：在模組的 `router.py` 匯出 `onAppCreated()`，裡面呼叫 `registerUnavailabilityProvider`（範例：`app/modules/leave/router.py`）；`createApp` 每次建立 app 都會呼叫它，資源預約檢查參加者時就會自動帶出警告，不用改資源預約的程式。
 
 ## 已知限制
 
