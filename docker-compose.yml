@@ -9,7 +9,7 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}
     ports:
       # 給本機跑後端和測試用。只綁本機，區網裡的其他電腦連不到；用 5433 避開本機其他專案或已安裝的 PostgreSQL 常用的 5432
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init:/docker-entrypoint-initdb.d:ro
@@ -18,7 +18,31 @@ services:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
       interval: 2s
       timeout: 5s
-      retries: 30
+      # 第一次建立資料目錄時，Docker Desktop 上的 fsync 可能要好幾分鐘；等太短會讓 app 以為資料庫壞了
+      retries: 150
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 容器之間用服務名稱 postgres 連線，不經過對外的 port
+      DATABASE_URL: postgresql://schedule_app:${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}@postgres:5432/schedule
+      # 容器預設是 UTC，「今天的排程」會差 8 小時
+      TZ: Asia/Taipei
+    # 遷移成功才啟動；失敗就讓容器停下來，不用舊的資料表結構硬跑
+    command: ["sh", "-c", "python -m app.cli migrate && exec uvicorn app.main:createAppFromEnv --factory --host 0.0.0.0 --port 8000"]
+    ports:
+      # 容器內聽 0.0.0.0，但對外只綁本機：還沒有 HTTPS，不開放給區網
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    healthcheck:
+      # 首頁打得開就代表後端與前端建置結果都在；用 Python 檢查，不用額外裝 curl
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
 volumes:
   pgdata:
