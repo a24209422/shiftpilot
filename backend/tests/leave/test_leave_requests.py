@@ -78,6 +78,13 @@ def testValidationErrors(world):
                 leave(world, start=datetime(2024, 12, 2, 9), end=datetime(2024, 12, 2, 18)), now)
 
 
+def testHugeRangeRejectedByPeriodCheckBeforeCountingHours(world):
+  with openDb(world.url) as conn:
+    # 年度檢查要先於逐日算時數，否則這個區間會跑幾百萬天的迴圈
+    expectError("LEAVE_CROSSES_PERIOD", requests.quoteRequest, conn, world.aliceActor,
+                leave(world, start=datetime(2026, 11, 24, 9), end=datetime(9999, 12, 31, 9)))
+
+
 def testInactiveTypeAndLeftEmployeeRejected(world):
   with openDb(world.url) as conn:
     service.updateLeaveType(conn, world.hrActor, world.types["personal"], {"isActive": False})

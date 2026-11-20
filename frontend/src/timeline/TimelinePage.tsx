@@ -146,9 +146,11 @@ function TimelineBoard({ view, sources, create, tabs }: {
                         const title = `${item.label} ${formatRange(item.startAt, item.endAt)}`;
                         const text = `${item.label}${span.crossesDay ? "（跨日）" : ""}`;
                         return item.link ? (
-                          <button key={item.key} type="button" className={className} style={style} title={title} onClick={() => navigate(item.link!)}>{text}</button>
+                          <button key={item.key} type="button" className={className} style={style} title={title} onClick={() => navigate(item.link!)}>
+                            {item.kind === "block" ? <span>{text}</span> : text}
+                          </button>
                         ) : (
-                          <div key={item.key} className={className} style={style} title={title}>{text}</div>
+                          <div key={item.key} className={className} style={style} title={title}>{item.kind === "block" ? <span>{text}</span> : text}</div>
                         );
                       })}
                       {showNow && <div className="tlNow" data-testid="nowLine" style={{ left: `${percentOf(axis, nowMinute)}%` }} />}

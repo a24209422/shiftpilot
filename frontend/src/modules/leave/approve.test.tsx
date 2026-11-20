@@ -14,9 +14,9 @@ afterEach(() => vi.useRealTimers());
 const boss = { ...testUser, role: "manager" as const, employeeId: 1, employeeName: "陳主管" };
 const pending = leaveRequest();
 
-const open = (options: { toApprove?: unknown[]; permissions?: string[]; route?: string; routes?: MockRoutes } = {}) =>
+const open = (options: { toApprove?: unknown[]; user?: typeof testUser; permissions?: string[]; route?: string; routes?: MockRoutes } = {}) =>
   renderApp({
-    route: options.route ?? "/leave", user: boss, permissions: options.permissions ?? ["leave.request"], registrations: [leaveRegistration],
+    route: options.route ?? "/leave", user: options.user ?? boss, permissions: options.permissions ?? ["leave.request"], registrations: [leaveRegistration],
     routes: {
       "GET /api/leave/balances": () => ({ body: [] }),
       "GET /api/leave/requests": ({ params }) => ({ body: params.get("scope") === "toApprove" ? (options.toApprove ?? [pending]) : [] }),
@@ -56,4 +56,21 @@ test("testRejectRequiresNote", async () => {
   await user.click(await screen.findByRole("button", { name: "退回" }));
   expect(await screen.findByText("退回要填理由")).toBeInTheDocument();
   expect(api.calls.some((call) => call.path === "/api/leave/requests/5/reject")).toBe(false);
+});
+
+const hr = { ...testUser, role: "hr" as const, employeeId: 9, employeeName: "人資" };
+
+test("testHrCanDecideRequestNotInToApprove", async () => {
+  open({ route: "/leave?id=5", toApprove: [], user: hr, permissions: ["leave.request", "leave.manage"] });
+  expect(await screen.findByRole("button", { name: "核准" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "退回" })).toBeInTheDocument();
+});
+
+test("testHrCannotDecideOwnRequest", async () => {
+  open({
+    route: "/leave?id=5", toApprove: [], user: { ...hr, employeeId: 2 }, permissions: ["leave.request", "leave.manage"],
+    routes: { "GET /api/leave/requests/5": () => ({ body: pending }) },
+  });
+  await screen.findByText("林小美");
+  expect(screen.queryByRole("button", { name: "核准" })).not.toBeInTheDocument();
 });

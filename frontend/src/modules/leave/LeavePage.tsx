@@ -67,7 +67,10 @@ export function LeavePage() {
     return next;
   });
   const selected = detail.data ?? null;
-  const canDecide = selected !== null && selected.status === "pending" && (toApprove.data ?? []).some((item) => item.id === selected.id);
+  const inToApprove = selected !== null && (toApprove.data ?? []).some((item) => item.id === selected.id);
+  // 人資可以核准任何人（本人除外）：主管還在職時申請不會出現在人資的待核准清單，但後端允許
+  const canDecide = selected !== null && selected.status === "pending"
+    && (inToApprove || (can("leave.manage") && user?.employeeId !== selected.employeeId));
   const open = drawer.mode === "new" || (drawer.mode === "view" && selected !== null);
 
   return (

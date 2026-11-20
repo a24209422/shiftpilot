@@ -429,6 +429,8 @@ a.navItem { text-decoration: none; }
   color: var(--ink); font-size: 12px; font-weight: 600; text-align: left; display: flex; align-items: center;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
+/* flex 容器的直接文字不吃 ellipsis，所以文字包在 span 裡，min-width 0 才縮得下去 */
+.tlBlock > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.tlBlock { cursor: pointer; }
 button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .tlMuted { opacity: 0.55; }

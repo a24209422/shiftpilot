@@ -65,11 +65,14 @@ def evaluate(conn: Connection, actor: Actor, data: LeaveInput, lock: bool) -> di
     raise AppError("VALIDATION", "結束時間要晚於開始時間", 422, {"field": "endAt"})
   if data.startAt.date() < employee["hired_on"]:
     raise AppError("LEAVE_NOT_ELIGIBLE", "請假不能早於到職日", 422)
+  # 先做便宜的檢查：年度檢查會把範圍限在一年內，避免超長區間在持有員工列鎖時逐日跑迴圈
+  rules.requireWholeHour(data.startAt, "startAt")
+  rules.requireWholeHour(data.endAt, "endAt")
+  period = rules.periodForRequest(leaveType["quotaKind"], leaveType["annualCapHours"], employee["hired_on"], data.startAt, data.endAt)
   kinds = calendarKindsBetween(conn, data.startAt.date(), data.endAt.date())
   hours = rules.countLeaveHours(data.startAt, data.endAt, kinds)
   if hours == 0:
     raise AppError("LEAVE_NO_WORKING_HOURS", "這段時間沒有上班時間，不需要請假", 422)
-  period = rules.periodForRequest(leaveType["quotaKind"], leaveType["annualCapHours"], employee["hired_on"], data.startAt, data.endAt)
   remainingAfter = None
   if period.quotaHours is not None:
     balance = service.balanceFor(conn, employee["id"], employee["hired_on"], leaveType, period.start)

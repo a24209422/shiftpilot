@@ -192,8 +192,8 @@ EXCLUDE USING gist (employee_id WITH =, tsrange(start_at, end_at) WITH &&)
 
 1. `SELECT … FROM employees WHERE id = %s FOR UPDATE`：同一個人的申請排隊檢查，兩張同時送出不會都通過額度
 2. 員工 `is_active`；假別啟用；整點；`start_at` 不早於 `hired_on`；可以是過去的日期（病假常事後補）
-3. 算時數，等於 0 時擋下
-4. 找年度、不能跨年度、特休要有年度
+3. 找年度、不能跨年度、特休要有年度（先做，避免超長區間在鎖內逐日算時數）
+4. 算時數，等於 0 時擋下
 5. 檢查額度（`none` 不檢查）
 6. 沒有 `acknowledgeWarnings` 時，查本人同時段 `confirmed` 的會議，有就回 `MEETING_CONFLICT`
 7. 寫入；排除限制擋下時轉成 `LEAVE_OVERLAP`

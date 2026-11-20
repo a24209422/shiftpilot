@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiSend } from "../../api/client";
 import { SelectField, TextArea, TextField } from "../../forms/fields";
 import { FormError } from "../../forms/FormError";
@@ -14,11 +14,19 @@ export function AdjustmentForm({ employeeId, onDone }: { employeeId: number; onD
   const [periodStart, setPeriodStart] = useState("");
   const [hours, setHours] = useState("");
   const [reason, setReason] = useState("");
+  const previousTypeId = useRef("");
 
   // 帶入這位員工這個假別「目前」的年度開始日；要調過去的年度可以自己改
   useEffect(() => {
     const balance = balances?.find((item) => String(item.leaveTypeId) === leaveTypeId);
-    if (balance?.periodStart) setPeriodStart(balance.periodStart);
+    // 換假別時一律重帶（新假別沒有年度就清空，免得沿用舊假別的日期）；
+    // 同一假別只在欄位還空著時補上，避免餘額重抓蓋掉使用者手改的日期
+    if (previousTypeId.current !== leaveTypeId) {
+      previousTypeId.current = leaveTypeId;
+      setPeriodStart(balance?.periodStart ?? "");
+    } else if (balance?.periodStart) {
+      setPeriodStart((current) => current || balance.periodStart || "");
+    }
   }, [leaveTypeId, balances]);
 
   const { submit, pending, error, fieldErrors } = useSubmit(

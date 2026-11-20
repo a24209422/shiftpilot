@@ -81,6 +81,21 @@ test("testAdjustmentPrefillsPeriodStartFromBalance", async () => {
   }));
 });
 
+test("testAdjustmentClearsPeriodStartWhenTypeHasNoPeriod", async () => {
+  // 事假沒有年度（餘額裡沒有這個假別）：切過去後日期要清空，不能留著特休的日期
+  open("/leave/admin?tab=adjustments", { "GET /api/leave/balances": () => ({ body: [balances[0]] }) });
+  const user = userEvent.setup();
+  await screen.findByRole("option", { name: /林小美/ });
+  await user.selectOptions(screen.getByLabelText("員工"), "2");
+  await user.click(screen.getByRole("button", { name: "新增調整" }));
+  await user.selectOptions(await screen.findByLabelText("假別"), "1");
+  await waitFor(() => expect(screen.getByLabelText("年度開始日")).toHaveValue("2026-01-01"));
+  await user.selectOptions(screen.getByLabelText("假別"), "2");
+  await waitFor(() => expect(screen.getByLabelText("年度開始日")).toHaveValue(""));
+  await user.type(screen.getByLabelText("年度開始日"), "2025-01-01");
+  expect(screen.getByLabelText("年度開始日")).toHaveValue("2025-01-01");
+});
+
 test("testUnusedReportQueriesRange", async () => {
   const { api } = open("/leave/admin?tab=unused", {
     "GET /api/leave/unused": () => ({ body: [{ employeeId: 2, employeeName: "林小美", departmentName: "工程部", periodStart: "2025-07-01", periodEnd: "2025-12-31", quotaHours: 24, adjustmentHours: 0, usedHours: 8, unusedHours: 16 }] }),
