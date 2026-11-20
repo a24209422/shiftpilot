@@ -68,7 +68,7 @@ export function MonthCalendar() {
       </div>
       <div className="monthGrid">
         {weekdayNames.map((name) => <div className="monthWeekday" key={name}>{name}</div>)}
-        {cells.map((day) => {
+        {cells.map((day, index) => {
           const date = toLocalDate(day);
           const info = dayInfo(date);
           const dayBookings = bookingsOn(day);
@@ -82,6 +82,9 @@ export function MonthCalendar() {
             count > 0 ? "busy" : "",
             // 週六、週日在月曆最右邊，小框往左開才不會超出畫面
             day.getDay() === 0 || day.getDay() === 6 ? "popLeft" : "",
+            // 下半部的列往上開：小框最多 6 筆、比三列格子還高，往下開會超出內容底部、撐出捲軸，
+            // 版面變窄後滑鼠離開格子，小框就一直閃。月曆有 4～6 列，所以用列數的一半判斷，不寫死最後兩列
+            Math.floor(index / 7) >= Math.floor(cells.length / 7 / 2) ? "popUp" : "",
           ].filter(Boolean).join(" ");
           return (
             <button

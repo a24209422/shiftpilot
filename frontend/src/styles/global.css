@@ -114,7 +114,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 /* 主內容的版面隨「自己的寬度」變化，不是視窗寬度：聊天面板拉寬時，這裡會變窄，4 欄要能自己改成 2 欄 */
-.content { height: 100%; overflow: auto; padding: 32px; container-type: inline-size; }
+/* 先保留捲軸的位置：捲軸出現或消失時，內容寬度不變，版面不會左右跳 */
+.content { height: 100%; overflow: auto; padding: 32px; container-type: inline-size; scrollbar-gutter: stable; }
 .inner { max-width: 1120px; margin: 0 auto; }
 
 /* ---- 頁首：巨大窄體標題＋粗黑線 ---- */
@@ -380,6 +381,7 @@ a.navItem { text-decoration: none; }
   box-shadow: 4px 4px 0 color-mix(in oklch, var(--ink) 30%, transparent);
 }
 .monthCell.popLeft .dayPopover { left: auto; right: calc(100% + 6px); }
+.monthCell.popUp .dayPopover { top: auto; bottom: 0; }
 .monthCell:hover .dayPopover, .monthCell:focus-visible .dayPopover { display: flex; }
 .monthCell:hover, .monthCell:focus-visible { z-index: 21; }
 .popItem { display: grid; gap: 2px; }
