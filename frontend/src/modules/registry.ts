@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { IconName } from "../shell/icons";
+import type { TimelineSource, TimelineView } from "../timeline/types";
 
 export interface PageRegistration {
   key: string;
@@ -16,8 +17,11 @@ export interface PageRegistration {
 }
 
 export interface ModuleRegistration {
-  backendModule: string;
+  // 平台頁面（例如時間軸）沒有對應的後端模組
+  backendModule?: string;
   pages: PageRegistration[];
+  timelineViews?: TimelineView[];
+  timelineSources?: TimelineSource[];
 }
 
 export function visiblePages(registrations: ModuleRegistration[], can: (permission: string) => boolean): PageRegistration[] {
