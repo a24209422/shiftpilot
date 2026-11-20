@@ -7,13 +7,16 @@ export interface TimelineQuery<T> {
 // 時間軸上的一個項目；所有模組共用這個格式
 export interface TimelineItem {
   key: string;
-  // 第一版只有長條；請假、排班要用時再加種類
-  kind: "event";
+  // event：會議這類有明確起訖的長條；block：請假這類「這段時間不在」的區塊
+  kind: "event" | "block";
   subjectId: number;
   startAt: string;
   endAt: string;
   label: string;
-  link: string;
+  // 沒有連結的項目畫成不能點的區塊（例如看不到細節的別人的假）
+  link?: string;
+  // 還沒定案的項目（例如待核准的假）畫淡一點
+  muted?: boolean;
 }
 
 export interface TimelineSubject {

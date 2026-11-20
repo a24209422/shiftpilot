@@ -1,10 +1,11 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, formatRange, toLocalDate, toLocalString } from "../forms/time";
 import type { ModuleRegistration } from "../modules/registry";
 import { PageHead } from "../shell/PageHead";
+import { Tabs } from "../shell/Tabs";
 import { axisFor, clipToDay, groupSubjects, halfDayGroups, minuteLabel, minuteToLocal, parseDay, percentOf, slotFor, slotStep, type Axis } from "./layout";
 import type { TimelineSource, TimelineView } from "./types";
 
@@ -28,19 +29,26 @@ const placeStyle = (axis: Axis, startMinute: number, endMinute: number) => ({
 
 export function TimelinePage({ registrations }: { registrations: ModuleRegistration[] }) {
   const { can } = usePermissions();
+  const [params, setParams] = useSearchParams();
   const views = registrations.flatMap((registration) => registration.timelineViews ?? []).filter((view) => can(view.requires));
-  // 第一版只有一種檢視，不做檢視選單
-  const view = views[0];
+  const view = views.find((item) => item.key === params.get("view")) ?? views[0];
   if (!view) return <div className="empty">沒有可以看的時間軸</div>;
   const sources = registrations
     .flatMap((registration) => registration.timelineSources ?? [])
     .filter((source) => source.subjectType === view.subjectType && can(source.requires));
   const create = view.createLink && view.createRequires && can(view.createRequires) ? view.createLink : undefined;
-  return <TimelineBoard key={view.key} view={view} sources={sources} create={create} />;
+  // 換檢視時保留日期，只換 view
+  const selectView = (key: string) => setParams((current) => {
+    const next = new URLSearchParams(current);
+    next.set("view", key);
+    return next;
+  });
+  const tabs = views.length > 1 ? <Tabs tabs={views.map((item) => ({ key: item.key, label: item.name }))} value={view.key} onChange={selectView} /> : null;
+  return <TimelineBoard key={view.key} view={view} sources={sources} create={create} tabs={tabs} />;
 }
 
-function TimelineBoard({ view, sources, create }: {
-  view: TimelineView; sources: TimelineSource[]; create?: (subjectId: number, startAt: string, endAt: string) => string;
+function TimelineBoard({ view, sources, create, tabs }: {
+  view: TimelineView; sources: TimelineSource[]; create?: (subjectId: number, startAt: string, endAt: string) => string; tabs: ReactNode;
 }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -70,11 +78,16 @@ function TimelineBoard({ view, sources, create }: {
   for (let minute = axis.startMinute; minute < axis.endMinute; minute += 60) hours.push(minute);
   const nowMinute = now.getHours() * 60 + now.getMinutes();
   const showNow = toLocalDate(day) === toLocalDate(now) && nowMinute >= axis.startMinute && nowMinute <= axis.endMinute;
-  const goTo = (date: Date) => setParams({ date: toLocalDate(date) });
+  const goTo = (date: Date) => setParams((current) => {
+    const next = new URLSearchParams(current);
+    next.set("date", toLocalDate(date));
+    return next;
+  });
 
   return (
     <div className="inner">
       <PageHead headline="Timeline" />
+      {tabs}
       <div className="weekBar">
         <button className="secondary" type="button" onClick={() => goTo(addDays(day, -1))}>前一天</button>
         <button className="secondary" type="button" onClick={() => goTo(now)}>今天</button>
@@ -127,14 +140,17 @@ function TimelineBoard({ view, sources, create }: {
                           />
                         );
                       })}
-                      {row.map(({ item, span }) => (
-                        <button
-                          key={item.key} type="button" className="tlBar" style={placeStyle(axis, span.startMinute, span.endMinute)}
-                          title={`${item.label} ${formatRange(item.startAt, item.endAt)}`} onClick={() => navigate(item.link)}
-                        >
-                          {item.label}{span.crossesDay ? "（跨日）" : ""}
-                        </button>
-                      ))}
+                      {row.map(({ item, span }) => {
+                        const className = `${item.kind === "block" ? "tlBlock" : "tlBar"}${item.muted ? " tlMuted" : ""}`;
+                        const style = placeStyle(axis, span.startMinute, span.endMinute);
+                        const title = `${item.label} ${formatRange(item.startAt, item.endAt)}`;
+                        const text = `${item.label}${span.crossesDay ? "（跨日）" : ""}`;
+                        return item.link ? (
+                          <button key={item.key} type="button" className={className} style={style} title={title} onClick={() => navigate(item.link!)}>{text}</button>
+                        ) : (
+                          <div key={item.key} className={className} style={style} title={title}>{text}</div>
+                        );
+                      })}
                       {showNow && <div className="tlNow" data-testid="nowLine" style={{ left: `${percentOf(axis, nowMinute)}%` }} />}
                     </div>
                   </div>

@@ -3,6 +3,7 @@ import type { ModuleRegistration } from "../registry";
 import { CalendarPage } from "./CalendarPage";
 import { DepartmentsPage } from "./DepartmentsPage";
 import { EmployeesPage } from "./EmployeesPage";
+import { employeeTimelineView } from "./timeline";
 
 export const orgRegistration: ModuleRegistration = {
   backendModule: "org",
@@ -11,4 +12,5 @@ export const orgRegistration: ModuleRegistration = {
     { key: "departments", path: "/departments", name: "部門", en: "Departments", icon: "building", requires: "org.read", element: createElement(DepartmentsPage), order: 40 },
     { key: "calendar", path: "/calendar", name: "行事曆", en: "Calendar", icon: "calendar", requires: "org.read", element: createElement(CalendarPage), order: 50, hideFromNav: true },
   ],
+  timelineViews: [employeeTimelineView],
 };

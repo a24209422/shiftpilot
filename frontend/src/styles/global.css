@@ -422,6 +422,16 @@ a.navItem { text-decoration: none; }
 /* 範本長條尾端的白色圓點 */
 .tlBar::after { content: ""; position: absolute; right: 5px; top: 50%; width: 20px; height: 20px; margin-top: -10px; border-radius: 50%; background: var(--paper); }
 .tlBar:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+/* 請假這類「不在」的區塊：直角、斜線底，跟會議的圓角長條一眼分得出來；顏色依種類，不依列 */
+.tlBlock {
+  position: absolute; top: 6px; bottom: 6px; z-index: 2; border: 1.5px solid var(--ink); border-radius: 0; padding: 0 8px;
+  background: repeating-linear-gradient(135deg, color-mix(in oklch, var(--stamp) 55%, var(--paper)) 0 6px, var(--paper) 6px 12px);
+  color: var(--ink); font-size: 12px; font-weight: 600; text-align: left; display: flex; align-items: center;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+button.tlBlock { cursor: pointer; }
+button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tlMuted { opacity: 0.55; }
 .tlTone0 { --tone: var(--primary); --tone-content: var(--primary-content); }
 .tlTone1 { --tone: var(--accent); --tone-content: var(--accent-content); }
 .tlTone2 { --tone: var(--success); --tone-content: var(--success-content); }

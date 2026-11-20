@@ -2,6 +2,8 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Booking, Resource } from "../api/types";
 import { bookingRegistration } from "../modules/booking";
+import { leaveRegistration } from "../modules/leave";
+import { orgRegistration } from "../modules/org";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp, testUser } from "../test/renderApp";
 import { createTimelineRegistration } from "./index";
@@ -153,4 +155,49 @@ test("testHiddenWithoutBookingRead", async () => {
 test("testNavShowsTimelineWithBookingRead", async () => {
   open({ route: "/", routes: { "GET /api/booking/summary": () => ({ body: { todayBookings: [], nextBooking: null, resourceStatus: [], bookingCount: 0, resourceCount: 0 } }) } });
   expect(await screen.findByRole("link", { name: "時間軸" })).toHaveAttribute("href", "/timeline");
+});
+
+const fullRegistrations = [bookingRegistration, leaveRegistration, orgRegistration, createTimelineRegistration([bookingRegistration, leaveRegistration, orgRegistration])];
+
+const openWithEmployees = (calendar: unknown[]) =>
+  renderApp({
+    route: "/timeline?date=2026-11-24&view=employees", permissions: ["booking.read", "org.read", "leave.request"], registrations: fullRegistrations,
+    routes: {
+      "GET /api/booking/resources": () => ({ body: [bigRoom] }),
+      "GET /api/booking/bookings": () => ({ body: [] }),
+      "GET /api/org/employees": () => ({ body: [{ id: 2, employeeNo: "E2", name: "林小美", email: null, departmentId: 1, jobTitle: "工程師", managerId: null, hiredOn: "2025-01-01", isActive: true, leftOn: null }] }),
+      "GET /api/org/departments": () => ({ body: [{ id: 1, name: "工程部", parentId: null }] }),
+      "GET /api/leave/calendar": () => ({ body: calendar }),
+    },
+  });
+
+test("testViewTabsSwitchBetweenResourcesAndEmployees", async () => {
+  renderApp({
+    route: "/timeline?date=2026-11-24", permissions: ["booking.read", "org.read", "leave.request"], registrations: fullRegistrations,
+    routes: {
+      "GET /api/booking/resources": () => ({ body: [bigRoom] }),
+      "GET /api/booking/bookings": () => ({ body: [] }),
+      "GET /api/org/employees": () => ({ body: [] }),
+      "GET /api/org/departments": () => ({ body: [] }),
+      "GET /api/leave/calendar": () => ({ body: [] }),
+    },
+  });
+  expect(await screen.findByText("3F 大會議室")).toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("tab", { name: "員工" }));
+  await waitFor(() => expect(location()).toContain("view=employees"));
+  expect(location()).toContain("date=2026-11-24");
+});
+
+test("testLeaveBlockWithoutLinkIsNotClickable", async () => {
+  openWithEmployees([{ id: 6, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "approved", leaveTypeName: null }]);
+  // 導覽列也有「請假」兩個字，所以用區塊的 title 找
+  const block = await screen.findByTitle(/^請假 /);
+  expect(block.tagName).toBe("DIV");
+  expect(block).toHaveClass("tlBlock");
+});
+
+test("testLeaveBlockWithLinkOpensRequest", async () => {
+  openWithEmployees([{ id: 5, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "pending", leaveTypeName: "事假" }]);
+  await userEvent.setup().click(await screen.findByRole("button", { name: /事假（待核准）/ }));
+  expect(location()).toBe("/leave?id=5");
 });
