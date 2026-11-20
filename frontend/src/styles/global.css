@@ -208,14 +208,62 @@ tbody tr.selected { background: var(--base-200); }
   .navLabel { flex: none; }
   .content { padding: 20px 16px; }
   .drawer { width: 100%; }
-
+  .chat { position: fixed; inset: 0; z-index: 60; width: 100%; border-left: 0; transition: none; }
+  .chat.collapsed { display: none; }
+  .resizer { display: none; }
+  .onDesktop { display: none; }
+  .onMobile { display: block; }
+  .fab { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .drawer { transition: none; }
+  .chat, .drawer { transition: none; }
 }
 
-/* ---- 右側面板的位置：問答做好之後掛在這裡，現在寬度是 0 ---- */
-.sidePanelSlot { width: 0; }
+/* ---- 問答面板（右側停靠，可收合、可拉寬）：照原型，功能還沒接 ---- */
+.chat {
+  position: relative; width: var(--chat-w); min-height: 0; height: 100%;
+  background: var(--paper); border-left: 2px solid var(--ink);
+  transition: width 0.18s steps(5);
+}
+body.dragging .chat { transition: none; }       /* 拖曳時不能有動畫，不然寬度會追不上滑鼠 */
+.chat.collapsed { width: 46px; }
+.chatFull { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; }
+.chat.collapsed .chatFull, .chat.collapsed .resizer { display: none; }
+
+/* 拖曳把手：視覺上只有 2px，但可點的範圍有 10px，比較好抓 */
+.resizer { position: absolute; left: -6px; top: 0; bottom: 0; width: 10px; cursor: col-resize; z-index: 5; touch-action: none; }
+.resizer::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: transparent; }
+.resizer:hover::after, .resizer:focus-visible::after, body.dragging .resizer::after { background: var(--primary); }
+.resizer:focus-visible { outline: none; }
+
+/* 收合後的細欄 */
+.chatRail { display: none; width: 100%; height: 100%; flex-direction: column; align-items: center; gap: 16px; padding: 18px 0; border: 0; background: none; }
+.chat.collapsed .chatRail { display: flex; }
+.chatRail:hover { background: var(--base-200); }
+.chatRail .vertical { writing-mode: vertical-rl; font-size: 16px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
+
+.chatHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 18px 16px 14px; border-bottom: 5px solid var(--ink); }
+.chatTitle { font-size: 30px; font-weight: 700; line-height: 1; text-transform: uppercase; }
+.chatSub { font: 12px/1.4 var(--font-accent); color: var(--base-300); margin-top: 8px; }
+.chatActions { display: flex; gap: 6px; }
+.onMobile { display: none; }
+
+.chatLog { flex: 1; min-height: 0; overflow: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 16px; }
+.msg { display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
+.msg.user { align-items: flex-end; }
+.msgMeta { font: 11px var(--font-accent); color: var(--base-300); letter-spacing: 0.06em; }
+.bubble { padding: 10px 13px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--ink); color: var(--base-100); max-width: 88%; }
+.msg.bot { align-items: stretch; }
+.msg.bot .bubble { background: var(--base-100); border: 1px solid var(--ink); }
+
+/* 手機上聊天面板收起來時的入口 */
+.fab {
+  display: none; position: fixed; right: 14px; bottom: calc(78px + env(safe-area-inset-bottom)); z-index: 50;
+  align-items: center; gap: 8px; border: 0; background: var(--primary); color: var(--primary-content);
+  padding: 12px 16px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+}
+body.dragging { user-select: none; cursor: col-resize; }
 
 /* ---- 表單（原型沒有，沿用同一套邊框與色票） ---- */
 .form { display: grid; gap: 14px; }

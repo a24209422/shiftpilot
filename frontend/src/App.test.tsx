@@ -5,5 +5,5 @@ test("testAppRendersShellRegions", async () => {
   renderApp();
   expect(await screen.findByTestId("location")).toBeInTheDocument();
   await waitFor(() => expect(document.querySelector(".app")).not.toBeNull());
-  expect(document.body.textContent).not.toMatch(/DEMO|Ask the desk/);
+  expect(document.body.textContent).not.toMatch(/DEMO/);
 });

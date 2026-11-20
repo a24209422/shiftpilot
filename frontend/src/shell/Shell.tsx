@@ -5,6 +5,7 @@ import type { ModuleRegistration } from "../modules/registry";
 import { visiblePages } from "../modules/registry";
 import { ChangePasswordDrawer } from "./ChangePasswordForm";
 import { DrawerHostContext } from "./Drawer";
+import { SidePanel } from "./SidePanel";
 import { Sidebar } from "./Sidebar";
 import { ToastProvider } from "./Toast";
 
@@ -22,8 +23,8 @@ export function Shell({ registrations }: { registrations: ModuleRegistration[] }
               <main className="content">{isLoading ? <div className="empty">載入中…</div> : <Outlet />}</main>
             </div>
           </div>
-          {/* 右側面板的位置：問答做好之後掛在這裡 */}
-          <aside className="sidePanelSlot" />
+          {/* 問答面板：外殼先放上，功能之後再接 */}
+          <SidePanel />
         </div>
         <ChangePasswordDrawer open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       </DrawerHostContext.Provider>

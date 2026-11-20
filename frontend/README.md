@@ -37,5 +37,5 @@ src/
 ## 注意
 
 - 時間字串是不帶時區的本地時間，用 `src/forms/time.ts` 處理，不要用 `toISOString()`。
-- 右側面板的位置（`.sidePanelSlot`）保留給之後的問答，現在是空的。
+- 右側的問答面板（`src/shell/SidePanel.tsx`）目前只有外殼：可以收合、拖曳寬度，內容寫「問答尚未開放」。問答做好後把功能接進這個元件。
 - `src/actionCoverage.test.tsx` 是「每個後端寫入動作都有畫面入口」的自動核對；新增寫入動作時要一起更新。

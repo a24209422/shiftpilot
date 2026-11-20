@@ -10,6 +10,8 @@ const iconPaths = {
   log: '<path d="M5 3h14v18H5z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   close: '<path d="M5 5l14 14M19 5L5 19"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4V5z"/>',
+  chevron: '<path d="M9 5l7 7-7 7"/>',
 };
 
 export type IconName = keyof typeof iconPaths;
