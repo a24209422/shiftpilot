@@ -109,8 +109,9 @@ def createUser(
 def authenticate(conn: Connection, email: str, password: str, now: datetime | None = None) -> dict:
   now = now or datetime.now()
   row = conn.execute(
-    "SELECT id, password_hash, is_active, failed_login_count, locked_until FROM users "
-    "WHERE lower(email) = lower(%s) FOR UPDATE",
+    "SELECT u.id, u.password_hash, (u.is_active AND (u.employee_id IS NULL OR e.is_active)) AS is_active, "
+    "u.failed_login_count, u.locked_until FROM users u LEFT JOIN employees e ON e.id = u.employee_id "
+    "WHERE lower(u.email) = lower(%s) FOR UPDATE OF u",
     (email.strip(),),
   ).fetchone()
   if row is None or not row["is_active"]:
@@ -150,7 +151,9 @@ def getSessionActor(conn: Connection, token: str, now: datetime | None = None) -
   now = now or datetime.now()
   row = conn.execute(
     "SELECT u.id, u.role, u.employee_id FROM sessions s JOIN users u ON u.id = s.user_id "
-    "WHERE s.id_hash = %s AND s.expires_at > %s AND u.is_active",
+    "LEFT JOIN employees e ON e.id = u.employee_id "
+    # 連到員工的帳號，員工被停用（離職）後也不能用：處理離職的人資沒有權限停用帳號
+    "WHERE s.id_hash = %s AND s.expires_at > %s AND u.is_active AND (u.employee_id IS NULL OR e.is_active)",
     (hashToken(token), now),
   ).fetchone()
   if row is None:

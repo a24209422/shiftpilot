@@ -2,7 +2,7 @@ import importlib
 
 from fastapi import Depends, FastAPI
 
-from app.config import loadConfig
+from app.config import loadConfig, loadEnvFile
 from app.infra.actor import Actor
 from app.infra.http import getActor, installHttpHandlers
 from app.infra.permissions import permissionsFor
@@ -46,6 +46,7 @@ def createApp(databaseUrl: str, sessionHours: int = 12) -> FastAPI:
 
 
 def createAppFromEnv() -> FastAPI:
-  # 給 uvicorn --factory 用
+  # 給 uvicorn --factory 用；README 的啟動指令不會先 export 環境變數，所以要自己讀 .env
+  loadEnvFile()
   config = loadConfig()
   return createApp(config.databaseUrl, config.sessionHours)

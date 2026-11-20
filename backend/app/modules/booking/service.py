@@ -383,8 +383,9 @@ def updateBooking(conn: Connection, actor: Actor, bookingId: int, fields: dict) 
   # 只檢查這次有變動的部分：沒動時間時，舊有的（已確認過的）參加者與資源不重新警告，也不因為資源後來被停用而擋住修改
   addedResourceIds = [item for item in resourceIds if item not in oldResourceIds]
   addedEmployeeIds = [item for item in participantIds if item not in oldParticipantIds]
-  checkReferences(conn, "resources", "資源", addedResourceIds)
-  checkReferences(conn, "employees", "員工", addedEmployeeIds)
+  # 時間有變等於重新排進新的時段：之後才停用的資源、離職的人，也不能再被排進去
+  checkReferences(conn, "resources", "資源", resourceIds if timeChanged else addedResourceIds)
+  checkReferences(conn, "employees", "員工", participantIds if timeChanged else addedEmployeeIds)
   lockResources(conn, resourceIds)
   checkConflicts(
     conn,

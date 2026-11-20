@@ -189,3 +189,30 @@ def testAuditNeverContainsPassword(migratedUrl):
   assert "createUser" in dump and "resetPassword" in dump
   for secret in ("first-secret-pw", "second-secret-pw", "third-secret-pw", "$argon2"):
     assert secret not in dump
+
+
+def makeLinkedUser(conn):
+  from datetime import date
+
+  from app.modules.org import service as orgService
+
+  departmentId = orgService.createDepartment(conn, None, "工程部")["id"]
+  employeeId = orgService.createEmployee(
+    conn, None, {"employeeNo": "E001", "name": "王小明", "departmentId": departmentId, "jobTitle": "工程師", "hiredOn": date(2025, 1, 1)}
+  )["id"]
+  return employeeId, makeUser(conn, "emp@x.com", employeeId=employeeId)
+
+
+def testDeactivatedEmployeeCannotLoginAndSessionsStopWorking(migratedUrl):
+  from app.modules.org import service as orgService
+
+  with openDb(migratedUrl) as conn:
+    employeeId, user = makeLinkedUser(conn)
+    token = service.createSession(conn, user["id"], now=start)
+    assert service.getSessionActor(conn, token, start) is not None
+    orgService.updateEmployee(conn, None, employeeId, {"isActive": False})
+    assert service.getSessionActor(conn, token, start) is None
+    expectError("INVALID_CREDENTIALS", service.authenticate, conn, "emp@x.com", password, start)
+    orgService.updateEmployee(conn, None, employeeId, {"isActive": True})
+    assert service.getSessionActor(conn, token, start) is not None
+    assert service.authenticate(conn, "emp@x.com", password, start)["id"] == user["id"]

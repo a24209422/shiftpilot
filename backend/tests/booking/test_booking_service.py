@@ -345,3 +345,23 @@ def testSummaryUsesNowForTodayNextAndCurrent(world):
   assert status[world.room1]["currentBooking"]["id"] == current["id"] and status[world.room2]["currentBooking"] is None
   assert set(status[world.room1]) == {"resourceId", "name", "kind", "currentBooking"}
   assert tomorrow["id"] not in [item["id"] for item in summary["todayBookings"]]
+
+
+def testMovingBookingRechecksResourcesDeactivatedSinceBooking(world):
+  with openDb(world.url) as conn:
+    booking = service.createBooking(conn, world.aliceActor, inputFor(world, resourceIds=[world.room1, world.room2]))
+    conn.execute("UPDATE resources SET is_active = false WHERE id = %s", (world.room2,))
+    expectError("INACTIVE_REFERENCE", service.updateBooking, conn, world.aliceActor, booking["id"], {"startAt": at(14), "endAt": at(15)})
+    # 同時把停用的資源拿掉就可以移動
+    moved = service.updateBooking(
+      conn, world.aliceActor, booking["id"], {"startAt": at(14), "endAt": at(15), "resourceIds": [world.room1]}
+    )
+    assert [item["id"] for item in moved["resources"]] == [world.room1]
+
+
+def testMovingBookingRechecksParticipantsWhoLeftSinceBooking(world):
+  with openDb(world.url) as conn:
+    booking = service.createBooking(conn, world.aliceActor, inputFor(world, participantEmployeeIds=[world.bob]))
+    conn.execute("UPDATE employees SET is_active = false WHERE id = %s", (world.bob,))
+    expectError("INACTIVE_REFERENCE", service.updateBooking, conn, world.aliceActor, booking["id"], {"startAt": at(14), "endAt": at(15)})
+    assert service.updateBooking(conn, world.aliceActor, booking["id"], {"note": "只改備註不受影響"})["note"] == "只改備註不受影響"

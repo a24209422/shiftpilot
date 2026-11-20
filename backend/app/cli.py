@@ -2,12 +2,10 @@ import argparse
 import getpass
 import sys
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
 import psycopg
-from dotenv import load_dotenv
 
-from app.config import loadConfig
+from app.config import loadConfig, loadEnvFile
 from app.infra.actor import Actor
 from app.infra.db import openDb
 from app.infra.errors import AppError
@@ -113,8 +111,7 @@ def askPassword() -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-  # .env 放在 repo 根目錄；已經設好的環境變數不會被它蓋掉
-  load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+  loadEnvFile()
   args = buildParser().parse_args(argv)
   try:
     databaseUrl = loadConfig().databaseUrl

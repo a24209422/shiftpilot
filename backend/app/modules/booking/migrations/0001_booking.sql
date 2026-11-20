@@ -59,7 +59,7 @@ END
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER booking_resources_fill_trigger
-  BEFORE INSERT ON booking_resources
+  BEFORE INSERT OR UPDATE ON booking_resources
   FOR EACH ROW EXECUTE FUNCTION booking_resources_fill();
 
 CREATE FUNCTION bookings_sync_resources() RETURNS trigger AS $$

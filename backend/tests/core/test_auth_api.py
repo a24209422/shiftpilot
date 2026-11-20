@@ -143,3 +143,12 @@ def testValidationErrorUsesErrorFormat(client):
 def testUnknownRouteUsesErrorFormat(client):
   response = client.get("/api/nothing")
   assert response.status_code == 404 and errorOf(response)["code"] == "NOT_FOUND"
+
+
+def testDeactivatedEmployeeCookieIsRejected(client, loginAs, migratedUrl):
+  info = loginAs("employee", "emp@example.com", employee=True)
+  assert client.get("/api/auth/me").status_code == 200
+  with openDb(migratedUrl) as conn:
+    conn.execute("UPDATE employees SET is_active = false WHERE id = %s", (info["employeeId"],))
+  assert client.get("/api/auth/me").status_code == 401
+  assert client.post("/api/auth/login", json={"email": "emp@example.com", "password": info["password"]}).status_code == 401

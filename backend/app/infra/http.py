@@ -1,3 +1,6 @@
+import logging
+
+import psycopg
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -8,6 +11,7 @@ from app.infra.db import openDb
 from app.infra.errors import AppError
 from app.infra.permissions import hasPermission
 
+logger = logging.getLogger("app")
 sessionCookieName = "sid"
 csrfHeaderName = "X-App-Client"
 csrfHeaderValue = "web"
@@ -66,6 +70,17 @@ def installHttpHandlers(app: FastAPI) -> None:
   async def handleValidationError(request: Request, error: RequestValidationError):
     fields = [{"loc": [str(part) for part in item["loc"]], "message": item["msg"]} for item in error.errors()]
     return errorResponse(422, "VALIDATION", "請求內容不符合格式", {"fields": fields})
+
+  @app.exception_handler(psycopg.errors.DataError)
+  async def handleDataError(request: Request, error: psycopg.errors.DataError):
+    # 數字超出欄位範圍、格式不合這類錯誤，都是請求內容的問題，不是伺服器壞了
+    return errorResponse(422, "VALIDATION", "請求裡的數值超出允許的範圍或格式不合")
+
+  @app.exception_handler(Exception)
+  async def handleUnexpectedError(request: Request, error: Exception):
+    # 細節只寫進 log，不回給使用者
+    logger.error("未預期的錯誤：%s %s", request.method, request.url.path, exc_info=error)
+    return errorResponse(500, "INTERNAL_ERROR", "系統發生未預期的錯誤")
 
   @app.exception_handler(StarletteHTTPException)
   async def handleHttpError(request: Request, error: StarletteHTTPException):

@@ -165,3 +165,20 @@ def testResourceKindAndCapacityAreRestricted(base):
   with pytest.raises(psycopg.errors.CheckViolation):
     with openDb(url) as conn:
       insertResource(conn, "Y", capacity=0)
+
+
+def testDirectUpdateOfBookingResourcesCannotDesyncIt(base):
+  # 資料庫要保證不會不同步：就算有人手動改 booking_resources，也不能讓同一時段的資源被重複預約
+  url, userId, roomId = base
+  bookingId = None
+  with openDb(url) as conn:
+    bookingId = insertBooking(conn, userId, at(10), at(11))
+    attach(conn, bookingId, roomId)
+    conn.execute(
+      "UPDATE booking_resources SET is_active = false, during = tsrange('2030-01-01', '2030-01-02') WHERE booking_id = %s", (bookingId,)
+    )
+    row = conn.execute("SELECT is_active, during FROM booking_resources WHERE booking_id = %s", (bookingId,)).fetchone()
+  assert row["is_active"] is True and (row["during"].lower, row["during"].upper) == (at(10), at(11))
+  with pytest.raises(psycopg.errors.ExclusionViolation):
+    with openDb(url) as conn:
+      attach(conn, insertBooking(conn, userId, at(10, 30), at(11, 30)), roomId)
