@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.infra.actor import Actor
-from app.infra.http import getConn, requirePermission
+from app.infra.http import connDependency, requirePermission
 from app.infra.serialize import parseLocalTime
 from app.modules.booking import service
 from app.modules.booking.service import BookingInput
@@ -61,17 +61,17 @@ class BookingUpdate(BaseModel):
 
 
 @router.get("/resources")
-def listResources(includeInactive: bool = False, actor: Actor = Depends(readBooking), conn=Depends(getConn)):
+def listResources(includeInactive: bool = False, actor: Actor = Depends(readBooking), conn=connDependency):
   return service.listResources(conn, includeInactive)
 
 
 @router.post("/resources", status_code=201)
-def createResource(body: ResourceCreate, actor: Actor = Depends(manageResources), conn=Depends(getConn)):
+def createResource(body: ResourceCreate, actor: Actor = Depends(manageResources), conn=connDependency):
   return service.createResource(conn, actor, body.model_dump())
 
 
 @router.patch("/resources/{resourceId}")
-def updateResource(resourceId: int, body: ResourceUpdate, actor: Actor = Depends(manageResources), conn=Depends(getConn)):
+def updateResource(resourceId: int, body: ResourceUpdate, actor: Actor = Depends(manageResources), conn=connDependency):
   return service.updateResource(conn, actor, resourceId, body.model_dump(exclude_unset=True))
 
 
@@ -83,13 +83,13 @@ def listBookings(
   employeeId: int | None = None,
   includeCancelled: bool = False,
   actor: Actor = Depends(readBooking),
-  conn=Depends(getConn),
+  conn=connDependency,
 ):
   return service.listBookings(conn, parseLocalTime(start), parseLocalTime(end), resourceId, employeeId, includeCancelled)
 
 
 @router.post("/bookings", status_code=201)
-def createBooking(body: BookingCreate, actor: Actor = Depends(writeBooking), conn=Depends(getConn)):
+def createBooking(body: BookingCreate, actor: Actor = Depends(writeBooking), conn=connDependency):
   data = BookingInput(
     title=body.title,
     category=body.category,
@@ -105,7 +105,7 @@ def createBooking(body: BookingCreate, actor: Actor = Depends(writeBooking), con
 
 
 @router.patch("/bookings/{bookingId}")
-def updateBooking(bookingId: int, body: BookingUpdate, actor: Actor = Depends(writeBooking), conn=Depends(getConn)):
+def updateBooking(bookingId: int, body: BookingUpdate, actor: Actor = Depends(writeBooking), conn=connDependency):
   fields = body.model_dump(exclude_unset=True)
   for key in ("startAt", "endAt"):
     if fields.get(key) is not None:
@@ -114,10 +114,10 @@ def updateBooking(bookingId: int, body: BookingUpdate, actor: Actor = Depends(wr
 
 
 @router.post("/bookings/{bookingId}/cancel")
-def cancelBooking(bookingId: int, actor: Actor = Depends(writeBooking), conn=Depends(getConn)):
+def cancelBooking(bookingId: int, actor: Actor = Depends(writeBooking), conn=connDependency):
   return service.cancelBooking(conn, actor, bookingId)
 
 
 @router.get("/summary")
-def getSummary(actor: Actor = Depends(readBooking), conn=Depends(getConn)):
+def getSummary(actor: Actor = Depends(readBooking), conn=connDependency):
   return service.getSummary(conn, datetime.now())

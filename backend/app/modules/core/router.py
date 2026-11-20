@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel
 
 from app.infra.actor import Actor
-from app.infra.http import getActor, getConn, requirePermission, sessionCookieName
+from app.infra.http import connDependency, getActor, requirePermission, sessionCookieName
 from app.modules.core import service
 
 # 登入相關的路由掛在 /api/auth，不在 /api/core 底下（設計文件的路徑）；main.py 明確掛上這一組
@@ -30,7 +30,7 @@ def clearSessionCookie(response: Response) -> None:
 
 
 @authRouter.post("/login")
-def login(body: LoginBody, request: Request, response: Response, conn=Depends(getConn)):
+def login(body: LoginBody, request: Request, response: Response, conn=connDependency):
   user = service.authenticate(conn, body.email, body.password)
   hours = request.app.state.sessionHours
   token = service.createSession(conn, user["id"], hours)
@@ -40,7 +40,7 @@ def login(body: LoginBody, request: Request, response: Response, conn=Depends(ge
 
 
 @authRouter.post("/logout", status_code=204)
-def logout(request: Request, response: Response, conn=Depends(getConn)):
+def logout(request: Request, response: Response, conn=connDependency):
   token = request.cookies.get(sessionCookieName)
   if token:
     service.deleteSession(conn, token)
@@ -48,12 +48,12 @@ def logout(request: Request, response: Response, conn=Depends(getConn)):
 
 
 @authRouter.get("/me")
-def me(actor: Actor = Depends(getActor), conn=Depends(getConn)):
+def me(actor: Actor = Depends(getActor), conn=connDependency):
   return {"user": userPayload(service.getUser(conn, actor.userId))}
 
 
 @authRouter.post("/password", status_code=204)
-def changePassword(body: ChangePasswordBody, response: Response, actor: Actor = Depends(getActor), conn=Depends(getConn)):
+def changePassword(body: ChangePasswordBody, response: Response, actor: Actor = Depends(getActor), conn=connDependency):
   service.changePassword(conn, actor, body.currentPassword, body.newPassword)
   # 密碼改了，所有 session（包含這一個）都已刪除，要重新登入
   clearSessionCookie(response)
@@ -81,22 +81,22 @@ class ResetPasswordBody(BaseModel):
 
 
 @router.get("/users")
-def listUsers(actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+def listUsers(actor: Actor = Depends(manageUsers), conn=connDependency):
   return service.listUsers(conn)
 
 
 @router.post("/users", status_code=201)
-def createUser(body: UserCreate, actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+def createUser(body: UserCreate, actor: Actor = Depends(manageUsers), conn=connDependency):
   return service.createUser(conn, actor, body.email, body.password, body.role, body.employeeId)
 
 
 @router.patch("/users/{userId}")
-def updateUser(userId: int, body: UserUpdate, actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+def updateUser(userId: int, body: UserUpdate, actor: Actor = Depends(manageUsers), conn=connDependency):
   return service.updateUser(conn, actor, userId, body.model_dump(exclude_unset=True))
 
 
 @router.post("/users/{userId}/password", status_code=204)
-def resetPassword(userId: int, body: ResetPasswordBody, actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+def resetPassword(userId: int, body: ResetPasswordBody, actor: Actor = Depends(manageUsers), conn=connDependency):
   service.resetPassword(conn, actor, userId, body.newPassword)
 
 
@@ -106,6 +106,6 @@ def listAudit(
   limit: int = Query(100, ge=1, le=500),
   beforeId: int | None = None,
   actor: Actor = Depends(readAudit),
-  conn=Depends(getConn),
+  conn=connDependency,
 ):
   return service.listAudit(conn, module, limit, beforeId)

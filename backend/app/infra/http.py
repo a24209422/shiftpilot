@@ -24,7 +24,12 @@ def getConn(request: Request):
     yield conn
 
 
-def getActor(request: Request, conn=Depends(getConn)) -> Actor:
+# scope="function"：端點結束就 commit，再送出回應。預設（"request"）是回應送出「之後」才收尾，
+# 瀏覽器拿到登入成功就立刻送下一個請求時，session 還沒 commit，會被當成未登入；commit 失敗時也已經回了成功
+connDependency = Depends(getConn, scope="function")
+
+
+def getActor(request: Request, conn=connDependency) -> Actor:
   # 函式內才匯入：core 模組的 service 也會用到 infra，避免啟動時互相匯入
   from app.modules.core.service import getSessionActor
 
