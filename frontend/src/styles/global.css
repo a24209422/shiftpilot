@@ -438,3 +438,14 @@ a.navItem { text-decoration: none; }
 .chatModel { min-width: 0; max-width: 100%; border: 1px solid var(--ink); background: var(--base-100); color: var(--ink); padding: 8px 10px; font: 12px var(--font-accent); }
 .chatSend { display: flex; align-items: center; justify-content: center; flex: none; width: 44px; border: 1px solid var(--ink); background: var(--ink); color: var(--base-100); padding: 0; cursor: pointer; }
 .chatSend:hover { background: color-mix(in oklch, var(--ink) 80%, var(--base-100)); }
+
+/* 分頁：底線標出目前這一頁，跟表格的直角風格一致 */
+.tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1.5px solid var(--ink); }
+.tab { border: 0; border-radius: 0; background: none; padding: 8px 16px; font-weight: 600; color: var(--base-300); cursor: pointer; }
+.tab.active { color: var(--ink); box-shadow: inset 0 -3px 0 var(--ink); }
+.balanceCards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin: 0 0 20px; }
+.balanceCard { border: 1.5px solid var(--ink); padding: 12px 14px; background: var(--base-100); }
+.balanceCard .balanceName { font-weight: 600; }
+.balanceCard .balanceValue { font: 600 22px var(--font-accent); margin: 6px 0 2px; }
+.balanceCard .balanceNote { font-size: 12px; color: var(--base-300); }
+.formNote { font: 13px/1.5 var(--font-accent); }

@@ -40,3 +40,27 @@ export interface ResourceConflict { bookingId: number; title: string; startAt: s
 export interface ParticipantConflict {
   employeeId: number; name: string; reason: string; bookingId?: number; title?: string; startAt?: string; endAt?: string;
 }
+
+export type QuotaKind = "seniority" | "yearly_cap" | "none";
+export interface LeaveType { id: number; code: string; name: string; paidRatio: number; quotaKind: QuotaKind; annualCapHours: number | null; isActive: boolean }
+export interface LeaveBalance {
+  leaveTypeId: number; leaveTypeName: string; quotaKind: QuotaKind; periodStart: string | null; periodEnd: string | null;
+  quotaHours: number | null; adjustmentHours: number; approvedHours: number; pendingHours: number; remainingHours: number | null;
+}
+export type LeaveStatus = "pending" | "approved" | "rejected" | "withdrawn" | "cancelled";
+export interface LeaveRequest {
+  id: number; employeeId: number; employeeName: string; leaveTypeId: number; leaveTypeName: string; startAt: string; endAt: string;
+  hours: number; reason: string; status: LeaveStatus; decidedBy: number | null; decidedByName: string | null; decidedAt: string | null;
+  decisionNote: string | null; cancelledBy: number | null; cancelledAt: string | null; createdBy: number; createdAt: string;
+}
+export interface MeetingConflict { bookingId: number; title: string; startAt: string; endAt: string }
+export interface LeaveQuote { hours: number; remainingAfter: number | null; conflicts: MeetingConflict[] }
+export interface LeaveAdjustment {
+  id: number; employeeId: number; leaveTypeId: number; leaveTypeName: string; periodStart: string; hours: number; reason: string;
+  createdBy: number; createdByEmail: string; createdAt: string;
+}
+export interface UnusedLeave {
+  employeeId: number; employeeName: string; departmentName: string; periodStart: string; periodEnd: string;
+  quotaHours: number; adjustmentHours: number; usedHours: number; unusedHours: number;
+}
+export interface LeaveCalendarItem { id: number; employeeId: number; startAt: string; endAt: string; status: "pending" | "approved"; leaveTypeName: string | null }
