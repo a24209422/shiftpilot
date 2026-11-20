@@ -45,10 +45,13 @@ export function LeaveRequestForm({ onDone }: { onDone(): void }) {
   const [reason, setReason] = useState("");
   const [quote, setQuote] = useState<LeaveQuote | null>(null);
   const [quoteError, setQuoteError] = useState<ApiError | null>(null);
-  // 「仍要送出」只對下一次送出有效，不會悄悄套用到之後改過的內容
-  const acknowledge = useRef(false);
   const startAt = `${startDate}T${startTime}`;
   const endAt = `${endDate}T${endTime}`;
+  const inputKey = `${leaveTypeId}|${startAt}|${endAt}`;
+  // 會議衝突是針對「送出當下」的假別與時段查的：記下那次的內容，改過之後衝突提示與「仍要送出」都不再成立
+  const submittedKey = useRef<string | null>(null);
+  // 「仍要送出」只認這一組內容，且用過就清掉；就算被重複送出的防呆擋下也不會殘留到之後的一般送出
+  const acknowledgedKey = useRef<string | null>(null);
 
   useEffect(() => {
     setQuote(null);
@@ -65,8 +68,9 @@ export function LeaveRequestForm({ onDone }: { onDone(): void }) {
 
   const { submit, pending, error, fieldErrors } = useSubmit(
     () => {
-      const ack = acknowledge.current;
-      acknowledge.current = false;
+      const ack = acknowledgedKey.current === inputKey;
+      acknowledgedKey.current = null;
+      submittedKey.current = inputKey;
       return apiSend("POST", "/api/leave/requests", { leaveTypeId: Number(leaveTypeId), startAt, endAt, reason, acknowledgeWarnings: ack });
     },
     { onSuccess: () => { toast("已送出請假申請"); onDone(); }, invalidate: [["leave"]] },
@@ -77,6 +81,7 @@ export function LeaveRequestForm({ onDone }: { onDone(): void }) {
     void submit();
   }
 
+  const conflictIsCurrent = error?.code === "MEETING_CONFLICT" && submittedKey.current === inputKey;
   const typeOptions = (types ?? []).map((item) => ({ value: String(item.id), label: item.name }));
   const quoteText = quote && `共 ${quote.hours} 小時${quote.remainingAfter === null ? "" : `，送出後剩 ${quote.remainingAfter} 小時`}`;
 
@@ -93,8 +98,8 @@ export function LeaveRequestForm({ onDone }: { onDone(): void }) {
         <div className="formWarn">這段時間你有會議：{quote.conflicts.map((item) => item.title).join("、")}</div>
       )}
       <FormError error={quoteError} />
-      <MeetingWarning error={error} pending={pending} onOverride={() => { acknowledge.current = true; void submit(); }} />
-      {error?.code !== "MEETING_CONFLICT" && <FormError error={error} />}
+      {conflictIsCurrent && <MeetingWarning error={error} pending={pending} onOverride={() => { if (pending) return; acknowledgedKey.current = inputKey; void submit(); }} />}
+      {!conflictIsCurrent && error?.code !== "MEETING_CONFLICT" && <FormError error={error} />}
       <div className="formActions">
         <button className="primary" type="submit" disabled={pending || quoteError !== null || !leaveTypeId}>送出</button>
         <button className="secondary" type="button" onClick={onDone}>取消</button>

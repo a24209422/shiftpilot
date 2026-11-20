@@ -118,6 +118,22 @@ test("testMeetingConflictCanBeOverridden", async () => {
   expect(last.body).toMatchObject({ acknowledgeWarnings: true });
 });
 
+test("testEditedFormDropsMeetingOverride", async () => {
+  const { api } = open({
+    "POST /api/leave/requests/quote": () => ({ body: { hours: 8, remainingAfter: 36, conflicts: [] } }),
+    "POST /api/leave/requests": () => ({ status: 409, body: { error: { code: "MEETING_CONFLICT", message: "這段時間你有會議", details: { conflicts: [{ bookingId: 3, title: "週會", startAt: "2026-11-21T10:00:00", endAt: "2026-11-21T11:00:00" }] } } } }),
+  });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "申請請假" }));
+  await user.selectOptions(await screen.findByLabelText("假別"), "1");
+  await screen.findByText("共 8 小時，送出後剩 36 小時");
+  await user.click(drawerSubmit());
+  await screen.findByRole("button", { name: "仍要送出" });
+  await user.selectOptions(screen.getByLabelText("結束時間"), "17:00");
+  expect(screen.queryByRole("button", { name: "仍要送出" })).not.toBeInTheDocument();
+  expect(api.calls.filter((call) => call.method === "POST" && call.path === "/api/leave/requests")).toHaveLength(1);
+});
+
 test("testAccountWithoutEmployeeSeesExplanation", async () => {
   renderApp({ route: "/leave", user: testUser, permissions: ["leave.request"], registrations: [leaveRegistration], routes: { "GET /api/leave/requests": () => ({ body: [] }) } });
   expect(await screen.findByText("這個帳號沒有對應的員工，不能請假")).toBeInTheDocument();
