@@ -1,14 +1,14 @@
 services:
   postgres:
     image: postgres:17
-    # 電腦重開機、Docker 重新啟動後自動跑起來，app 才不會因為連不到資料庫而停擺
+    # 電腦重開機、Docker 重新啟動後自動跑起來，後端才不會因為連不到資料庫而停擺
     restart: unless-stopped
     environment:
       # 密碼只放在 .env（不進 git），沒設定就直接啟動失敗，避免用空密碼跑起來
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?請在 .env 設定 POSTGRES_PASSWORD}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}
     ports:
-      # 給本機跑測試和評測用。只綁本機，區網裡的其他電腦連不到；用 5433 避開本機其他專案或已安裝的 PostgreSQL 常用的 5432
+      # 給本機跑後端和測試用。只綁本機，區網裡的其他電腦連不到；用 5433 避開本機其他專案或已安裝的 PostgreSQL 常用的 5432
       - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -19,37 +19,6 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
-
-  app:
-    build: .
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      # 容器之間用服務名稱 postgres 連線；.env 裡的 DATABASE_URL 是給本機開發用的 127.0.0.1:5433，這裡不能沿用
-      DATABASE_URL: postgresql://schedule_app:${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}@postgres:5432/schedule
-      # 容器裡的 localhost 是容器自己，host.docker.internal 才是執行 Ollama 的主機
-      OLLAMA_URL: http://host.docker.internal:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
-      # 下面幾個沒填也能啟動：沒有 key 時選單只會出現本機模型
-      LOCAL_MODELS: ${LOCAL_MODELS:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
-      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
-      GOOGLE_AI_MODELS: ${GOOGLE_AI_MODELS:-}
-    extra_hosts:
-      # Docker Desktop 內建 host.docker.internal；Linux 的 Docker Engine 要靠這行才有
-      - "host.docker.internal:host-gateway"
-    ports:
-      # 還沒有登入功能，先只讓這台電腦連線
-      - "127.0.0.1:8501:8501"
-    healthcheck:
-      # slim 映像檔沒有 curl，用 Python 打 Streamlit 的健康檢查網址
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
 
 volumes:
   pgdata:

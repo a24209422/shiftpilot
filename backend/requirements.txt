@@ -1,0 +1,7 @@
+fastapi>=0.115
+uvicorn[standard]
+psycopg[binary]>=3.2
+argon2-cffi
+python-dotenv
+pytest
+httpx

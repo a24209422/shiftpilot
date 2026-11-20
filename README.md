@@ -1,3 +1,5 @@
+> 重構進行中：舊版（Streamlit + text2sql）已搬到 `legacy/`，新設計見 `docs/superpowers/specs/2026-11-20-erp-platform-design.md`。
+
 # 排程工具 MVP（text2sql）
 
 用中文問排程問題，本機 Ollama 模型把問題轉成 PostgreSQL 查詢並回傳結果。一筆排程可以有多個資源（例如幾個人加一間會議室），新增時會自動檢查每個資源的時段衝突。
