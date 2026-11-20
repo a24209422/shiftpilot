@@ -52,7 +52,7 @@
 
 ### 模組
 
-`backend/app/modules/leave/`：`manifest.py`、`migrations/0001_leave.sql`、`rules.py`（純函式）、`service.py`、`router.py`。依賴 `org`、`core`。權限 `leave.request`、`leave.manage`。
+`backend/app/modules/leave/`：`manifest.py`、`migrations/0001_leave.sql`、`rules.py`（純函式）、`service.py`（假別、額度、餘額、報表）、`requests.py`（申請的流程、行事曆、不可用提供者）、`router.py`。依賴 `org`、`core`、`booking`（送出申請時要查本人同時段的會議）。權限 `leave.request`、`leave.manage`。
 
 ### 資料表
 
@@ -91,7 +91,7 @@
 | `id` | identity |
 | `employee_id` | `REFERENCES employees` |
 | `leave_type_id` | `REFERENCES leave_types` |
-| `start_at`、`end_at` | `timestamptz`，`CHECK (end_at > start_at)`；整點由 service 檢查 |
+| `start_at`、`end_at` | `timestamp`（不含時區，跟排程一樣：系統是單一時區），`CHECK (end_at > start_at)`；整點由 service 檢查 |
 | `hours` | `int NOT NULL CHECK (hours > 0)`；送出時算好的快照 |
 | `reason` | `text NOT NULL DEFAULT ''` |
 | `status` | `pending`／`approved`／`rejected`／`withdrawn`／`cancelled` |
@@ -103,7 +103,7 @@
 排除限制：同一個人在 `pending`、`approved` 的申請時段不能重疊。
 
 ```sql
-EXCLUDE USING gist (employee_id WITH =, tstzrange(start_at, end_at) WITH &&)
+EXCLUDE USING gist (employee_id WITH =, tsrange(start_at, end_at) WITH &&)
   WHERE (status IN ('pending', 'approved'))
 ```
 
@@ -184,7 +184,7 @@ EXCLUDE USING gist (employee_id WITH =, tstzrange(start_at, end_at) WITH &&)
 | `GET /unused?periodEndFrom=&periodEndTo=` | `leave.manage` | 特休年度結束日落在區間內、剩餘大於 0 的人：員工、部門、年度、額度、已用、未休 |
 | `GET /calendar?from=&to=` | `leave.request` | 區間內所有 `pending`、`approved` 的假：`id`、`employeeId`、`startAt`、`endAt`、`status`；`leaveTypeName` 只有本人、直屬主管、`leave.manage` 拿得到，其他人是 `null`。給時間軸用，區間最多 31 天 |
 
-錯誤沿用平台的統一格式。新的錯誤代碼：`LEAVE_QUOTA_EXCEEDED`（附 `remainingHours`）、`LEAVE_OVERLAP`（排除限制，附重疊的申請）、`LEAVE_CROSSES_PERIOD`、`LEAVE_NO_WORKING_HOURS`、`LEAVE_NOT_ELIGIBLE`（到職未滿 6 個月請特休、早於到職日、員工已離職）、`LEAVE_INVALID_STATE`、`MEETING_CONFLICT`（409，附 `conflicts`，用 `acknowledgeWarnings` 略過）。
+錯誤沿用平台的統一格式。新的錯誤代碼：`LEAVE_QUOTA_EXCEEDED`（附 `remainingHours`）、`LEAVE_OVERLAP`（排除限制，附重疊的申請）、`LEAVE_CROSSES_PERIOD`、`LEAVE_NO_WORKING_HOURS`、`LEAVE_NOT_ELIGIBLE`（到職未滿 6 個月請特休、早於到職日、員工已離職）、`NO_EMPLOYEE`（帳號沒有對應的員工，例如只有管理員帳號）、`LEAVE_INVALID_STATE`、`MEETING_CONFLICT`（409，附 `conflicts`，用 `acknowledgeWarnings` 略過）。
 
 ### 送出與狀態變更的流程
 
@@ -215,7 +215,7 @@ EXCLUDE USING gist (employee_id WITH =, tstzrange(start_at, end_at) WITH &&)
 
 - 上方：我的餘額卡片，每個啟用假別一張。顯示剩餘時數，已用與待核准分開；特休顯示年度起訖；`none` 只顯示已用。
 - 分頁「我的申請」：表格（假別、時間、時數、狀態）、撤回與取消按鈕依狀態與時間顯示；點列開詳情面板（事由、核准人、決定時間、備註）。
-- 「申請請假」按鈕開表單：假別、開始日期＋整點、結束日期＋整點、事由。欄位變動後呼叫 `quote`（短暫延遲再送），顯示「共 N 小時，送出後剩 M 小時」或錯誤訊息。`MEETING_CONFLICT` 沿用資源預約的 `ConflictNotice` 與「仍要送出」。
+- 「申請請假」按鈕開表單：假別、開始日期＋整點、結束日期＋整點、事由。欄位變動後呼叫 `quote`（短暫延遲再送），顯示「共 N 小時，送出後剩 M 小時」或錯誤訊息。`MEETING_CONFLICT` 用跟資源預約一樣的警告樣式與「仍要送出」流程（請假模組自己的元件，不改資源預約的 `ConflictNotice`）。
 - 分頁「待我核准」：`toApprove` 有資料、或使用者有 `leave.manage` 時才出現。核准；退回要填理由。
 
 **「假別與額度」頁**（`/leave/admin`，`leave.manage`）
@@ -231,6 +231,9 @@ EXCLUDE USING gist (employee_id WITH =, tstzrange(start_at, end_at) WITH &&)
 ### 時間軸（最後一個任務）
 
 - `TimelineItem.kind` 加 `"block"`：區塊畫法，跟 `event` 的長條分開。顏色依種類分（時間軸設計的規則）；待核准用文字「待核准」加淡色區分。
+- `TimelineItem.link` 改成選填：沒有連結的項目畫成不能點的區塊。
+- 時間軸頁加「檢視」選單（網址參數 `view`），在看得到的檢視之間切換；第一版只取第一個檢視的寫法拿掉。
+- 請假跨好幾天時，中間那幾天會蓋滿 00:00–24:00，把時間軸撐成整天。請假來源把每筆假裁到當天的上班時間（09:00–18:00）再交給時間軸，當天沒有交集就不畫。
 - 組織模組登記「員工」檢視：`subjectType: "employee"`、`requires: "org.read"`，列出在職員工，依部門分組。沒有 `createLink`。
 - 請假模組登記「請假」來源：`subjectType: "employee"`，呼叫 `GET /api/leave/calendar`，`label` 是假別名稱或「請假」，`link` 到請假詳情（看不到詳情的人不給連結）。`queryKey` 放在 `["leave", …]` 底下，寫入後的 invalidate 會一併更新時間軸。
 - 同一個人的請假由資料庫保證不重疊，所以員工檢視不需要疊放。
