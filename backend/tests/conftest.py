@@ -5,6 +5,8 @@ import pytest
 from dotenv import load_dotenv
 
 from app.infra.db import ensureExtensions, temporarySchema
+from app.infra.migrate import runMigrations
+from app.modules import allModules
 
 # .env 放在 repo 根目錄，不在 backend/ 底下
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -24,3 +26,9 @@ def databaseUrl(testDatabaseUrl):
   ensureExtensions(testDatabaseUrl)
   with temporarySchema(testDatabaseUrl, "test") as url:
     yield url
+
+
+@pytest.fixture
+def migratedUrl(databaseUrl):
+  runMigrations(databaseUrl, allModules)
+  return databaseUrl
