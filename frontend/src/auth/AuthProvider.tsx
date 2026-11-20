@@ -10,6 +10,7 @@ interface AuthValue {
   notice: string | null;
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
+  signOutWithNotice(message: string): void;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -60,7 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [queryClient, update]);
 
-  const value = useMemo(() => ({ user, status, notice, login, logout }), [user, status, notice, login, logout]);
+  const signOutWithNotice = useCallback((message: string) => {
+    queryClient.clear();
+    setNotice(message);
+    update("signedOut", null);
+  }, [queryClient, update]);
+
+  const value = useMemo(
+    () => ({ user, status, notice, login, logout, signOutWithNotice }),
+    [user, status, notice, login, logout, signOutWithNotice],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

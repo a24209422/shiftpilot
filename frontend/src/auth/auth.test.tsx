@@ -62,7 +62,6 @@ test("testSessionExpiryReturnsToLoginWithNotice", async () => {
   expect(location()).toBe("/login");
 });
 
-test.todo("testLogoutReturnsToLogin");
 
 function PermissionProbe() {
   const { can } = usePermissions();
