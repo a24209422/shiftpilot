@@ -142,7 +142,7 @@ dev 各類別（加規則之前 → 之後）：
 
 ### 結構變複雜的代價（2026-11-19 起）
 
-之前給模型看的是攤平好的 view `event_details`，模型不用寫 JOIN，不像真的排程系統。這一節量的是：模型改看原始的資料表、再加上組織與可用時間的新表之後，同一批題目的分數掉多少。設計見 [`docs/superpowers/specs/2026-11-19-realistic-schema-design.md`](docs/superpowers/specs/2026-11-19-realistic-schema-design.md)。分三步，每一步只動一件事：
+之前給模型看的是攤平好的 view `event_details`，模型不用寫 JOIN，不像真的排程系統。這一節量的是：模型改看原始的資料表、再加上組織與可用時間的新表之後，同一批題目的分數掉多少。設計見 [`docs/superpowers/specs/2026-11-19-realistic-schema-design.md`](../docs/superpowers/specs/2026-11-19-realistic-schema-design.md)。分三步，每一步只動一件事：
 
 - 步驟 0：固定 Ollama 的上下文長度，用現在的 prompt 重跑舊的 71 題，當作之後所有比較的基準
 - 步驟 1：模型改看原始的 `events`、`event_resources`、`resources`，照 view 寫的規則和範例逐條改寫成 JOIN 版本
