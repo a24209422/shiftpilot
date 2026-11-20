@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel
 
 from app.infra.actor import Actor
-from app.infra.http import getActor, getConn, sessionCookieName
+from app.infra.http import getActor, getConn, requirePermission, sessionCookieName
 from app.modules.core import service
 
 # 登入相關的路由掛在 /api/auth，不在 /api/core 底下（設計文件的路徑）；main.py 明確掛上這一組
@@ -57,3 +57,55 @@ def changePassword(body: ChangePasswordBody, response: Response, actor: Actor = 
   service.changePassword(conn, actor, body.currentPassword, body.newPassword)
   # 密碼改了，所有 session（包含這一個）都已刪除，要重新登入
   clearSessionCookie(response)
+
+
+manageUsers = requirePermission("core.users.manage")
+readAudit = requirePermission("core.audit.read")
+
+
+class UserCreate(BaseModel):
+  email: str
+  password: str
+  role: str
+  employeeId: int | None = None
+
+
+class UserUpdate(BaseModel):
+  role: str | None = None
+  isActive: bool | None = None
+  employeeId: int | None = None
+
+
+class ResetPasswordBody(BaseModel):
+  newPassword: str
+
+
+@router.get("/users")
+def listUsers(actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+  return service.listUsers(conn)
+
+
+@router.post("/users", status_code=201)
+def createUser(body: UserCreate, actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+  return service.createUser(conn, actor, body.email, body.password, body.role, body.employeeId)
+
+
+@router.patch("/users/{userId}")
+def updateUser(userId: int, body: UserUpdate, actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+  return service.updateUser(conn, actor, userId, body.model_dump(exclude_unset=True))
+
+
+@router.post("/users/{userId}/password", status_code=204)
+def resetPassword(userId: int, body: ResetPasswordBody, actor: Actor = Depends(manageUsers), conn=Depends(getConn)):
+  service.resetPassword(conn, actor, userId, body.newPassword)
+
+
+@router.get("/audit")
+def listAudit(
+  module: str | None = None,
+  limit: int = Query(100, ge=1, le=500),
+  beforeId: int | None = None,
+  actor: Actor = Depends(readAudit),
+  conn=Depends(getConn),
+):
+  return service.listAudit(conn, module, limit, beforeId)
