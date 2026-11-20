@@ -345,3 +345,21 @@ a.navItem { text-decoration: none; }
 .popTime { font: 12px var(--font-accent); color: var(--base-200); }
 .popTitle { font-size: 15px; font-weight: 500; }
 .popMeta { font: 11px var(--font-accent); color: color-mix(in oklch, var(--neutral-content) 70%, transparent); }
+
+/* ---- 時間軸：左欄名稱固定，右側軌道依時間定位；窄螢幕時整塊橫向捲動 ---- */
+.timeline { overflow-x: auto; border-top: 1px solid var(--ink); }
+.tlGroupName { font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; padding: 14px 0 6px; }
+.tlRow { display: grid; grid-template-columns: 160px minmax(640px, 1fr); border-bottom: 1px solid var(--rule); }
+.tlName { position: sticky; left: 0; z-index: 3; background: var(--base-100); padding: 12px 10px 12px 0; font-size: 15px; }
+.tlTrack { position: relative; height: 44px; }
+.tlAxis { height: 24px; }
+.tlTick { position: absolute; top: 4px; transform: translateX(-50%); font: 11px var(--font-accent); color: var(--base-300); white-space: nowrap; }
+/* 空檔格子在長條底下：長條蓋住的部分點不到，露出來的才是能預約的時段 */
+.tlCell { position: absolute; top: 0; bottom: 0; z-index: 1; border: 0; padding: 0; background: none; cursor: pointer; }
+.tlCell:hover { background: color-mix(in oklch, var(--ink) 8%, transparent); }
+.tlBar {
+  position: absolute; top: 6px; bottom: 6px; z-index: 2; border: 1px solid var(--ink); background: var(--base-200); color: var(--ink);
+  padding: 0 6px; font-size: 12px; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+}
+.tlBar:hover { background: var(--ink); color: var(--base-100); }
+.tlNow { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: var(--primary); pointer-events: none; }

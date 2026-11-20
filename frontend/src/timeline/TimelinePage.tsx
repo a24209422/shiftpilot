@@ -1,0 +1,132 @@
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
+import { usePermissions } from "../auth/usePermissions";
+import { addDays, formatDay, formatRange, toLocalDate, toLocalString } from "../forms/time";
+import type { ModuleRegistration } from "../modules/registry";
+import { PageHead } from "../shell/PageHead";
+import { axisFor, clipToDay, groupSubjects, minuteLabel, minuteToLocal, parseDay, percentOf, slotFor, slotStep, type Axis } from "./layout";
+import type { TimelineSource, TimelineView } from "./types";
+
+// 現在時間線要跟著走，一分鐘更新一次就夠
+function useNow() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
+const placeStyle = (axis: Axis, startMinute: number, endMinute: number) => ({
+  left: `${percentOf(axis, startMinute)}%`,
+  width: `${percentOf(axis, endMinute) - percentOf(axis, startMinute)}%`,
+});
+
+export function TimelinePage({ registrations }: { registrations: ModuleRegistration[] }) {
+  const { can } = usePermissions();
+  const views = registrations.flatMap((registration) => registration.timelineViews ?? []).filter((view) => can(view.requires));
+  // 第一版只有一種檢視，不做檢視選單
+  const view = views[0];
+  if (!view) return <div className="empty">沒有可以看的時間軸</div>;
+  const sources = registrations
+    .flatMap((registration) => registration.timelineSources ?? [])
+    .filter((source) => source.subjectType === view.subjectType && can(source.requires));
+  const create = view.createLink && view.createRequires && can(view.createRequires) ? view.createLink : undefined;
+  return <TimelineBoard key={view.key} view={view} sources={sources} create={create} />;
+}
+
+function TimelineBoard({ view, sources, create }: {
+  view: TimelineView; sources: TimelineSource[]; create?: (subjectId: number, startAt: string, endAt: string) => string;
+}) {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const now = useNow();
+  const day = parseDay(params.get("date"), now);
+  const from = toLocalString(day);
+  const to = toLocalString(addDays(day, 1));
+
+  const subjects = useQuery(view.subjects());
+  const results = useQueries({ queries: sources.map((source) => source.items(from, to)) });
+  // 一個來源失敗不能默默少畫：其他照畫，但要說出哪個來源沒載到
+  const failed = sources.filter((_, index) => results[index]?.isError).map((source) => source.name);
+
+  const rows = subjects.data ?? [];
+  const rowIds = new Set(rows.map((subject) => subject.id));
+  const placed = results
+    .flatMap((result) => result.data ?? [])
+    .flatMap((item) => {
+      const span = clipToDay(day, item);
+      // 不屬於任何一列的項目（例如停用資源上的排程）不畫
+      return span && rowIds.has(item.subjectId) ? [{ item, span }] : [];
+    });
+  const axis = axisFor(placed.map((entry) => entry.span));
+  const cells: number[] = [];
+  for (let minute = axis.startMinute; minute < axis.endMinute; minute += slotStep) cells.push(minute);
+  const ticks: number[] = [];
+  for (let minute = axis.startMinute; minute <= axis.endMinute; minute += 60) ticks.push(minute);
+  const nowMinute = now.getHours() * 60 + now.getMinutes();
+  const showNow = toLocalDate(day) === toLocalDate(now) && nowMinute >= axis.startMinute && nowMinute <= axis.endMinute;
+  const goTo = (date: Date) => setParams({ date: toLocalDate(date) });
+
+  return (
+    <div className="inner">
+      <PageHead headline="Timeline." sub={`時間軸・${view.name}・${formatDay(from)}`} />
+      <div className="weekBar">
+        <button className="secondary" type="button" onClick={() => goTo(addDays(day, -1))}>前一天</button>
+        <button className="secondary" type="button" onClick={() => goTo(now)}>今天</button>
+        <button className="secondary" type="button" onClick={() => goTo(addDays(day, 1))}>後一天</button>
+        <span className="range">{formatDay(from)}</span>
+      </div>
+      {failed.length > 0 && <div className="formError" role="alert">{failed.join("、")}載入失敗</div>}
+      {subjects.isError && <div className="formError" role="alert">{view.name}載入失敗</div>}
+      {subjects.isSuccess && rows.length === 0 && <div className="empty">{view.emptyText}</div>}
+      {rows.length > 0 && (
+        <div className="timeline">
+          <div className="tlRow tlAxisRow">
+            <div className="tlName" />
+            <div className="tlTrack tlAxis">
+              {ticks.map((minute) => <span key={minute} className="tlTick" style={{ left: `${percentOf(axis, minute)}%` }}>{minuteLabel(minute)}</span>)}
+            </div>
+          </div>
+          {groupSubjects(rows).map((group) => (
+            <div key={group.name} className="tlGroup">
+              <div className="tlGroupName">{group.name}</div>
+              {group.subjects.map((subject) => {
+                const row = placed.filter((entry) => entry.item.subjectId === subject.id);
+                const spans = row.map((entry) => entry.span);
+                return (
+                  <div key={subject.id} className="tlRow">
+                    <div className="tlName">{subject.label}</div>
+                    <div className="tlTrack">
+                      {create && cells.map((cell) => {
+                        const slot = slotFor(cell, spans);
+                        if (!slot) return null;
+                        return (
+                          <button
+                            key={cell} type="button" className="tlCell" style={placeStyle(axis, cell, cell + slotStep)}
+                            aria-label={`${subject.label} ${minuteLabel(cell)} 新增排程`}
+                            onClick={() => navigate(create(subject.id, minuteToLocal(day, slot.startMinute), minuteToLocal(day, slot.endMinute)))}
+                          />
+                        );
+                      })}
+                      {row.map(({ item, span }) => (
+                        <button
+                          key={item.key} type="button" className="tlBar" style={placeStyle(axis, span.startMinute, span.endMinute)}
+                          title={`${item.label} ${formatRange(item.startAt, item.endAt)}`} onClick={() => navigate(item.link)}
+                        >
+                          {item.label}{span.crossesDay ? "（跨日）" : ""}
+                        </button>
+                      ))}
+                      {showNow && <div className="tlNow" data-testid="nowLine" style={{ left: `${percentOf(axis, nowMinute)}%` }} />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
