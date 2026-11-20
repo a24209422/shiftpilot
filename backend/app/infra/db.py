@@ -38,10 +38,20 @@ def temporarySchema(databaseUrl: str, prefix: str):
 
 
 @contextmanager
+def savepoint(conn):
+  """區塊失敗時只回復這一段，外層的交易與同一條連線都還能繼續用。"""
+  # 連線上還沒有交易時，transaction() 會開一個離開區塊就 commit 的交易，不是 savepoint；先開始外層交易
+  if conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
+    conn.execute("SELECT 1")
+  with conn.transaction():
+    yield
+
+
+@contextmanager
 def mapDbErrors(conn):
-  """把資料庫限制錯誤轉成 AppError。包在 savepoint 裡：失敗只回復這一段，同一條連線之後還能繼續用。"""
+  """把資料庫限制錯誤轉成 AppError，並且只回復這一段（savepoint）。"""
   try:
-    with conn.transaction():
+    with savepoint(conn):
       yield
   except psycopg.errors.UniqueViolation as error:
     raise AppError("DUPLICATE", "資料重複：名稱或編號已經被使用", 409, {"constraint": error.diag.constraint_name})

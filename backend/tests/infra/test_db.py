@@ -1,7 +1,7 @@
 import psycopg
 import pytest
 
-from app.infra.db import ensureExtensions, openDb, temporarySchema
+from app.infra.db import ensureExtensions, mapDbErrors, openDb, temporarySchema
 
 
 def testTemporarySchemaIsolatesTables(testDatabaseUrl):
@@ -49,3 +49,18 @@ def testBtreeGistIsAvailable(testDatabaseUrl):
     )
   with openDb(testDatabaseUrl) as conn:
     assert conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'btree_gist'").fetchone() is not None
+
+
+def testMapDbErrorsAsFirstStatementStaysInsideOuterTransaction(testDatabaseUrl):
+  # 連線上的第一個語句如果是 transaction()，psycopg 會開一個自己 commit 的交易而不是 savepoint，
+  # 之後請求失敗的 rollback 就救不回已經寫入的資料
+  with temporarySchema(testDatabaseUrl, "test") as url:
+    with openDb(url) as conn:
+      conn.execute("CREATE TABLE t (n int)")
+    with pytest.raises(RuntimeError):
+      with openDb(url) as conn:
+        with mapDbErrors(conn):
+          conn.execute("INSERT INTO t VALUES (1)")
+        raise RuntimeError("後面的步驟失敗")
+    with openDb(url) as conn:
+      assert conn.execute("SELECT count(*) AS n FROM t").fetchone()["n"] == 0

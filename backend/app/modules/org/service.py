@@ -6,6 +6,7 @@ from app.infra.actor import Actor
 from app.infra.db import mapDbErrors
 from app.infra.errors import AppError
 from app.infra.serialize import camelizeRow
+from app.infra.validate import requireText
 from app.modules.core.service import writeAudit
 
 departmentColumns = "id, name, parent_id"
@@ -29,12 +30,6 @@ requiredTextFields = {"name", "employeeNo", "jobTitle"}
 
 # 兩個人同時改部門或主管，可能各自通過循環檢查、合起來卻形成循環；用同一把鎖讓它們排隊
 hierarchyLockKey = 7301
-
-
-def requireText(value, label: str) -> str:
-  if not isinstance(value, str) or not value.strip():
-    raise AppError("VALIDATION", f"{label}不能是空白", 422)
-  return value.strip()
 
 
 def validateFields(fields: dict, allowed: dict) -> dict:
