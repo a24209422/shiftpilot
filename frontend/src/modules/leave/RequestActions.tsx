@@ -3,6 +3,7 @@ import { apiSend } from "../../api/client";
 import type { LeaveRequest } from "../../api/types";
 import { useAuth } from "../../auth/AuthProvider";
 import { usePermissions } from "../../auth/usePermissions";
+import { TextArea } from "../../forms/fields";
 import { FormError } from "../../forms/FormError";
 import { parseLocal } from "../../forms/time";
 import { useSubmit } from "../../forms/useSubmit";
@@ -44,5 +45,33 @@ export function OwnerActions({ request, onDone }: { request: LeaveRequest; onDon
       {canWithdraw && <ConfirmButton label="撤回" confirmLabel="確定撤回？" pending={withdraw.pending} onConfirm={() => void withdraw.submit()} />}
       {canCancel && <ConfirmButton label="取消請假" confirmLabel="確定取消？" pending={cancel.pending} onConfirm={() => void cancel.submit()} />}
     </>
+  );
+}
+
+export function ApprovalActions({ request, onDone }: { request: LeaveRequest; onDone(): void }) {
+  const toast = useToast();
+  const [note, setNote] = useState("");
+  const [noteError, setNoteError] = useState<string | undefined>();
+  const approve = useSubmit(
+    () => apiSend("POST", `/api/leave/requests/${request.id}/approve`, { note: note || null }),
+    { onSuccess: () => { toast("已核准"); onDone(); }, invalidate: [["leave"]] },
+  );
+  const reject = useSubmit(
+    () => apiSend("POST", `/api/leave/requests/${request.id}/reject`, { note }),
+    { onSuccess: () => { toast("已退回"); onDone(); }, invalidate: [["leave"]] },
+  );
+  return (
+    <div className="form">
+      <TextArea label="核准備註或退回理由" value={note} onChange={(value) => { setNote(value); setNoteError(undefined); }} error={noteError} />
+      <FormError error={approve.error ?? reject.error} />
+      <div className="formActions">
+        <button className="primary" type="button" disabled={approve.pending || reject.pending} onClick={() => void approve.submit()}>核准</button>
+        <button className="danger" type="button" disabled={approve.pending || reject.pending} onClick={() => {
+          // 前端先擋一次，少一趟來回；後端也會檢查
+          if (!note.trim()) { setNoteError("退回要填理由"); return; }
+          void reject.submit();
+        }}>退回</button>
+      </div>
+    </div>
   );
 }

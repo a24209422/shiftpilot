@@ -449,3 +449,5 @@ a.navItem { text-decoration: none; }
 .balanceCard .balanceValue { font: 600 22px var(--font-accent); margin: 6px 0 2px; }
 .balanceCard .balanceNote { font-size: 12px; color: var(--base-300); }
 .formNote { font: 13px/1.5 var(--font-accent); }
+.statLink { border: 0; border-radius: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.statLink:hover { outline: 2px solid var(--ink); outline-offset: -2px; }

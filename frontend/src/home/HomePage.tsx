@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { apiGet } from "../api/client";
-import type { BookingSummary } from "../api/types";
+import type { BookingSummary, LeaveRequest } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
-import { formatRange, formatTime, toLocalDate } from "../forms/time";
+import { formatDay, formatRange, formatTime, toLocalDate } from "../forms/time";
 import { navPages, type ModuleRegistration } from "../modules/registry";
 import { Icon } from "../shell/icons";
 import { PageHead } from "../shell/PageHead";
@@ -16,6 +16,15 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
   const navigate = useNavigate();
   const canSee = can("booking.read");
   const { data: summary } = useQuery({ queryKey: ["summary"], queryFn: () => apiGet<BookingSummary>("/api/booking/summary"), enabled: canSee });
+  const canRequestLeave = can("leave.request");
+  const { data: toApprove } = useQuery({
+    queryKey: ["leave", "requests", "toApprove"],
+    queryFn: () => apiGet<LeaveRequest[]>("/api/leave/requests", { scope: "toApprove" }),
+    enabled: canRequestLeave,
+  });
+  const pendingLeave = toApprove ?? [];
+  // 最早開始的那張最急；列表是新到舊排，所以取最後一筆
+  const earliest = pendingLeave.length ? pendingLeave[pendingLeave.length - 1] : null;
   const pages = navPages(registrations, can);
 
   const now = new Date();
@@ -28,12 +37,16 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
   const busyRooms = rooms.filter((item) => item.currentBooking).length;
   const nextIsToday = next !== null && next.startAt.slice(0, 10) === today;
 
-  const stats = summary ? [
+  const stats: { label: string; value: string; note: string; link?: string }[] = summary ? [
     { label: "今天的排程", value: String(todayBookings.length), note: nextIsToday ? `下一場 ${formatTime(next!.startAt)}` : "今天沒有下一場了" },
     { label: "會議室使用中", value: `${busyRooms}/${rooms.length}`, note: "此刻" },
     { label: "接下來的排程", value: String(summary.bookingCount), note: "還沒結束的已確認排程" },
     { label: "資源", value: String(summary.resourceCount), note: "可以預約" },
   ] : [];
+  const leaveStats = pendingLeave.length > 0
+    ? [{ label: "待審核請假", value: String(pendingLeave.length), note: `最早 ${formatDay(earliest!.startAt)}`, link: "/leave?tab=approve" }]
+    : [];
+  const allStats = [...stats, ...leaveStats];
 
   return (
     <div className="inner">
@@ -44,9 +57,15 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
         )}
       />
 
-      {summary && (
+      {allStats.length > 0 && (
         <section className="stats">
-          {stats.map((stat) => (
+          {allStats.map((stat) => stat.link ? (
+            <button className="stat statLink" type="button" key={stat.label} onClick={() => navigate(stat.link!)}>
+              <div className="statLabel">{stat.label}</div>
+              <div className="statValue">{stat.value}</div>
+              <div className="statNote">{stat.note}</div>
+            </button>
+          ) : (
             <div className="stat" key={stat.label}>
               <div className="statLabel">{stat.label}</div>
               <div className="statValue">{stat.value}</div>

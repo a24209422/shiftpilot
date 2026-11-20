@@ -173,3 +173,30 @@ test("testBusyDaysMarkedAndHomeHasNoSubtitle", async () => {
   expect(document.querySelector(".pageHead .sub")).toBeNull();
   expect(screen.getByText("All modules").textContent).toBe("All modules");
 });
+
+const openWithLeave = (toApprove: unknown[]) =>
+  renderApp({
+    route: "/", permissions: ["booking.read", "leave.request"], registrations: [bookingRegistration],
+    routes: {
+      "GET /api/booking/summary": () => ({ body: summary }),
+      "GET /api/booking/bookings": () => ({ body: [] }),
+      "GET /api/booking/resources": () => ({ body: [] }),
+      "GET /api/org/employees": () => ({ body: [] }),
+      "GET /api/leave/requests": ({ params }) => ({ body: params.get("scope") === "toApprove" ? toApprove : [] }),
+    },
+  });
+
+test("testPendingLeaveStatLinksToApproveTab", async () => {
+  openWithLeave([{ id: 6, startAt: "2026-11-25T09:00:00" }, { id: 5, startAt: "2026-11-24T09:00:00" }]);
+  const stat = await screen.findByRole("button", { name: /待審核請假/ });
+  expect(within(stat).getByText("2", { selector: ".statValue" })).toBeInTheDocument();
+  expect(within(stat).getByText("最早 11/24（二）", { selector: ".statNote" })).toBeInTheDocument();
+  await userEvent.setup().click(stat);
+  expect(screen.getByTestId("location").textContent).toBe("/leave?tab=approve");
+});
+
+test("testNoPendingLeaveStatWhenNothingToApprove", async () => {
+  openWithLeave([]);
+  await screen.findByText("今天的排程", { selector: ".statLabel" });
+  expect(screen.queryByText("待審核請假")).not.toBeInTheDocument();
+});

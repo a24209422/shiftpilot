@@ -10,7 +10,7 @@ import { PageHead } from "../../shell/PageHead";
 import { useDrawerParams } from "../../shell/useDrawerParams";
 import { useAudit, useUsers } from "./queries";
 
-const moduleOptions = ["org", "core", "booking"].map((value) => ({ value, label: value }));
+const moduleOptions = ["org", "core", "booking", "leave"].map((value) => ({ value, label: value }));
 const json = (value: unknown) => (value === null || value === undefined ? "—" : JSON.stringify(value, null, 2));
 
 export function AuditPage() {
