@@ -110,13 +110,14 @@ def testChangePasswordClearsSessionAndOldPasswordFails(client, loginAs):
 def testModulesListFiltersByPermission(client, newClient, loginAs):
   loginAs("employee", "emp@example.com")
   modules = {item["name"]: item for item in client.get("/api/modules").json()}
-  assert set(modules) == {"org", "booking"}
+  assert set(modules) == {"org", "booking", "leave"}
   assert modules["org"]["permissions"] == ["org.read"]
   assert modules["booking"]["permissions"] == ["booking.read", "booking.write"]
   assert modules["booking"]["title"] == "資源預約"
+  assert modules["leave"]["permissions"] == ["leave.request"]
   adminClient = newClient()
   loginAs("admin", "admin@example.com", client=adminClient)
-  assert {item["name"] for item in adminClient.get("/api/modules").json()} == {"org", "core", "booking"}
+  assert {item["name"] for item in adminClient.get("/api/modules").json()} == {"org", "core", "booking", "leave"}
 
 
 def testModulesRequiresSession(client):

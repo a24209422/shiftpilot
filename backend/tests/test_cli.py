@@ -16,7 +16,7 @@ def countRows(url, table):
 
 
 def testMigrateCommandAppliesThenNoop(databaseUrl):
-  assert cli.migrateCommand(databaseUrl) == ["org/0001_org.sql", "core/0001_core.sql", "booking/0001_booking.sql"]
+  assert cli.migrateCommand(databaseUrl) == ["org/0001_org.sql", "core/0001_core.sql", "booking/0001_booking.sql", "leave/0001_leave.sql"]
   assert cli.migrateCommand(databaseUrl) == []
 
 
