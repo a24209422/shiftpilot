@@ -25,7 +25,9 @@ python -m app.cli seedDemo                 # 選用：寫入示範的部門、�
 uvicorn app.main:createAppFromEnv --factory --host 127.0.0.1 --port 8000
 ```
 
-- 自動產生的 API 文件：<http://127.0.0.1:8000/docs>
+- 有畫面：先 `cd frontend && npm install && npm run build`（見 `frontend/README.md`），之後 <http://127.0.0.1:8000/> 就是登入頁。沒有建置結果時只有 API。
+- 開發前端時：後端照上面啟動，另一個終端機在 `frontend/` 執行 `npm run dev`，開 <http://127.0.0.1:5173>。
+- 自動產生的 API 文件：<http://127.0.0.1:8000/docs>（所有非 GET 請求都要帶 `X-App-Client: web`，Swagger 的 Try it out 不會自動加，寫入請用前端或 PowerShell）
 - 一定要寫 `--host 127.0.0.1`：目前沒有 HTTPS，cookie 沒有 `Secure`，只能給本機使用。
 - 所有非 GET 請求都要帶標頭 `X-App-Client: web`（擋跨站請求）；登入後的 session 放在 HttpOnly cookie `sid`。
 - 錯誤一律是 `{ "error": { "code", "message", "details" } }`。

@@ -1,4 +1,4 @@
-> 重構進行中：舊版（Streamlit + text2sql）已搬到 `legacy/`，新設計見 `docs/superpowers/specs/2026-11-20-erp-platform-design.md`。
+> 重構進行中：舊版（Streamlit + text2sql）已搬到 `legacy/`，新系統：後端見 `backend/README.md`、前端見 `frontend/README.md`，設計見 `docs/superpowers/specs/2026-11-20-erp-platform-design.md`。
 
 # 排程工具 MVP（text2sql）
 
