@@ -14,7 +14,7 @@ afterEach(() => vi.useRealTimers());
 
 const allPermissions = [
   "org.read", "org.manage", "booking.read", "booking.write", "booking.writeAny", "booking.resources.manage", "core.users.manage", "core.audit.read",
-  "leave.request", "leave.manage",
+  "leave.request", "leave.manage", "shift.read", "shift.manage",
 ];
 const employee = { id: 2, employeeNo: "E002", name: "林小美", email: null, departmentId: 1, jobTitle: "工程師", managerId: null, hiredOn: "2024-01-01", isActive: true, leftOn: null };
 const booking = {
@@ -35,6 +35,9 @@ const routes = {
   "GET /api/leave/balances": () => ({ body: [] }),
   "GET /api/leave/requests": () => ({ body: [leaveRequest] }),
   "GET /api/leave/requests/5": () => ({ body: leaveRequest }),
+  "GET /api/shift/types": () => ({ body: [{ id: 1, code: "standard", name: "標準班", startTime: "09:00", endTime: "18:00", breakStart: "12:00", breakEnd: "13:00", isDefault: true, isActive: true }] }),
+  "GET /api/shift/schedule": () => ({ body: [] }),
+  "GET /api/shift/rosters": () => ({ body: [] }),
 };
 
 // 每一頁：頁面層級的按鈕、點哪一列、那一列的詳情裡該有的按鈕
@@ -48,6 +51,8 @@ const pages = [
   // 「申請請假」「撤回」要有員工帳號（leave.test.tsx 覆蓋）；「新增調整」要先選員工（admin.test.tsx 覆蓋）
   { path: "/leave/admin", row: "事假", pageButtons: ["新增假別"], rowButtons: ["編輯", "停用"] },
   { path: "/leave?tab=approve", row: "家裡有事", pageButtons: [], rowButtons: ["核准", "退回"] },
+  { path: "/shifts/types", row: "標準班", pageButtons: ["新增班別"], rowButtons: ["編輯", "停用"] },
+  { path: "/shifts", row: "林小美", pageButtons: [], rowButtons: ["新增週班表"] },
 ];
 
 const has = (name: string) => screen.findByRole("button", { name }, { timeout: 1500 }).then(() => true, () => false);

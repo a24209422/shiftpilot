@@ -463,3 +463,16 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .formNote { font: 13px/1.5 var(--font-accent); }
 .statLink { border: 0; border-radius: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .statLink:hover { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* 班表：一週七欄，預設班用淡色、單日調整加角標，一眼看得出哪些是特別排的 */
+.shiftGrid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.shiftGrid th, .shiftGrid td { border-bottom: 1px solid var(--rule); padding: 4px; text-align: left; }
+.shiftGrid thead th { font: 12px var(--font-accent); color: var(--base-300); }
+.shiftGroup td { font: 12px var(--font-accent); color: var(--base-300); padding-top: 12px; }
+.shiftCell { width: 100%; border: 1.5px solid var(--ink); border-radius: 0; background: var(--paper); padding: 6px; font-size: 12px; text-align: left; cursor: pointer; position: relative; }
+.shiftSource-default { border-color: var(--rule); color: var(--base-300); }
+.shiftSource-off, .shiftSource-inactive { border-style: dashed; border-color: var(--rule); color: var(--base-300); }
+.shiftSource-holiday { background: color-mix(in oklch, var(--stamp) 18%, var(--paper)); }
+.shiftOverride::after { content: ""; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 10px 10px 0; border-color: transparent var(--ink) transparent transparent; }
+.rosterItem { border: 1.5px solid var(--ink); padding: 8px 10px; display: grid; gap: 4px; }
+.rosterFrom { font-weight: 600; }
