@@ -37,7 +37,7 @@ cases = [
   },
   {
     "id": "o04", "category": "org", "asker": "manager",
-    "question": "我底下有哪些人？",
+    "question": "陳大文底下有哪些人？",
     "goldSql": "SELECT e.name FROM employees e JOIN employees m ON m.id = e.manager_id WHERE m.name = '陳大文'",
     "compareAsSet": True,
   },
@@ -79,7 +79,8 @@ cases = [
   {
     "id": "s06", "category": "shift", "asker": "employee",
     "question": "下週五是國定假日嗎？",
-    "goldSql": "SELECT kind, name FROM calendar_days WHERE day = '2026-11-27'",
+    "goldSql": "SELECT kind FROM calendar_days WHERE day = '2026-11-27'",
+    "alsoAccept": ["SELECT name FROM calendar_days WHERE day = '2026-11-27' AND kind = 'holiday'"],
   },
   {
     "id": "s07", "category": "shift", "asker": "employee",
@@ -88,9 +89,8 @@ cases = [
   },
   {
     "id": "s08", "category": "shift", "asker": "employee",
-    "question": "12 月 5 日是補班日，那天有誰要上班？",
-    "goldSql": "SELECT e.name FROM day_shifts s JOIN employees e ON e.id = s.employee_id WHERE s.day = '2026-12-05' AND s.shift_name IS NOT NULL",
-    "compareAsSet": True,
+    "question": "12 月 5 日補班那天，劉怡君上什麼班？",
+    "goldSql": "SELECT s.shift_name FROM day_shifts s JOIN employees e ON e.id = s.employee_id WHERE e.name = '劉怡君' AND s.day = '2026-12-05'",
   },
   {
     "id": "a01", "category": "avail", "asker": "employee",
@@ -115,11 +115,15 @@ cases = [
   },
   {
     "id": "a03", "category": "avail", "asker": "requester",
-    "question": "我下週二下午有沒有會議或請假？",
+    "question": "林小美下週二下午有沒有會議或請假？",
     "goldSql": (
-      "SELECT b.kind, b.label FROM busy_periods b JOIN employees e ON e.id = b.employee_id "
+      "SELECT b.kind FROM busy_periods b JOIN employees e ON e.id = b.employee_id "
       "WHERE e.name = '林小美' AND b.start_at < '2026-11-24 18:00' AND b.end_at > '2026-11-24 12:00'"
     ),
+    "alsoAccept": [
+      "SELECT b.label FROM busy_periods b JOIN employees e ON e.id = b.employee_id "
+      "WHERE e.name = '林小美' AND b.start_at < '2026-11-24 18:00' AND b.end_at > '2026-11-24 12:00'"
+    ],
   },
   {
     "id": "a04", "category": "avail", "asker": "employee",
@@ -129,6 +133,7 @@ cases = [
       "JOIN resources r ON r.id = br.resource_id "
       "WHERE r.name = 'A 會議室' AND b.start_at < '2026-11-24 16:00' AND b.end_at > '2026-11-24 15:00'"
     ),
+    "compareAsSet": True,
   },
   {
     "id": "a05", "category": "avail", "asker": "employee",
@@ -137,6 +142,7 @@ cases = [
       "SELECT b.start_at, b.end_at FROM busy_periods b JOIN employees e ON e.id = b.employee_id "
       "WHERE e.name = '李佳穎' AND b.start_at >= '2026-11-18' AND b.start_at < '2026-11-19'"
     ),
+    "compareAsSet": True,
   },
   {
     "id": "a06", "category": "avail", "asker": "employee",
@@ -188,15 +194,16 @@ cases = [
   },
   {
     "id": "l04", "category": "leave", "asker": "manager",
-    "question": "目前有哪些請假還在等核准？",
+    "question": "目前有哪些請假還在等核准？是什麼假？",
     "goldSql": (
-      "SELECT e.name, r.start_at FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
+      "SELECT e.name, r.leave_type FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
       "WHERE r.status = 'pending'"
     ),
+    "compareAsSet": True,
   },
   {
     "id": "l05", "category": "leave", "asker": "requester",
-    "question": "我申請的特休總共幾小時？",
+    "question": "林小美申請的特休總共幾小時？",
     "goldSql": (
       "SELECT sum(r.hours) FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
       "WHERE e.name = '林小美' AND r.leave_type = '特休' AND r.status IN ('pending', 'approved')"
@@ -204,19 +211,21 @@ cases = [
   },
   {
     "id": "l06", "category": "leave", "asker": "hr",
-    "question": "有哪些請假申請被退回？",
+    "question": "有哪些人的請假申請被退回？",
     "goldSql": (
-      "SELECT e.name, r.start_at FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
+      "SELECT e.name FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
       "WHERE r.status = 'rejected'"
     ),
+    "compareAsSet": True,
   },
   {
     "id": "l07", "category": "leave", "asker": "requester",
-    "question": "我有哪些已經核准的假？",
+    "question": "林小美有哪些已經核准的假別？",
     "goldSql": (
-      "SELECT r.leave_type, r.start_at FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
+      "SELECT r.leave_type FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
       "WHERE e.name = '林小美' AND r.status = 'approved'"
     ),
+    "compareAsSet": True,
   },
   {
     "id": "l08", "category": "leave", "asker": "employee",
@@ -233,10 +242,11 @@ cases = [
       "SELECT b.title FROM bookings b JOIN booking_resources br ON br.booking_id = b.id "
       "JOIN resources r ON r.id = br.resource_id WHERE r.name = 'B 會議室' AND b.start_at::date = '2026-11-25'"
     ),
+    "compareAsSet": True,
   },
   {
     "id": "m02", "category": "meet", "asker": "requester",
-    "question": "我下週有幾場會議？",
+    "question": "林小美下週有幾場會議？",
     "goldSql": (
       "SELECT count(DISTINCT b.id) FROM bookings b JOIN booking_participants p ON p.booking_id = b.id "
       "JOIN employees e ON e.id = p.employee_id "
@@ -276,6 +286,7 @@ cases = [
     "id": "m06", "category": "meet", "asker": "employee",
     "question": "專案啟動會幾點開始？",
     "goldSql": "SELECT start_at FROM bookings WHERE title = '專案啟動會'",
+    "alsoAccept": ["SELECT start_at::time FROM bookings WHERE title = '專案啟動會'"],
   },
   {
     "id": "m07", "category": "meet", "asker": "employee",
@@ -305,16 +316,16 @@ cases = [
     "id": "g03", "category": "agg", "asker": "hr",
     "question": "各種假別已核准的總時數各是多少？",
     "goldSql": "SELECT leave_type, sum(hours) FROM leave_requests WHERE status = 'approved' GROUP BY leave_type",
+    # 已離職的人不在 employees：有人會 JOIN employees 而排除他的假
+    "alsoAccept": [
+      "SELECT r.leave_type, sum(r.hours) FROM leave_requests r JOIN employees e ON e.id = r.employee_id "
+      "WHERE r.status = 'approved' GROUP BY r.leave_type"
+    ],
   },
   {
     "id": "g04", "category": "agg", "asker": "employee",
-    "question": "每場會議平均有幾個人參加？",
+    "question": "把主辦人也算進去，每場會議平均有幾個人參加？",
     "goldSql": "SELECT count(*)::numeric / count(DISTINCT booking_id) FROM booking_participants",
-    # 只算參加者、不含主辦；分母可能是全部會議或只算有參加者的會議
-    "alsoAccept": [
-      "SELECT count(*)::numeric / (SELECT count(*) FROM bookings) FROM booking_participants WHERE role = 'attendee'",
-      "SELECT count(*)::numeric / count(DISTINCT booking_id) FROM booking_participants WHERE role = 'attendee'",
-    ],
   },
   {
     "id": "g05", "category": "agg", "asker": "employee",
@@ -323,5 +334,10 @@ cases = [
       "SELECT start_at::date, count(*) FROM bookings "
       "WHERE start_at >= '2026-11-16' AND start_at < '2026-11-23' GROUP BY start_at::date"
     ),
+    # 「會議」也可能只指分類為會議的排程（不含外出、訓練）
+    "alsoAccept": [
+      "SELECT start_at::date, count(*) FROM bookings "
+      "WHERE category = '會議' AND start_at >= '2026-11-16' AND start_at < '2026-11-23' GROUP BY start_at::date"
+    ],
   },
 ]
