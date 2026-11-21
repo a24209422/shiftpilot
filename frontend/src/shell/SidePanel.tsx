@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { ApiError, apiGet, apiSend } from "../api/client";
+import type { QaAnswer, QaModel } from "../api/types";
+import { usePermissions } from "../auth/usePermissions";
+import { addDays, formatDay, toLocalDate } from "../forms/time";
 import { Icon } from "./icons";
-import { useToast } from "./Toast";
+import { ChatMessage, type ChatEntry } from "./QaMessage";
 
-// 只是介面的樣子：接上後端時換成真的模型清單
-const modelOptions = ["qwen2.5:3b", "qwen3-vl:4b-instruct"];
+// 跟後端的沙盒範圍一致：還沒問過問題前，先用今天前後各 90 天提示
+const windowDays = 90;
 
 const defaultWidth = 400;
 const minWidth = 320;
@@ -13,19 +18,50 @@ const clamp = (width: number) => Math.min(maxWidth(), Math.max(minWidth, Math.ro
 const mobileQuery = "(max-width: 760px)";
 const isMobile = () => typeof window.matchMedia === "function" && window.matchMedia(mobileQuery).matches;
 
-// 問答（text2sql）的位置：外殼與輸入區的樣子先做好（收合、拖曳寬度、選模型、送出），功能還沒接後端，所以不放假答案
+// 問答（text2sql）面板：模型清單與回答都來自後端，沒有 qa.ask 權限時只顯示說明
 export function SidePanel() {
   const [width, setWidth] = useState(defaultWidth);
   // 桌面預設展開；手機上展開會蓋滿整個畫面，所以預設收起來
   const [open, setOpen] = useState(() => !isMobile());
   const [question, setQuestion] = useState("");
-  const [model, setModel] = useState(modelOptions[0]);
-  const toast = useToast();
+  const { can, isLoading: permissionsLoading } = usePermissions();
+  const canAsk = can("qa.ask");
+  const { data: models } = useQuery({ queryKey: ["qa", "models"], queryFn: () => apiGet<QaModel[]>("/api/qa/models"), enabled: canAsk });
+  const [model, setModel] = useState("");
+  const [entries, setEntries] = useState<ChatEntry[]>([]);
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const nextId = useRef(1);
 
-  // 問答還沒接後端：送出不產生任何回答，輸入的字留著，只說明還沒開放
-  function onSend(event: FormEvent) {
+  // 模型清單載入後預設第一個（後端把 .env 的 OLLAMA_MODEL 放第一）
+  useEffect(() => {
+    if (models && models.length > 0 && !models.some((item) => item.id === model)) setModel(models[0].id);
+  }, [models, model]);
+
+  const selected = models?.find((item) => item.id === model);
+  const today = new Date();
+  const shownRange = range ?? { from: toLocalDate(addDays(today, -windowDays)), to: toLocalDate(addDays(today, windowDays)) };
+
+  async function onSend(event: FormEvent) {
     event.preventDefault();
-    toast("問答尚未開放");
+    const text = question.trim();
+    if (!text || !canAsk || !model || asking) return;
+    const questionId = nextId.current++;
+    const pendingId = nextId.current++;
+    setEntries((current) => [...current, { id: questionId, kind: "question", text }, { id: pendingId, kind: "pending" }]);
+    setQuestion("");
+    setAsking(true);
+    try {
+      const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", { question: text, model });
+      setRange(result.window);
+      setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "answer", result } : entry)));
+    } catch (caught) {
+      const error = caught instanceof ApiError ? caught : new ApiError(0, "UNKNOWN", "問答失敗，請再試一次");
+      const sql = (error.details as { sql?: string } | null)?.sql ?? null;
+      setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "error", message: error.message, sql } : entry)));
+    } finally {
+      setAsking(false);
+    }
   }
 
   useEffect(() => {
@@ -93,8 +129,10 @@ export function SidePanel() {
           <div className="chatLog">
             <div className="msg bot">
               <div className="msgMeta">DESK</div>
-              <div className="bubble">問答尚未開放。之後可以在這裡用中文查詢排程，例如「明天有哪些會議？」。</div>
+              {/* 權限還在載入時先顯示說明，免得有權限的人先閃過一句「沒有權限」 */}
+              <div className="bubble">{canAsk || permissionsLoading ? "用中文問組織、會議、請假或班表，例如「黃志強明天上什麼班？」「下週二下午誰有空？」" : "沒有使用問答的權限"}</div>
             </div>
+            {entries.map((entry) => <ChatMessage key={entry.id} entry={entry} />)}
           </div>
           <form className="chatForm" onSubmit={onSend}>
             <div className="chatFormRow">
@@ -106,12 +144,14 @@ export function SidePanel() {
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
                 }}
               />
-              <button className="chatSend" type="submit" aria-label="送出" title="送出"><Icon name="arrowUp" size={20} /></button>
+              <button className="chatSend" type="submit" aria-label="送出" title="送出" disabled={!canAsk || asking}><Icon name="arrowUp" size={20} /></button>
             </div>
             <div className="chatFormBar">
-              <select className="chatModel" aria-label="模型" value={model} onChange={(event) => setModel(event.target.value)}>
-                {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              <select className="chatModel" aria-label="模型" value={model} onChange={(event) => setModel(event.target.value)} disabled={!canAsk}>
+                {(models ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
+              {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}
+              <div className="chatNote">資料範圍：{formatDay(shownRange.from)} ～ {formatDay(shownRange.to)}</div>
             </div>
           </form>
         </div>

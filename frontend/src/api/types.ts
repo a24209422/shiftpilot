@@ -81,3 +81,9 @@ export interface ScheduleDay {
   startAt: string | null; endAt: string | null; breakStartAt: string | null; breakEndAt: string | null;
   holidayName: string | null; overrideNote: string | null;
 }
+
+export interface QaModel { id: string; label: string; remote: boolean }
+export interface QaAnswer {
+  answer: string; sql: string; columns: string[]; rows: unknown[][]; truncated: boolean;
+  model: string; remote: boolean; window: { from: string; to: string };
+}

@@ -1,53 +1,107 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SidePanel } from "./SidePanel";
-import { ToastProvider } from "./Toast";
+import type { QaAnswer, QaModel } from "../api/types";
+import type { MockRoutes } from "../test/mockApi";
+import { renderApp } from "../test/renderApp";
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 22, 9, 30));
+});
+afterEach(() => vi.useRealTimers());
+
+const models: QaModel[] = [
+  { id: "qwen2.5:3b", label: "qwen2.5:3b（本機）", remote: false },
+  { id: "gemini-x", label: "gemini-x（Google）", remote: true },
+];
+const answer: QaAnswer = {
+  answer: "黃志強明天上晚班，14:00 到 23:00。", sql: "SELECT shift_name FROM day_shifts", columns: ["shift_name", "start_at"],
+  rows: [["晚班", "2026-11-23T14:00:00"]], truncated: false, model: "qwen2.5:3b", remote: false,
+  window: { from: "2026-08-23", to: "2027-02-20" },
+};
 
 const panel = () => screen.getByRole("complementary", { name: "問答面板" });
+// 外殼要等登入狀態與權限載入完才會畫出面板，所以先等面板出現再回傳
+const open = async (routes: MockRoutes = {}, permissions = ["qa.ask"]) => {
+  const view = renderApp({ route: "/", permissions, routes: { "GET /api/qa/models": () => ({ body: models }), ...routes } });
+  await screen.findByRole("complementary", { name: "問答面板" });
+  return view;
+};
 
-test("testShowsNotYetAvailableNotice", () => {
-  render(<SidePanel />);
-  expect(screen.getByText("Ask the desk", { selector: ".chatTitle" })).toBeInTheDocument();
-  expect(screen.getByText(/問答尚未開放/)).toBeInTheDocument();
+test("testModelsComeFromApi", async () => {
+  await open();
+  const select = await within(panel()).findByRole("combobox", { name: "模型" });
+  await waitFor(() => expect(Array.from(select.querySelectorAll("option")).map((item) => item.value)).toEqual(["qwen2.5:3b", "gemini-x"]));
+  expect(select).toHaveValue("qwen2.5:3b");
 });
 
-test("testHasModelSelectAndSendButton", () => {
-  render(<SidePanel />);
-  const select = screen.getByRole("combobox", { name: "模型" });
-  expect(Array.from(select.querySelectorAll("option")).map((item) => item.value)).toEqual(["qwen2.5:3b", "qwen3-vl:4b-instruct"]);
-  expect(screen.getByRole("textbox", { name: "問題" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "送出" })).toHaveClass("chatSend");
+test("testRemoteModelShowsWarning", async () => {
+  await open();
+  const select = await within(panel()).findByRole("combobox", { name: "模型" });
+  await waitFor(() => expect(select.querySelectorAll("option")).toHaveLength(2));
+  await userEvent.setup().selectOptions(select, "gemini-x");
+  expect(within(panel()).getByText("問題與查詢結果會送到雲端廠商")).toBeInTheDocument();
 });
 
-test("testSendOnlyExplainsNotAvailableAndKeepsQuestion", async () => {
-  render(<ToastProvider><SidePanel /></ToastProvider>);
+test("testAskShowsAnswerTableAndSql", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
   const user = userEvent.setup();
-  await user.type(screen.getByRole("textbox", { name: "問題" }), "明天有哪些會議？");
-  await user.click(screen.getByRole("button", { name: "送出" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("問答尚未開放");
-  expect(screen.getByRole("textbox", { name: "問題" })).toHaveValue("明天有哪些會議？");
-  // 不能出現使用者的問題變成對話泡泡、或任何回答
-  expect(screen.queryByText("明天有哪些會議？", { selector: ".bubble" })).toBeNull();
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "黃志強明天上什麼班？");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  expect(await within(panel()).findByText("黃志強明天上晚班，14:00 到 23:00。")).toBeInTheDocument();
+  expect(within(panel()).getByText("黃志強明天上什麼班？", { selector: ".bubble" })).toBeInTheDocument();
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b" });
+  await user.click(within(panel()).getByText("看查詢結果"));
+  expect(within(panel()).getByRole("cell", { name: "晚班" })).toBeInTheDocument();
+  expect(within(panel()).getByText("SELECT shift_name FROM day_shifts")).toBeInTheDocument();
+  expect(within(panel()).getByText("資料範圍：8/23（日） ～ 2/20（六）")).toBeInTheDocument();
+  expect(within(panel()).getByRole("textbox", { name: "問題" })).toHaveValue("");
 });
 
-test("testModelCanBeChanged", async () => {
-  render(<SidePanel />);
-  await userEvent.setup().selectOptions(screen.getByRole("combobox", { name: "模型" }), "qwen3-vl:4b-instruct");
-  expect(screen.getByRole("combobox", { name: "模型" })).toHaveValue("qwen3-vl:4b-instruct");
+test("testRemoteAnswerIsMarked", async () => {
+  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, model: "gemini-x", remote: true } }) });
+  const user = userEvent.setup();
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  expect(await within(panel()).findByText("gemini-x・已送到雲端")).toBeInTheDocument();
+});
+
+test("testErrorShowsMessageAndSql", async () => {
+  await open({ "POST /api/qa/ask": () => ({ status: 422, body: { error: { code: "QA_QUERY_FAILED", message: "查詢失敗：欄位不存在", details: { sql: "SELECT nope", error: "欄位不存在" } } } }) });
+  const user = userEvent.setup();
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  expect(await within(panel()).findByText("查詢失敗：欄位不存在")).toBeInTheDocument();
+  await user.click(within(panel()).getByText("看 SQL"));
+  expect(within(panel()).getByText("SELECT nope")).toBeInTheDocument();
+});
+
+test("testWithoutPermissionShowsNoticeAndDoesNotLoadModels", async () => {
+  const { api } = await open({}, []);
+  expect(await within(panel()).findByText("沒有使用問答的權限")).toBeInTheDocument();
+  expect(api.calls.some((call) => call.path === "/api/qa/models")).toBe(false);
+});
+
+test("testDefaultWindowNoteBeforeAsking", async () => {
+  await open();
+  expect(await within(panel()).findByText("資料範圍：8/24（一） ～ 2/20（六）")).toBeInTheDocument();
 });
 
 test("testCollapseAndExpand", async () => {
-  render(<SidePanel />);
+  await open();
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "收合問答面板" }));
+  await user.click(await screen.findByRole("button", { name: "收合問答面板" }));
   expect(panel()).toHaveClass("collapsed");
   await user.click(screen.getByRole("button", { name: "展開問答面板" }));
   expect(panel()).not.toHaveClass("collapsed");
 });
 
-test("testKeyboardResizeIsClampedAndResettable", () => {
-  render(<SidePanel />);
-  const handle = screen.getByRole("separator", { name: "調整問答面板寬度" });
+test("testKeyboardResizeIsClampedAndResettable", async () => {
+  await open();
+  const handle = await screen.findByRole("separator", { name: "調整問答面板寬度" });
   expect(handle).toHaveAttribute("aria-valuenow", "400");
   fireEvent.keyDown(handle, { key: "ArrowLeft" });
   expect(handle).toHaveAttribute("aria-valuenow", "424");
@@ -57,9 +111,9 @@ test("testKeyboardResizeIsClampedAndResettable", () => {
   expect(handle).toHaveAttribute("aria-valuenow", "400");
 });
 
-test("testDragWidensPanel", () => {
-  render(<SidePanel />);
-  const handle = screen.getByRole("separator", { name: "調整問答面板寬度" });
+test("testDragWidensPanel", async () => {
+  await open();
+  const handle = await screen.findByRole("separator", { name: "調整問答面板寬度" });
   fireEvent.pointerDown(handle, { clientX: 1000 });
   fireEvent.pointerMove(window, { clientX: 950 });
   fireEvent.pointerUp(window);

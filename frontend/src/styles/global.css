@@ -478,3 +478,13 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .shiftOverride::after { content: ""; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 10px 10px 0; border-color: transparent var(--ink) transparent transparent; }
 .rosterItem { border: 1.5px solid var(--ink); padding: 8px 10px; display: grid; gap: 4px; }
 .rosterFrom { font-weight: 600; }
+
+/* 問答回答：表格與 SQL 收在 details 裡，預設只看一句話 */
+.bubble details { margin-top: 8px; }
+.bubble summary { cursor: pointer; font: 12px var(--font-accent); color: var(--base-300); }
+.qaTable { overflow: auto; max-height: 260px; margin-top: 6px; }
+.qaTable table { border-collapse: collapse; font-size: 12px; }
+.qaTable th, .qaTable td { border: 1px solid var(--rule); padding: 3px 6px; text-align: left; white-space: nowrap; }
+.qaSql { white-space: pre-wrap; font-size: 11px; margin: 6px 0 0; }
+.qaError { border-color: var(--stamp); }
+.chatNote { font: 11px var(--font-accent); color: var(--base-300); }
