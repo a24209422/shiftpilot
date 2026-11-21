@@ -5,14 +5,15 @@ from app.infra.permissions import hasPermission, permissionsFor
 permissionNames = [
   "org.read", "org.manage", "booking.read", "booking.write", "booking.writeAny",
   "booking.resources.manage", "core.users.manage", "core.audit.read", "leave.request", "leave.manage",
+  "shift.read", "shift.manage",
 ]
 
 # 設計文件「權限的預設」那張表，一格一格寫出來；用 1 代表 ✓、0 代表 —
 expectedTable = {
-  "employee": dict(zip(permissionNames, [1, 0, 1, 1, 0, 0, 0, 0, 1, 0])),
-  "manager": dict(zip(permissionNames, [1, 0, 1, 1, 0, 0, 0, 0, 1, 0])),
-  "hr": dict(zip(permissionNames, [1, 1, 1, 1, 1, 0, 0, 0, 1, 1])),
-  "admin": dict(zip(permissionNames, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])),
+  "employee": dict(zip(permissionNames, [1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0])),
+  "manager": dict(zip(permissionNames, [1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0])),
+  "hr": dict(zip(permissionNames, [1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1])),
+  "admin": dict(zip(permissionNames, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])),
 }
 
 
