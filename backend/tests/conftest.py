@@ -3,9 +3,11 @@ import os
 from datetime import date
 from pathlib import Path
 
+import psycopg
 import pytest
 from dotenv import load_dotenv
 
+from app.config import buildQaDatabaseUrl
 from app.infra.db import ensureExtensions, openDb, temporarySchema
 from app.infra.migrate import runMigrations
 from app.modules import allModules
@@ -21,6 +23,21 @@ def testDatabaseUrl():
   url = os.getenv("TEST_DATABASE_URL")
   if not url:
     pytest.fail("請在 .env 設定 TEST_DATABASE_URL（參考 .env.example），並先執行 docker compose up -d")
+  return url
+
+
+@pytest.fixture(scope="session")
+def qaSandboxUrl(testDatabaseUrl):
+  hint = "請在 .env 設定 QA_DB_PASSWORD，並用管理員帳號建立 qa_sandbox（見根目錄 README 的「問答」）"
+  password = os.getenv("QA_DB_PASSWORD", "").strip()
+  if not password:
+    pytest.fail(hint)
+  url = buildQaDatabaseUrl(testDatabaseUrl, password)
+  try:
+    with psycopg.connect(url):
+      pass
+  except psycopg.OperationalError as error:
+    pytest.fail(f"{hint}：{error}")
   return url
 
 

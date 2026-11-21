@@ -23,6 +23,22 @@ docker compose exec app python -m app.cli seedDemo                              
 - 時間用台灣時間（容器的 `TZ=Asia/Taipei`）。
 - 停止：`docker compose stop`；連資料庫一起清掉：`docker compose down -v`（會刪除所有資料）。
 
+## 問答
+
+右側面板可以用中文問組織、會議、請假與班表。模型寫的 SQL 只在沙盒帳號 `qa_sandbox` 的連線上執行，它讀不到任何真實資料表，只看得到每題複製進去、提問者有權看的資料（今天前後各 90 天）。
+
+1. `.env` 設定 `QA_DB_PASSWORD`（只用英文和數字）。新的資料庫第一次啟動時會自動建立帳號；**現有的資料庫**要執行一次：
+
+   ```powershell
+   docker compose up -d --wait postgres
+   docker compose exec -T postgres sh /docker-entrypoint-initdb.d/02-create-qa-user.sh
+   ```
+
+2. 本機開好 Ollama，下載 `.env` 的 `OLLAMA_MODEL`（例如 `ollama pull qwen2.5:3b`）。
+3. `docker compose up -d --build --wait`。
+
+沒設定 `QA_DB_PASSWORD` 時問答會停用，其他功能照常。用雲端模型時（`OPENROUTER_API_KEY`、`GOOGLE_AI_API_KEY`），問題與查詢結果會送到廠商。
+
 ## 開發
 
 - 後端（FastAPI + PostgreSQL）：見 `backend/README.md`

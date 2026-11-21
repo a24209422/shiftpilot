@@ -7,6 +7,7 @@ services:
       # 密碼只放在 .env（不進 git），沒設定就直接啟動失敗，避免用空密碼跑起來
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?請在 .env 設定 POSTGRES_PASSWORD}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}
+      QA_DB_PASSWORD: ${QA_DB_PASSWORD:-}
     ports:
       # 給本機跑後端和測試用。只綁本機，區網裡的其他電腦連不到；用 5433 避開本機其他專案或已安裝的 PostgreSQL 常用的 5432
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
@@ -34,6 +35,19 @@ services:
       DATABASE_URL: postgresql://schedule_app:${APP_DB_PASSWORD:?請在 .env 設定 APP_DB_PASSWORD}@postgres:5432/schedule
       # 容器預設是 UTC，「今天的排程」會差 8 小時
       TZ: Asia/Taipei
+      # 問答沙盒帳號的密碼；沒設定時問答回 QA_NOT_CONFIGURED，其他功能照常
+      QA_DB_PASSWORD: ${QA_DB_PASSWORD:-}
+      # 容器裡連主機上的 Ollama
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      LOCAL_MODELS: ${LOCAL_MODELS:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+      GOOGLE_AI_MODELS: ${GOOGLE_AI_MODELS:-}
+    # Linux 上才有這個主機名稱，Docker Desktop 本來就有
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 遷移成功才啟動；失敗就讓容器停下來，不用舊的資料表結構硬跑
     command: ["sh", "-c", "python -m app.cli migrate && exec uvicorn app.main:createAppFromEnv --factory --host 0.0.0.0 --port 8000"]
     ports:

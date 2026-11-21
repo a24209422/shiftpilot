@@ -34,10 +34,11 @@ def mountModuleRouters(app: FastAPI) -> None:
       onAppCreated()
 
 
-def createApp(databaseUrl: str, sessionHours: int = 12, frontendDir: Path | None = None) -> FastAPI:
+def createApp(databaseUrl: str, sessionHours: int = 12, frontendDir: Path | None = None, qaDatabaseUrl: str | None = None) -> FastAPI:
   app = FastAPI(title="請假排班系統")
   app.state.databaseUrl = databaseUrl
   app.state.sessionHours = sessionHours
+  app.state.qaDatabaseUrl = qaDatabaseUrl
   installHttpHandlers(app)
   app.include_router(authRouter, prefix="/api/auth")
   mountModuleRouters(app)
@@ -78,4 +79,4 @@ def createAppFromEnv() -> FastAPI:
   # 給 uvicorn --factory 用；README 的啟動指令不會先 export 環境變數，所以要自己讀 .env
   loadEnvFile()
   config = loadConfig()
-  return createApp(config.databaseUrl, config.sessionHours, defaultFrontendDir)
+  return createApp(config.databaseUrl, config.sessionHours, defaultFrontendDir, config.qaDatabaseUrl)
