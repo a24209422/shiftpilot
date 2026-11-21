@@ -65,8 +65,8 @@
 | `id` | identity |
 | `code` | `text NOT NULL UNIQUE`，格式同請假假別（小寫英文開頭） |
 | `name` | `text NOT NULL UNIQUE`，不可空白 |
-| `start_time`、`end_time` | `time NOT NULL`，`CHECK (start_time <> end_time)`；`end_time < start_time` 代表跨過午夜，這種班算在**開始那天** |
-| `break_start`、`break_end` | `time NULL`，`CHECK ((break_start IS NULL) = (break_end IS NULL))`；休息時間必須完整落在班內（service 檢查，跨日班也要正確判斷） |
+| `start_time`、`end_time` | `time NOT NULL`，`CHECK (start_time <> end_time)`；必須是整點（請假的最小單位是 1 小時、時數存整數，半點的班會讓請假算出半小時）；`end_time < start_time` 代表跨過午夜，這種班算在**開始那天** |
+| `break_start`、`break_end` | `time NULL`，`CHECK ((break_start IS NULL) = (break_end IS NULL))`；同樣必須是整點；休息時間必須完整落在班內（service 檢查，跨日班也要正確判斷） |
 | `is_default` | 公司預設班，`CREATE UNIQUE INDEX … ON shift_types (is_default) WHERE is_default` 保證最多一筆 |
 | `is_active` | 停用後不能再排進新的週班表或單日調整，已排的照舊 |
 
@@ -111,7 +111,7 @@
 
 `resolveDay(day, employee, override, roster, calendarKind, defaultShift) -> ResolvedDay`，依序判斷，先符合的算數：
 
-1. 員工 `hired_on` 之後才算；`left_on` 之後或 `is_active = false` → `source: "inactive"`，休息
+1. 到職日之前、`left_on` 之後，或停用且沒有 `left_on` → `source: "inactive"`，休息（有 `left_on` 時，離職前的日子照常推算，歷史才查得回來）
 2. 有單日調整 → `source: "override"`，照調整（`shift_type_id` 為空就是休息）
 3. 行事曆是 `holiday` → `source: "holiday"`，休息（帶假日名稱）
 4. 有生效中的週班表 → `source: "roster"`，用那個星期幾的班。那天是 `makeup_workday` 而班表那天休息 → 改用預設班（`source: "default"`）
@@ -126,7 +126,7 @@
 ### Service 接口
 
 - `getSchedule(conn, employeeIds: list[int] | None, startDay: date, endDay: date) -> list[dict]`：一次查出需要的員工、週班表、單日調整、行事曆與班別，逐日呼叫 `resolveDay`。`employeeIds` 為 `None` 時是所有在職員工。區間最多 31 天。
-- `workWindows(conn, employeeId: int, startAt: datetime, endAt: datetime) -> list[(datetime, datetime)]`：回傳跟區間有交集的上班時段，已裁到區間內。查詢從 `startAt` 的前一天開始，才接得到前一晚延續過來的跨日班。給請假模組用。
+- `workWindows(conn, employeeIds: list[int], startAt: datetime, endAt: datetime) -> dict[int, list[(datetime, datetime)]]`：每人跟區間有交集的上班時段，已裁到區間內。一次查多人，請假的行事曆 API 才不用每筆假各查一次。查詢從 `startAt` 的前一天開始，才接得到前一晚延續過來的跨日班。給請假模組用。
 - `shiftSpans(conn, employeeIds, startAt, endAt) -> dict[int, list[(datetime, datetime, ResolvedDay)]]`：每人跟區間有交集的「整個班」（不扣休息），給不可用提供者用。
 
 ### 權限
@@ -160,7 +160,7 @@
 ### 串接請假
 
 - `leave/rules.py`：拿掉 `workWindows` 常數與 `isWorkday`。`countLeaveHours(startAt, endAt, windows: list[(datetime, datetime)]) -> int` 改成「請假區間跟上班時段的交集加總」；`requireWholeHour` 保留。
-- `leave/requests.py`：拿掉 `calendarKindsBetween`，改呼叫 `shift.service.workWindows(conn, employeeId, startAt, endAt)`。流程與錯誤代碼不變；整段都不在班內仍然回 `LEAVE_NO_WORKING_HOURS`。
+- `leave/requests.py`：拿掉 `calendarKindsBetween`，改呼叫 `shift.service.workWindows(conn, [employeeId], startAt, endAt)`。流程與錯誤代碼不變；整段都不在班內仍然回 `LEAVE_NO_WORKING_HOURS`。
 - `GET /api/leave/calendar`：每筆多回傳 `segments: [{startAt, endAt}]`，是那筆假跟上班時段的交集（已裁到查詢區間）。沒有交集的假仍然回傳，`segments` 是空陣列。
 - 已送出的申請時數是快照，不受影響。
 - **現有的請假測試要全部照舊通過**（員工沒有週班表就是標準班，結果應該跟原本的固定 09–18 一樣），再加上晚班、跨日班、單日調整成休息的案例。
