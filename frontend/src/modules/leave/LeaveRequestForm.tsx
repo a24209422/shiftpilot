@@ -95,7 +95,7 @@ export function LeaveRequestForm({ onDone }: { onDone(): void }) {
       <TextArea label="事由" value={reason} onChange={setReason} />
       {quoteText && <div className="formNote">{quoteText}</div>}
       {quote && quote.conflicts.length > 0 && (
-        <div className="formWarn">這段時間你有會議：{quote.conflicts.map((item) => item.title).join("、")}</div>
+        <div className="formWarn">這段時間你有會議：{[...new Set(quote.conflicts.map((item) => item.title))].join("、")}</div>
       )}
       <FormError error={quoteError} />
       {conflictIsCurrent && <MeetingWarning error={error} pending={pending} onOverride={() => { if (pending) return; acknowledgedKey.current = inputKey; void submit(); }} />}

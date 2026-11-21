@@ -2,7 +2,7 @@ import { useSearchParams } from "react-router";
 import type { LeaveRequest } from "../../api/types";
 import { useAuth } from "../../auth/AuthProvider";
 import { usePermissions } from "../../auth/usePermissions";
-import { formatRange } from "../../forms/time";
+import { formatDay, formatRange, formatTime } from "../../forms/time";
 import { DataTable, type Column } from "../../shell/DataTable";
 import { DetailList } from "../../shell/DetailList";
 import { Drawer } from "../../shell/Drawer";
@@ -37,7 +37,7 @@ export function RequestDetail({ request }: { request: LeaveRequest }) {
         ["事由", request.reason || "—"],
         ["狀態", <StatusTag key="s" request={request} />],
         ["核准人", request.decidedByName ?? "—"],
-        ["決定時間", request.decidedAt ? formatRange(request.decidedAt, request.decidedAt) : "—"],
+        ["決定時間", request.decidedAt ? `${formatDay(request.decidedAt)} ${formatTime(request.decidedAt)}` : "—"],
         ["備註", request.decisionNote ?? "—"],
       ]}
     />

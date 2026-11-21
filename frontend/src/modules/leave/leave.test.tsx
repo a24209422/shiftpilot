@@ -138,3 +138,17 @@ test("testAccountWithoutEmployeeSeesExplanation", async () => {
   renderApp({ route: "/leave", user: testUser, permissions: ["leave.request"], registrations: [leaveRegistration], routes: { "GET /api/leave/requests": () => ({ body: [] }) } });
   expect(await screen.findByText("這個帳號沒有對應的員工，不能請假")).toBeInTheDocument();
 });
+
+test("testDecidedAtShowsSingleTime", async () => {
+  open({ "GET /api/leave/requests/5": () => ({ body: leaveRequest({ status: "approved", decidedAt: "2026-11-21T12:40:00", decidedByName: "陳大文" }) }) }, "/leave?id=5");
+  expect(await screen.findByText("11/21（六） 12:40", { selector: "dd" })).toBeInTheDocument();
+});
+
+test("testQuoteMeetingTitlesAreDeduplicated", async () => {
+  const meeting = (bookingId: number) => ({ bookingId, title: "晨會", startAt: "2026-11-21T09:00:00", endAt: "2026-11-21T10:00:00" });
+  open({ "POST /api/leave/requests/quote": () => ({ body: { hours: 8, remainingAfter: 36, conflicts: [meeting(1), meeting(2)] } }) });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "申請請假" }));
+  await user.selectOptions(await screen.findByLabelText("假別"), "1");
+  expect(await screen.findByText("這段時間你有會議：晨會")).toBeInTheDocument();
+});
