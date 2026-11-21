@@ -36,9 +36,9 @@ def loadCases(split: str) -> list[dict]:
   # 延後匯入：只有真的要跑 test 時才載入，平常不讓 test 題出現在任何輸出或除錯畫面
   try:
     from evals.heldout_cases import cases as heldoutCases
-  except (ImportError, SyntaxError):
-    # 只給通用訊息：SyntaxError 的內容會帶出 test 題的原始碼行
-    raise EvalAbortError("讀不到 test 題庫（heldout_cases.py 不存在或有語法錯誤）") from None
+  except Exception:
+    # 只給通用訊息：任何例外（SyntaxError、NameError…）的 traceback 都可能帶出 test 題的原始碼行
+    raise EvalAbortError("讀不到 test 題庫（heldout_cases.py 不存在或載入失敗）") from None
 
   return heldoutCases
 
@@ -187,7 +187,11 @@ def runCases(world, split, model, selected, llm, out) -> dict:
       del partial["total"]
     else:
       partial["results"] = results
-    saveResults(split, model, partial)
+    try:
+      saveResults(split, model, partial)
+    except OSError:
+      # 存檔失敗不能蓋掉原本的例外（例如環境中止的訊息）；訊息不帶路徑細節
+      print("無法儲存評測結果", file=sys.stderr)
   summary = partial
   if hidden:
     out(f"總分：{summary['correct']}/{summary['scored']}（模型連不上 {summary['unavailable']} 題不計分）")

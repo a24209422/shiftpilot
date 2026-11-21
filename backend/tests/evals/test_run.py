@@ -279,3 +279,40 @@ def testMainExitsOneOnGoldError(monkeypatch):
   with pytest.raises(SystemExit) as info:
     run.main(["--split", "dev"])
   assert info.value.code == 1
+
+
+def testHeldoutLoadFailureIsGeneric(monkeypatch, capsys):
+  import builtins
+
+  realImport = builtins.__import__
+
+  def failing(name, *args, **kwargs):
+    if name == "evals.heldout_cases":
+      raise NameError("secret heldout line")
+    return realImport(name, *args, **kwargs)
+
+  monkeypatch.setattr(builtins, "__import__", failing)
+  with pytest.raises(SystemExit) as info:
+    run.main(["--split", "test"])
+  assert info.value.code == 1
+  captured = capsys.readouterr()
+  assert "secret" not in captured.out + captured.err and "NameError" not in captured.out + captured.err
+  assert "載入失敗" in captured.err
+
+
+def testSaveFailureDoesNotMaskAbort(world, monkeypatch, capsys):
+  from app.infra.errors import AppError
+
+  snapshotOf(miniCases, world)
+
+  def abort(*args, **kwargs):
+    raise AppError("QA_SANDBOX_UNAVAILABLE", "連不上", 503)
+
+  def cannotSave(*args, **kwargs):
+    raise OSError("disk full")
+
+  monkeypatch.setattr(run.service, "ask", abort)
+  monkeypatch.setattr(run, "saveResults", cannotSave)
+  with pytest.raises(run.EvalAbortError):
+    run.runSplit("dev", "qwen2.5:3b", llm=lambda m, x: "", out=lambda line: None, world=world, casesOverride=miniCases)
+  assert "無法儲存" in capsys.readouterr().err
