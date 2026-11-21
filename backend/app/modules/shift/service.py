@@ -6,6 +6,7 @@ from psycopg import Connection
 from app.infra.actor import Actor
 from app.infra.db import mapDbErrors
 from app.infra.errors import AppError
+from app.infra.permissions import hasPermission
 from app.infra.serialize import camelizeRow
 from app.infra.validate import requireText
 from app.modules.core.service import writeAudit
@@ -217,3 +218,143 @@ def shiftSpans(conn: Connection, employeeIds: list[int], startAt: datetime, endA
     return {}
   startDay, endDay = rangeDays(startAt, endAt)
   return {employee["id"]: days for employee, days in resolveRange(conn, employeeIds, startDay, endDay)}
+
+
+# ---------- 誰可以排班 ----------
+
+
+def requireCanSchedule(conn: Connection, actor: Actor, employeeId: int) -> dict:
+  employee = conn.execute("SELECT id, name, manager_id, hired_on FROM employees WHERE id = %s", (employeeId,)).fetchone()
+  if employee is None:
+    raise AppError("NOT_FOUND", "找不到員工", 404)
+  if hasPermission(actor.role, "shift.manage"):
+    return employee
+  # 主管只能排直屬下屬；主管自己的班由人資排
+  if actor.employeeId is not None and employee["manager_id"] == actor.employeeId:
+    return employee
+  raise AppError("FORBIDDEN", "只有人資或直屬主管可以排這位員工的班", 403)
+
+
+def requireActiveType(conn: Connection, shiftTypeId, field: str) -> None:
+  row = conn.execute("SELECT is_active FROM shift_types WHERE id = %s", (shiftTypeId,)).fetchone()
+  if row is None:
+    raise AppError("VALIDATION", "找不到班別", 422, {"field": field})
+  if not row["is_active"]:
+    raise AppError("SHIFT_TYPE_INACTIVE", "這個班別已經停用，不能再排", 422, {"field": field})
+
+
+# ---------- 週班表 ----------
+
+
+def loadRosters(conn: Connection, where: str, params: tuple) -> list[dict]:
+  rows = conn.execute(
+    "SELECT r.id, r.employee_id, r.effective_from, r.created_by, r.created_at, d.weekday, d.shift_type_id, t.name AS shift_name "
+    "FROM shift_rosters r LEFT JOIN shift_roster_days d ON d.roster_id = r.id LEFT JOIN shift_types t ON t.id = d.shift_type_id "
+    f"WHERE {where} ORDER BY r.effective_from DESC, r.id DESC, d.weekday",
+    params,
+  ).fetchall()
+  rosters: dict[int, dict] = {}
+  for row in rows:
+    roster = rosters.setdefault(row["id"], {
+      "id": row["id"], "employeeId": row["employee_id"], "effectiveFrom": row["effective_from"],
+      "days": [], "createdBy": row["created_by"], "createdAt": row["created_at"],
+    })
+    if row["weekday"] is not None:
+      roster["days"].append({"weekday": row["weekday"], "shiftTypeId": row["shift_type_id"], "shiftName": row["shift_name"]})
+  return camelizeRow(list(rosters.values()))
+
+
+def loadRoster(conn: Connection, rosterId: int) -> dict:
+  found = loadRosters(conn, "r.id = %s", (rosterId,))
+  if not found:
+    raise AppError("NOT_FOUND", "找不到週班表", 404)
+  return found[0]
+
+
+def listRosters(conn: Connection, employeeId: int) -> list[dict]:
+  return loadRosters(conn, "r.employee_id = %s", (employeeId,))
+
+
+def createRoster(conn: Connection, actor: Actor, data: dict, now: datetime) -> dict:
+  employee = requireCanSchedule(conn, actor, data["employeeId"])
+  effectiveFrom = data["effectiveFrom"]
+  if effectiveFrom < employee["hired_on"]:
+    raise AppError("ROSTER_BEFORE_HIRE", "生效日不能早於到職日", 422, {"field": "effectiveFrom"})
+  days = data.get("days") or []
+  weekdays = [item["weekday"] for item in days]
+  if len(set(weekdays)) != len(weekdays) or any(not isinstance(weekday, int) or not 0 <= weekday <= 6 for weekday in weekdays):
+    raise AppError("VALIDATION", "星期幾要是 0 到 6，而且不能重複", 422, {"field": "days"})
+  for item in days:
+    requireActiveType(conn, item["shiftTypeId"], "days")
+  with mapDbErrors(conn):
+    rosterId = conn.execute(
+      "INSERT INTO shift_rosters (employee_id, effective_from, created_by, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
+      (employee["id"], effectiveFrom, actor.userId, now),
+    ).fetchone()["id"]
+    for item in sorted(days, key=lambda entry: entry["weekday"]):
+      conn.execute(
+        "INSERT INTO shift_roster_days (roster_id, weekday, shift_type_id) VALUES (%s, %s, %s)",
+        (rosterId, item["weekday"], item["shiftTypeId"]),
+      )
+  roster = loadRoster(conn, rosterId)
+  writeAudit(conn, actor, "shift", "createShiftRoster", "shiftRoster", rosterId, None, roster)
+  return roster
+
+
+def deleteRoster(conn: Connection, actor: Actor, rosterId: int, today: date) -> None:
+  before = loadRoster(conn, rosterId)
+  requireCanSchedule(conn, actor, before["employeeId"])
+  # 已生效的班表是歷史紀錄，刪掉會讓過去的班查不回來
+  if date.fromisoformat(before["effectiveFrom"]) <= today:
+    raise AppError("ROSTER_ALREADY_EFFECTIVE", "已經生效的週班表不能刪除，請新增一張新的", 409)
+  conn.execute("DELETE FROM shift_rosters WHERE id = %s", (rosterId,))
+  writeAudit(conn, actor, "shift", "deleteShiftRoster", "shiftRoster", rosterId, before, None)
+
+
+# ---------- 單日調整 ----------
+
+overrideSelect = (
+  "SELECT o.id, o.employee_id, o.day, o.shift_type_id, t.name AS shift_name, o.note, o.created_by, o.created_at, "
+  "o.updated_by, o.updated_at FROM shift_overrides o LEFT JOIN shift_types t ON t.id = o.shift_type_id"
+)
+
+
+def findOverride(conn: Connection, employeeId: int, day: date) -> dict | None:
+  row = conn.execute(f"{overrideSelect} WHERE o.employee_id = %s AND o.day = %s", (employeeId, day)).fetchone()
+  return camelizeRow(row) if row else None
+
+
+def listOverrides(conn: Connection, employeeId: int, startDay: date, endDay: date) -> list[dict]:
+  rows = conn.execute(
+    f"{overrideSelect} WHERE o.employee_id = %s AND o.day BETWEEN %s AND %s ORDER BY o.day", (employeeId, startDay, endDay)
+  ).fetchall()
+  return camelizeRow(rows)
+
+
+def upsertOverride(conn: Connection, actor: Actor, data: dict, now: datetime) -> dict:
+  employee = requireCanSchedule(conn, actor, data["employeeId"])
+  shiftTypeId = data.get("shiftTypeId")
+  if shiftTypeId is not None:
+    requireActiveType(conn, shiftTypeId, "shiftTypeId")
+  note = (data.get("note") or "").strip()
+  before = findOverride(conn, employee["id"], data["day"])
+  with mapDbErrors(conn):
+    overrideId = conn.execute(
+      "INSERT INTO shift_overrides (employee_id, day, shift_type_id, note, created_by, created_at, updated_by, updated_at) "
+      "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (employee_id, day) DO UPDATE SET "
+      "shift_type_id = EXCLUDED.shift_type_id, note = EXCLUDED.note, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at "
+      "RETURNING id",
+      (employee["id"], data["day"], shiftTypeId, note, actor.userId, now, actor.userId, now),
+    ).fetchone()["id"]
+  after = findOverride(conn, employee["id"], data["day"])
+  writeAudit(conn, actor, "shift", "upsertShiftOverride", "shiftOverride", overrideId, before, after)
+  return after
+
+
+def deleteOverride(conn: Connection, actor: Actor, employeeId: int, day: date) -> None:
+  requireCanSchedule(conn, actor, employeeId)
+  before = findOverride(conn, employeeId, day)
+  if before is None:
+    raise AppError("NOT_FOUND", "這一天沒有單日調整", 404)
+  conn.execute("DELETE FROM shift_overrides WHERE id = %s", (before["id"],))
+  writeAudit(conn, actor, "shift", "deleteShiftOverride", "shiftOverride", before["id"], before, None)
