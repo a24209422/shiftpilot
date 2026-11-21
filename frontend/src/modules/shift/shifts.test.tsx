@@ -38,7 +38,7 @@ const open = (options: { user?: typeof testUser; permissions?: string[]; route?:
       "GET /api/shift/types": () => ({ body: [standard, evening] }),
       "GET /api/shift/schedule": () => ({ body: [
         ...scheduleFor(1),
-        ...scheduleFor(2, { "2026-11-18": { source: "override", shiftTypeId: null, shiftName: null, startAt: null, endAt: null, overrideNote: "補休" } }),
+        ...scheduleFor(2, { "2026-11-21": { source: "override", shiftTypeId: null, shiftName: null, startAt: null, endAt: null, overrideNote: "補休" } }),
         ...scheduleFor(3, { "2026-11-17": { source: "roster", shiftTypeId: 2, shiftName: "晚班", startAt: "2026-11-17T14:00:00", endAt: "2026-11-17T23:00:00" } }),
       ] }),
       "GET /api/shift/rosters": () => ({ body: [] }),
@@ -56,8 +56,8 @@ test("testWeekGridShowsCellsAndRequestsWeek", async () => {
   const { api } = open();
   await screen.findByText("黃志強");
   expect(cell("黃志強", 1)).toHaveTextContent("晚班 14–23");
-  expect(cell("林小美", 2)).toHaveTextContent("休");
-  expect(cell("林小美", 2)).toHaveClass("shiftOverride");
+  expect(cell("林小美", 5)).toHaveTextContent("休");
+  expect(cell("林小美", 5)).toHaveClass("shiftOverride");
   expect(cell("陳主管", 5)).toHaveTextContent("休");
   const call = api.calls.find((item) => item.path === "/api/shift/schedule")!;
   expect(call.params.get("from")).toBe("2026-11-16");
@@ -78,20 +78,21 @@ test("testManagerCanSetOverrideForSubordinateOnly", async () => {
   await user.click(cell("黃志強", 0));
   expect(drawer().getByText("預設班")).toBeInTheDocument();
   expect(drawer().queryByRole("button", { name: "設定單日調整" })).not.toBeInTheDocument();
-  await user.click(cell("林小美", 0));
+  // 2026-11-20 是今天：主管只能調整今天以後的班
+  await user.click(cell("林小美", 4));
   await user.selectOptions(await drawer().findByLabelText("班別"), "rest");
   await user.type(drawer().getByLabelText("備註"), "支援");
   await user.click(drawer().getByRole("button", { name: "設定單日調整" }));
   await waitFor(() => expect(api.calls.find((item) => item.method === "PUT")?.body).toEqual({
-    employeeId: 2, day: "2026-11-16", shiftTypeId: null, note: "支援",
+    employeeId: 2, day: "2026-11-20", shiftTypeId: null, note: "支援",
   }));
 });
 
 test("testDeleteOverride", async () => {
-  const { api } = open({ routes: { "DELETE /api/shift/overrides/2/2026-11-18": () => ({ status: 204 }) } });
+  const { api } = open({ routes: { "DELETE /api/shift/overrides/2/2026-11-21": () => ({ status: 204 }) } });
   const user = userEvent.setup();
   await screen.findByText("林小美");
-  await user.click(cell("林小美", 2));
+  await user.click(cell("林小美", 5));
   expect(drawer().getByText("補休", { selector: "dd" })).toBeInTheDocument();
   await user.click(drawer().getByRole("button", { name: "刪除調整" }));
   await waitFor(() => expect(api.calls.some((item) => item.method === "DELETE")).toBe(true));
@@ -150,4 +151,18 @@ test("testInvalidWeekParamFallsBackToCurrentWeek", async () => {
   await screen.findByText("黃志強");
   const call = api.calls.find((item) => item.path === "/api/shift/schedule")!;
   expect(call.params.get("from")).toBe("2026-11-16");
+});
+
+
+test("testOnlyHrCanAdjustPastDays", async () => {
+  const user = userEvent.setup();
+  const view = open();
+  await screen.findByText("林小美");
+  await user.click(cell("林小美", 0));
+  expect(drawer().queryByRole("button", { name: "設定單日調整" })).not.toBeInTheDocument();
+  view.unmount();
+  open({ user: { ...testUser, role: "hr", employeeId: 9, employeeName: "人資" }, permissions: ["shift.read", "shift.manage", "org.read"] });
+  await screen.findByText("林小美");
+  await user.click(cell("林小美", 0));
+  expect(await drawer().findByRole("button", { name: "設定單日調整" })).toBeInTheDocument();
 });

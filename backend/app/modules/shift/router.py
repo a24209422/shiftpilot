@@ -117,7 +117,7 @@ def upsertOverride(body: OverrideBody, actor: Actor = Depends(readShift), conn=c
 
 @router.delete("/overrides/{employeeId}/{day}", status_code=204)
 def deleteOverride(employeeId: int, day: date, actor: Actor = Depends(readShift), conn=connDependency):
-  service.deleteOverride(conn, actor, employeeId, day)
+  service.deleteOverride(conn, actor, employeeId, day, date.today())
 
 
 @router.get("/schedule")

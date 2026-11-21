@@ -235,6 +235,12 @@ def requireCanSchedule(conn: Connection, actor: Actor, employeeId: int) -> dict:
   raise AppError("FORBIDDEN", "只有人資或直屬主管可以排這位員工的班", 403)
 
 
+def requirePastAllowed(actor: Actor, day: date, today: date) -> None:
+  # 過去的班會影響已核准請假的對照；更正歷史只交給人資
+  if day < today and not hasPermission(actor.role, "shift.manage"):
+    raise AppError("SHIFT_PAST_DAY", "只有人資可以排今天以前的班", 403)
+
+
 def requireActiveType(conn: Connection, shiftTypeId, field: str) -> None:
   row = conn.execute("SELECT is_active FROM shift_types WHERE id = %s", (shiftTypeId,)).fetchone()
   if row is None:
@@ -278,6 +284,7 @@ def listRosters(conn: Connection, employeeId: int) -> list[dict]:
 def createRoster(conn: Connection, actor: Actor, data: dict, now: datetime) -> dict:
   employee = requireCanSchedule(conn, actor, data["employeeId"])
   effectiveFrom = data["effectiveFrom"]
+  requirePastAllowed(actor, effectiveFrom, now.date())
   if effectiveFrom < employee["hired_on"]:
     raise AppError("ROSTER_BEFORE_HIRE", "生效日不能早於到職日", 422, {"field": "effectiveFrom"})
   days = data.get("days") or []
@@ -333,6 +340,7 @@ def listOverrides(conn: Connection, employeeId: int, startDay: date, endDay: dat
 
 def upsertOverride(conn: Connection, actor: Actor, data: dict, now: datetime) -> dict:
   employee = requireCanSchedule(conn, actor, data["employeeId"])
+  requirePastAllowed(actor, data["day"], now.date())
   shiftTypeId = data.get("shiftTypeId")
   if shiftTypeId is not None:
     requireActiveType(conn, shiftTypeId, "shiftTypeId")
@@ -351,8 +359,9 @@ def upsertOverride(conn: Connection, actor: Actor, data: dict, now: datetime) ->
   return after
 
 
-def deleteOverride(conn: Connection, actor: Actor, employeeId: int, day: date) -> None:
+def deleteOverride(conn: Connection, actor: Actor, employeeId: int, day: date, today: date) -> None:
   requireCanSchedule(conn, actor, employeeId)
+  requirePastAllowed(actor, day, today)
   before = findOverride(conn, employeeId, day)
   if before is None:
     raise AppError("NOT_FOUND", "這一天沒有單日調整", 404)
@@ -375,5 +384,6 @@ def findUnavailability(conn: Connection, employeeIds: list[int], startAt: dateti
       reason = "休息日"
     else:
       reason = f"不在班（{startDay.startAt:%H:%M}–{startDay.endAt:%H:%M}）"
-    result.append({"employeeId": employeeId, "reason": reason})
+    # selfExempt：送出的人自己知道自己的班，資源預約不會拿這筆提醒他本人
+    result.append({"employeeId": employeeId, "reason": reason, "selfExempt": True})
   return result

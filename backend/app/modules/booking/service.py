@@ -239,7 +239,8 @@ def findResourceConflicts(
 
 
 def findParticipantConflicts(
-  conn: Connection, employeeIds: list[int], startAt: datetime, endAt: datetime, excludeBookingId: int | None = None
+  conn: Connection, employeeIds: list[int], startAt: datetime, endAt: datetime, excludeBookingId: int | None = None,
+  actorEmployeeId: int | None = None,
 ) -> list[dict]:
   if not employeeIds:
     return []
@@ -253,6 +254,10 @@ def findParticipantConflicts(
   conflicts = [{**row, "reason": "同時段已有其他排程"} for row in rows]
   names = {row["id"]: row["name"] for row in conn.execute("SELECT id, name FROM employees WHERE id = ANY(%s)", (employeeIds,)).fetchall()}
   for item in collectUnavailability(conn, employeeIds, startAt, endAt):
+    # 提供者標了 selfExempt 的提醒（例如不在班）不拿來提醒送出的人自己：他知道自己的時間
+    selfExempt = item.pop("selfExempt", False)
+    if selfExempt and actorEmployeeId is not None and item["employeeId"] == actorEmployeeId:
+      continue
     # 提供者不一定帶姓名，由這裡補上
     conflicts.append({"name": names.get(item["employeeId"]), **item})
   return camelizeRow(conflicts)
@@ -266,13 +271,14 @@ def checkConflicts(
   endAt: datetime,
   excludeBookingId: int | None,
   acknowledgeWarnings: bool,
+  actorEmployeeId: int | None = None,
 ) -> None:
   # 資源撞期優先：它是硬性禁止，不能用「仍要排」略過
   conflicts = findResourceConflicts(conn, resourceIds, startAt, endAt, excludeBookingId)
   if conflicts:
     raise resourceConflictError(conflicts)
   if not acknowledgeWarnings:
-    warnings = findParticipantConflicts(conn, employeeIds, startAt, endAt, excludeBookingId)
+    warnings = findParticipantConflicts(conn, employeeIds, startAt, endAt, excludeBookingId, actorEmployeeId)
     if warnings:
       raise AppError("PARTICIPANT_CONFLICT", "有參加者在這個時段不方便", 409, {"conflicts": warnings})
 
@@ -317,7 +323,7 @@ def createBooking(conn: Connection, actor: Actor, data: BookingInput) -> dict:
   checkReferences(conn, "resources", "資源", resourceIds)
   checkReferences(conn, "employees", "員工", participantIds)
   lockResources(conn, resourceIds)
-  checkConflicts(conn, resourceIds, participantIds, data.startAt, data.endAt, None, data.acknowledgeWarnings)
+  checkConflicts(conn, resourceIds, participantIds, data.startAt, data.endAt, None, data.acknowledgeWarnings, actor.employeeId)
   try:
     with savepoint(conn):
       bookingId = conn.execute(
@@ -391,7 +397,7 @@ def updateBooking(conn: Connection, actor: Actor, bookingId: int, fields: dict) 
     conn,
     resourceIds if timeChanged else addedResourceIds,
     participantIds if timeChanged else addedEmployeeIds,
-    startAt, endAt, bookingId, bool(fields.get("acknowledgeWarnings")),
+    startAt, endAt, bookingId, bool(fields.get("acknowledgeWarnings")), actor.employeeId,
   )
   try:
     with savepoint(conn):

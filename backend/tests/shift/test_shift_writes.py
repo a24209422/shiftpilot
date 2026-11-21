@@ -112,7 +112,28 @@ def testOverrideValidationAndPermission(world):
 def testDeleteOverride(world):
   with openDb(world.url) as conn:
     service.upsertOverride(conn, world.hrActor, {"employeeId": world.alice, "day": date(2026, 11, 24), "shiftTypeId": None, "note": ""}, now)
-    expectError("FORBIDDEN", service.deleteOverride, conn, world.bobActor, world.alice, date(2026, 11, 24))
-    service.deleteOverride(conn, world.bossActor, world.alice, date(2026, 11, 24))
+    expectError("FORBIDDEN", service.deleteOverride, conn, world.bobActor, world.alice, date(2026, 11, 24), today)
+    service.deleteOverride(conn, world.bossActor, world.alice, date(2026, 11, 24), today)
     assert listAudit(conn, "shift")[0]["action"] == "deleteShiftOverride"
-    expectError("NOT_FOUND", service.deleteOverride, conn, world.hrActor, world.alice, date(2026, 11, 24))
+    expectError("NOT_FOUND", service.deleteOverride, conn, world.hrActor, world.alice, date(2026, 11, 24), today)
+
+
+def testOnlyHrCanSchedulePastDays(world):
+  with openDb(world.url) as conn:
+    yesterday = date(2026, 11, 20)
+    overridePast = {"employeeId": world.alice, "day": yesterday, "shiftTypeId": None, "note": ""}
+    error = expectError("SHIFT_PAST_DAY", service.createRoster, conn, world.bossActor, rosterData(world, world.alice, yesterday), now)
+    assert error.status == 403
+    expectError("SHIFT_PAST_DAY", service.upsertOverride, conn, world.bossActor, overridePast, now)
+    # 人資可以更正過去的班
+    service.createRoster(conn, world.hrActor, rosterData(world, world.alice, yesterday), now)
+    service.upsertOverride(conn, world.hrActor, overridePast, now)
+    expectError("SHIFT_PAST_DAY", service.deleteOverride, conn, world.bossActor, world.alice, yesterday, today)
+    service.deleteOverride(conn, world.hrActor, world.alice, yesterday, today)
+
+
+def testManagerCanScheduleToday(world):
+  with openDb(world.url) as conn:
+    service.createRoster(conn, world.bossActor, rosterData(world, world.alice, today), now)
+    service.upsertOverride(conn, world.bossActor, {"employeeId": world.alice, "day": today, "shiftTypeId": None, "note": ""}, now)
+    service.deleteOverride(conn, world.bossActor, world.alice, today, today)

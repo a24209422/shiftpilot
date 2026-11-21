@@ -31,6 +31,9 @@ export function ShiftsPage() {
   const employeeById = new Map(employees.map((item) => [item.id, item]));
   // 只決定顯示；後端會再檢查是不是人資或直屬主管
   const canEdit = (employee: Employee) => can("shift.manage") || (user?.employeeId != null && employee.managerId === user.employeeId);
+  // 今天以前的班只有人資能改：過去的班會影響已核准請假的對照（後端也會擋）
+  const today = toLocalDate(new Date());
+  const canEditDay = (employee: Employee, day: string) => canEdit(employee) && (day >= today || can("shift.manage"));
 
   const setPanel = (panel: Record<string, string>) => setParams((current) => {
     const next = new URLSearchParams(current);
@@ -98,7 +101,7 @@ export function ShiftsPage() {
         </table>
       </div>
       <Drawer open={open} title={title} onClose={() => setPanel({})}>
-        {selectedDay && cellEmployee && <DayPanel day={selectedDay} employee={cellEmployee} canEdit={canEdit(cellEmployee)} onDone={() => setPanel({})} />}
+        {selectedDay && cellEmployee && <DayPanel day={selectedDay} employee={cellEmployee} canEdit={canEditDay(cellEmployee, selectedDay.day)} onDone={() => setPanel({})} />}
         {rosterEmployee && <RosterPanel key={rosterEmployee.id} employee={rosterEmployee} canEdit={canEdit(rosterEmployee)} />}
       </Drawer>
     </div>

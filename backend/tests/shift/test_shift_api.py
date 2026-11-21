@@ -61,7 +61,8 @@ def testManagerSchedulesSubordinateAndScheduleReflectsIt(world):
   future = world.bossClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2030-01-07"}).json()
   assert world.bossClient.delete(f"/api/shift/rosters/{future['id']}").status_code == 204
   # 已生效的班表用固定的過去日期，不隨測試執行的日期變動
-  past = world.bossClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2026-01-05"})
+  # 過去的班只有人資能排；主管刪它時要被「已生效」擋下
+  past = world.hrClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2026-01-05"})
   assert past.status_code == 201, past.text
   response = world.bossClient.delete(f"/api/shift/rosters/{past.json()['id']}")
   assert response.status_code == 409 and errorOf(response)["code"] == "ROSTER_ALREADY_EFFECTIVE"
@@ -102,3 +103,29 @@ def testBookingInsideShiftAndAtLunchHasNoShiftWarning(world):
   for startAt, endAt in (("2026-11-24T10:00", "2026-11-24T11:00"), ("2026-11-24T12:00", "2026-11-24T13:00")):
     response = world.bossClient.post("/api/booking/bookings", json=booking(world, startAt, endAt, bob))
     assert response.status_code == 201, response.text
+
+
+def testOwnOffShiftIsNotWarned(world):
+  # 2026-11-28 是星期六：送出的人自己休息，不提醒自己
+  body = booking(world, "2026-11-28T10:00", "2026-11-28T11:00", world.bob["employeeId"])
+  response = world.bossClient.post("/api/booking/bookings", json={**body, "participantEmployeeIds": []})
+  assert response.status_code == 201, response.text
+
+
+def testOrganizerChosenByHrIsStillWarned(world):
+  body = booking(world, "2026-11-28T10:00", "2026-11-28T11:00", world.alice["employeeId"])
+  response = world.hrClient.post("/api/booking/bookings", json={**body, "organizerEmployeeId": world.bob["employeeId"]})
+  assert response.status_code == 409
+  reasons = {(item["employeeId"], item["reason"]) for item in errorOf(response)["details"]["conflicts"]}
+  assert (world.bob["employeeId"], "休息日") in reasons and (world.alice["employeeId"], "休息日") in reasons
+  assert world.hr["employeeId"] not in {employeeId for employeeId, _ in reasons}
+
+
+def testOwnLeaveIsStillWarned(world):
+  types = {item["code"]: item["id"] for item in world.bossClient.get("/api/leave/types").json()}
+  leave = world.bossClient.post("/api/leave/requests", json={"leaveTypeId": types["personal"], "startAt": "2026-11-24T09:00", "endAt": "2026-11-24T18:00"})
+  assert leave.status_code == 201, leave.text
+  body = booking(world, "2026-11-24T10:00", "2026-11-24T11:00", world.bob["employeeId"])
+  response = world.bossClient.post("/api/booking/bookings", json={**body, "participantEmployeeIds": []})
+  assert response.status_code == 409
+  assert [item["reason"] for item in errorOf(response)["details"]["conflicts"]] == ["請假（待核准）"]
