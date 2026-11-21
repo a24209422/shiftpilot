@@ -189,7 +189,7 @@ test("testViewTabsSwitchBetweenResourcesAndEmployees", async () => {
 });
 
 test("testLeaveBlockWithoutLinkIsNotClickable", async () => {
-  openWithEmployees([{ id: 6, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "approved", leaveTypeName: null }]);
+  openWithEmployees([{ id: 6, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "approved", leaveTypeName: null, segments: [{ startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00" }] }]);
   // 導覽列也有「請假」兩個字，所以用區塊的 title 找
   const block = await screen.findByTitle(/^請假 /);
   expect(block.tagName).toBe("DIV");
@@ -197,7 +197,7 @@ test("testLeaveBlockWithoutLinkIsNotClickable", async () => {
 });
 
 test("testLeaveBlockWithLinkOpensRequest", async () => {
-  openWithEmployees([{ id: 5, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "pending", leaveTypeName: "事假" }]);
+  openWithEmployees([{ id: 5, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "pending", leaveTypeName: "事假", segments: [{ startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00" }] }]);
   await userEvent.setup().click(await screen.findByRole("button", { name: /事假（待核准）/ }));
   expect(location()).toBe("/leave?id=5");
 });

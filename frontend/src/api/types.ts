@@ -63,4 +63,21 @@ export interface UnusedLeave {
   employeeId: number; employeeName: string; departmentName: string; periodStart: string; periodEnd: string;
   quotaHours: number; adjustmentHours: number; usedHours: number; unusedHours: number;
 }
-export interface LeaveCalendarItem { id: number; employeeId: number; startAt: string; endAt: string; status: "pending" | "approved"; leaveTypeName: string | null }
+export interface LeaveCalendarItem { id: number; employeeId: number; startAt: string; endAt: string; status: "pending" | "approved"; leaveTypeName: string | null; segments: { startAt: string; endAt: string }[] }
+
+export interface ShiftType {
+  id: number; code: string; name: string; startTime: string; endTime: string;
+  breakStart: string | null; breakEnd: string | null; isDefault: boolean; isActive: boolean;
+}
+export interface ShiftRosterDay { weekday: number; shiftTypeId: number; shiftName: string }
+export interface ShiftRoster { id: number; employeeId: number; effectiveFrom: string; days: ShiftRosterDay[]; createdBy: number; createdAt: string }
+export interface ShiftOverride {
+  id: number; employeeId: number; day: string; shiftTypeId: number | null; shiftName: string | null; note: string;
+  createdBy: number; createdAt: string; updatedBy: number; updatedAt: string;
+}
+export type ScheduleSource = "inactive" | "override" | "holiday" | "roster" | "default" | "off";
+export interface ScheduleDay {
+  employeeId: number; day: string; source: ScheduleSource; shiftTypeId: number | null; shiftName: string | null;
+  startAt: string | null; endAt: string | null; breakStartAt: string | null; breakEndAt: string | null;
+  holidayName: string | null; overrideNote: string | null;
+}

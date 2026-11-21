@@ -9,8 +9,8 @@ test("testClipToWorkdayKeepsOnlyWorkHoursOfThatDay", () => {
 
 test("testLeaveItemsLabelAndLink", () => {
   const items = toLeaveTimelineItems([
-    { id: 5, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "approved", leaveTypeName: "事假" },
-    { id: 6, employeeId: 3, startAt: "2026-11-24T13:00:00", endAt: "2026-11-24T18:00:00", status: "pending", leaveTypeName: null },
+    { id: 5, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "approved", leaveTypeName: "事假", segments: [{ startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00" }] },
+    { id: 6, employeeId: 3, startAt: "2026-11-24T13:00:00", endAt: "2026-11-24T18:00:00", status: "pending", leaveTypeName: null, segments: [{ startAt: "2026-11-24T13:00:00", endAt: "2026-11-24T18:00:00" }] },
   ], "2026-11-24T00:00");
   expect(items).toEqual([
     { key: "leave:5", kind: "block", subjectId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", label: "事假", muted: false, link: "/leave?id=5" },
