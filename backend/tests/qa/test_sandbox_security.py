@@ -87,3 +87,53 @@ def testRowsAreCappedAndJsonFriendly(sandbox):
   columns, rows, truncated = runQuery(sandbox.conn, "SELECT day, start_at FROM day_shifts ORDER BY employee_id, day")
   assert len(rows) == 200 and truncated is True
   assert isinstance(rows[0][0], str) and len(rows[0][0]) == 10
+
+
+def testSessionSettingsAreRevertedBetweenQueries(sandbox):
+  # 繞過 validateSql，直接呼叫 runQuery：沙盒自己也要守得住
+  runQuery(sandbox.conn, "SELECT set_config('default_transaction_read_only', 'off', false), set_config('statement_timeout', '0', false)")
+  with pytest.raises(psycopg.Error):
+    runQuery(sandbox.conn, "SELECT lo_create(0)")
+  # 唯讀還原後連 GRANT 都不能執行；INSERT 也一樣失敗
+  with pytest.raises(psycopg.Error):
+    sandbox.conn.execute("GRANT INSERT ON pg_temp.leave_requests TO qa_sandbox")
+  with pytest.raises(psycopg.Error):
+    sandbox.conn.execute("INSERT INTO leave_requests (id) VALUES (1)")
+  started = time.monotonic()
+  with pytest.raises(psycopg.errors.QueryCanceled):
+    runQuery(sandbox.conn, "SELECT pg_sleep(6.5)")
+  assert time.monotonic() - started < 6.2
+
+
+def testCrossJoinIsCappedInDatabase(sandbox):
+  started = time.monotonic()
+  columns, rows, truncated = runQuery(
+    sandbox.conn, "SELECT a.day, b.day AS other FROM day_shifts a CROSS JOIN day_shifts b CROSS JOIN day_shifts c"
+  )
+  assert len(rows) == 200 and truncated is True
+  assert time.monotonic() - started < 3
+
+
+def testOtherAskersQueriesAreNotVisible(sandbox, qaSandboxUrl, migratedUrl):
+  marker = "marker_9f3c1d_secret"
+  with openDb(migratedUrl) as conn:
+    data = collectSandboxData(conn, SimpleNamespace(role="admin", employeeId=None), date(2026, 11, 21))
+  with openSandbox(qaSandboxUrl, data) as other:
+    runQuery(other, f"SELECT '{marker}' AS x")
+    seen = runQuery(sandbox.conn, "SELECT query FROM pg_stat_activity")[1]
+    assert not any(marker in str(row[0]) for row in seen)
+    inserted = runQuery(sandbox.conn, "SELECT coalesce(sum(n_tup_ins), 0) FROM pg_stat_all_tables WHERE relname = 'leave_requests'")[1]
+    assert inserted[0][0] == 0
+
+
+def testJsonValuesAreNestedAndBinarySafe(sandbox):
+  rows = runQuery(sandbox.conn, "SELECT array_agg(day), 'a'::bytea, gen_random_uuid() FROM calendar_days WHERE false")[1]
+  assert rows[0][0] is None
+  rows = runQuery(sandbox.conn, "SELECT array_agg(d), 'a'::bytea, gen_random_uuid() FROM (SELECT current_date AS d) t")[1]
+  assert isinstance(rows[0][0][0], str) and rows[0][1] == "61" and isinstance(rows[0][2], str)
+
+
+def testPublicTablesAreNotGranted(sandbox):
+  tables = runQuery(sandbox.conn, "SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'v', 'p')")[1]
+  for (name,) in tables:
+    assert runQuery(sandbox.conn, f"SELECT has_table_privilege('qa_sandbox', 'public.{name}', 'SELECT')")[1] == [[False]]

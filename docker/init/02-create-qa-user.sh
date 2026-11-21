@@ -10,6 +10,9 @@ createQaSandboxRole() {
 -- 只能登入與建暫存表：不給任何資料表權限、不加入任何角色，模型的 SQL 才沒有角色可以切換
 SELECT format('CREATE ROLE qa_sandbox LOGIN NOINHERIT PASSWORD %L', :'qaPassword')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'qa_sandbox') \gexec
+-- 所有沙盒連線共用同一個角色：關掉活動追蹤，pg_stat_activity 才不會讓別人看到其他提問者的 SQL（已存在的角色也要套用）
+ALTER ROLE qa_sandbox SET track_activities = off;
+ALTER ROLE qa_sandbox SET track_counts = off;
 EOSQL
 }
 

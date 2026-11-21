@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from uuid import UUID
 
 import psycopg
 from psycopg import Connection
@@ -137,15 +138,17 @@ def collectSandboxData(conn: Connection, actor: Actor, today: date) -> SandboxDa
 def openSandbox(qaDatabaseUrl: str, data: SandboxData):
   # autocommit：每一句自成交易；切成唯讀之後，模型的 SQL 也在自己的唯讀交易裡執行
   with psycopg.connect(qaDatabaseUrl, autocommit=True) as conn:
-    for name, columns in sandboxTables:
-      conn.execute(f"CREATE TEMP TABLE {name} ({columns})")
-      tableRows = data.rows[name]
-      if tableRows:
-        with conn.cursor().copy(f"COPY {name} FROM STDIN") as copy:
-          for row in tableRows:
-            copy.write_row(row)
-      # 唯讀交易仍允許寫暫存表；擁有者收回自己的寫入權限後，唯讀狀態下也無法再 GRANT 回來
-      conn.execute(f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON {name} FROM CURRENT_USER")
+    # 建表、複製資料、收回寫入權限放在同一個交易，省掉每句一次的 fsync
+    with conn.transaction():
+      for name, columns in sandboxTables:
+        conn.execute(f"CREATE TEMP TABLE {name} ({columns})")
+        tableRows = data.rows[name]
+        if tableRows:
+          with conn.cursor().copy(f"COPY {name} FROM STDIN") as copy:
+            for row in tableRows:
+              copy.write_row(row)
+        # 唯讀交易仍允許寫暫存表；擁有者收回自己的寫入權限後，唯讀狀態下也無法再 GRANT 回來
+        conn.execute(f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON {name} FROM CURRENT_USER")
     # 只看得到自己的暫存表；真實資料表本來就沒有權限，這裡再讓沒寫 schema 的名稱只找暫存表
     conn.execute("SET search_path = pg_temp")
     conn.execute(f"SET statement_timeout = '{statementTimeout}'")
@@ -163,14 +166,27 @@ def jsonValue(value):
     return float(value)
   if isinstance(value, timedelta):
     return str(value)
+  if isinstance(value, UUID):
+    return str(value)
+  if isinstance(value, (bytes, bytearray, memoryview)):
+    return bytes(value).hex()
+  if isinstance(value, (list, tuple)):
+    return [jsonValue(item) for item in value]
+  if isinstance(value, dict):
+    return {str(key): jsonValue(item) for key, item in value.items()}
   return value
 
 
 def runQuery(conn: Connection, sql: str) -> tuple[list[str], list[list], bool]:
-  with conn.cursor() as cursor:
-    cursor.execute(sql)
-    if cursor.description is None:
-      return [], [], False
-    columns = [column.name for column in cursor.description]
-    fetched = cursor.fetchmany(maxRows + 1)
+  # 注意：pg_cancel_backend、pg_terminate_backend、pg_advisory_lock 這類函式無法用權限擋下（同一個角色的連線本來就能互相操作），
+  # 只能靠 sqlguard 在送進來之前禁止；這裡的防線只負責「就算 SQL 檢查被繞過，沙盒本身仍然唯讀、有逾時」。
+  # force_rollback：交易結束一定回滾，模型用 set_config(..., false) 改的連線設定（唯讀、逾時）都會還原。
+  # 具名游標在資料庫端分批取：交叉連接不會把上百萬列送到應用程式。
+  with conn.transaction(force_rollback=True):
+    with conn.cursor(name="qaQuery") as cursor:
+      cursor.execute(sql)
+      if cursor.description is None:
+        return [], [], False
+      columns = [column.name for column in cursor.description]
+      fetched = cursor.fetchmany(maxRows + 1)
   return columns, [[jsonValue(value) for value in row] for row in fetched[:maxRows]], len(fetched) > maxRows
