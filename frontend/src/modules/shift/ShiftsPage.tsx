@@ -17,7 +17,9 @@ export function ShiftsPage() {
   const { can } = usePermissions();
   const { user } = useAuth();
   const weekParam = params.get("week");
-  const start = weekStart(weekParam ? parseLocal(weekParam) : new Date());
+  const parsedWeek = weekParam ? parseLocal(weekParam) : new Date();
+  // 網址參數可能被亂改，日期無效就退回本週，避免送出 NaN 的查詢
+  const start = weekStart(Number.isNaN(parsedWeek.getTime()) ? new Date() : parsedWeek);
   const days = Array.from({ length: 7 }, (_, index) => toLocalDate(addDays(start, index)));
   const { data: employeeData } = useEmployees();
   const { data: departmentData } = useDepartments();

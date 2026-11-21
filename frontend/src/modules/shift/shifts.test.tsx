@@ -134,3 +134,20 @@ test("testFutureRosterCanBeDeleted", async () => {
   await user.click(drawer().getByRole("button", { name: "刪除" }));
   await waitFor(() => expect(api.calls.some((item) => item.method === "DELETE" && item.path === "/api/shift/rosters/7")).toBe(true));
 });
+
+test("testRosterFormPrefillsDefaultShiftOnFreshRender", async () => {
+  open();
+  const user = userEvent.setup();
+  await screen.findByText("林小美");
+  await user.click(screen.getByRole("button", { name: "林小美" }));
+  await user.click(await drawer().findByRole("button", { name: "新增週班表" }));
+  for (const label of ["週一", "週二", "週三", "週四", "週五"]) expect(drawer().getByLabelText(label)).toHaveValue("1");
+  for (const label of ["週六", "週日"]) expect(drawer().getByLabelText(label)).toHaveValue("rest");
+});
+
+test("testInvalidWeekParamFallsBackToCurrentWeek", async () => {
+  const { api } = open({ route: "/shifts?week=abc" });
+  await screen.findByText("黃志強");
+  const call = api.calls.find((item) => item.path === "/api/shift/schedule")!;
+  expect(call.params.get("from")).toBe("2026-11-16");
+});

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { apiSend } from "../../api/client";
-import type { Employee, ShiftRoster } from "../../api/types";
+import type { Employee, ShiftRoster, ShiftType } from "../../api/types";
 import { SelectField, TextField } from "../../forms/fields";
 import { FormError } from "../../forms/FormError";
 import { addDays, toLocalDate, weekStart } from "../../forms/time";
@@ -13,10 +13,9 @@ const restValue = "rest";
 const daysText = (roster: ShiftRoster) =>
   roster.days.length === 0 ? "全週休息" : roster.days.map((item) => `${weekdayLabels[item.weekday]} ${item.shiftName}`).join("、");
 
-function RosterForm({ employee, onDone }: { employee: Employee; onDone(): void }) {
+function RosterForm({ employee, types, onDone }: { employee: Employee; types: ShiftType[]; onDone(): void }) {
   const toast = useToast();
-  const { data: types } = useShiftTypes();
-  const defaultId = (types ?? []).find((item) => item.isDefault)?.id;
+  const defaultId = types.find((item) => item.isDefault)?.id;
   // 預設從下週一生效、平日帶入預設班：換班表通常從新的一週開始
   const [effectiveFrom, setEffectiveFrom] = useState(() => toLocalDate(addDays(weekStart(new Date()), 7)));
   const [days, setDays] = useState<string[]>(() => weekdayLabels.map((_, index) => (index < 5 && defaultId ? String(defaultId) : restValue)));
@@ -27,7 +26,7 @@ function RosterForm({ employee, onDone }: { employee: Employee; onDone(): void }
     }),
     { onSuccess: () => { toast("已新增週班表"); onDone(); }, invalidate: [["shifts"]] },
   );
-  const options = [{ value: restValue, label: "休息" }, ...(types ?? []).map((item) => ({ value: String(item.id), label: item.name }))];
+  const options = [{ value: restValue, label: "休息" }, ...types.map((item) => ({ value: String(item.id), label: item.name }))];
   return (
     <form className="form" onSubmit={(event: FormEvent) => { event.preventDefault(); void save.submit(); }}>
       <TextField label="生效日" type="date" required value={effectiveFrom} onChange={setEffectiveFrom} error={save.fieldErrors.effectiveFrom} />
@@ -60,6 +59,7 @@ function DeleteRoster({ roster }: { roster: ShiftRoster }) {
 
 export function RosterPanel({ employee, canEdit }: { employee: Employee; canEdit: boolean }) {
   const { data } = useRosters(employee.id);
+  const { data: types } = useShiftTypes();
   const [adding, setAdding] = useState(false);
   const today = toLocalDate(new Date());
   return (
@@ -73,8 +73,9 @@ export function RosterPanel({ employee, canEdit }: { employee: Employee; canEdit
           {canEdit && roster.effectiveFrom > today && <DeleteRoster roster={roster} />}
         </div>
       ))}
-      {canEdit && !adding && <button className="primary" type="button" onClick={() => setAdding(true)}>新增週班表</button>}
-      {canEdit && adding && <RosterForm employee={employee} onDone={() => setAdding(false)} />}
+      {/* 班別載入後才給新增：表單的預設班只在初始化時讀一次，沒載入會全部變成休息 */}
+      {canEdit && types && !adding && <button className="primary" type="button" onClick={() => setAdding(true)}>新增週班表</button>}
+      {canEdit && types && adding && <RosterForm employee={employee} types={types} onDone={() => setAdding(false)} />}
     </div>
   );
 }
