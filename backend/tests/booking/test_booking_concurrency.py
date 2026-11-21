@@ -23,7 +23,8 @@ def testConcurrentBookingsOfSameResourceOnlyOneSucceeds(migratedUrl):
 
   for roundNumber, resourceId in enumerate(resourceIds):
     # 每輪用不同的日期：同一批員工不能每輪都在同一個時段，否則會先被參加者警告擋住，測不到資源撞期
-    day = date(2026, 12, 1 + roundNumber)
+    # 還要避開週末：沒排班的人在休息日也會先被不在班的警告擋住
+    day = date(2026, 12, 1) + timedelta(days=roundNumber + 2 * (roundNumber // 5))
     barrier = threading.Barrier(2)
     outcomes = [None, None]
 

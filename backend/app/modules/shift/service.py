@@ -358,3 +358,22 @@ def deleteOverride(conn: Connection, actor: Actor, employeeId: int, day: date) -
     raise AppError("NOT_FOUND", "這一天沒有單日調整", 404)
   conn.execute("DELETE FROM shift_overrides WHERE id = %s", (before["id"],))
   writeAudit(conn, actor, "shift", "deleteShiftOverride", "shiftOverride", before["id"], before, None)
+
+
+# ---------- 給資源預約 ----------
+
+
+def findUnavailability(conn: Connection, employeeIds: list[int], startAt: datetime, endAt: datetime) -> list[dict]:
+  result = []
+  for employeeId, days in shiftSpans(conn, employeeIds, startAt, endAt).items():
+    # 用整個班的起訖、不扣休息：午餐時段開會很常見，不該因此跳警告
+    spans = [(day.startAt, day.endAt) for day in days if day.startAt is not None and day.endAt is not None]
+    if rules.isCovered(startAt, endAt, spans):
+      continue
+    startDay = next((day for day in days if day.day == startAt.date()), None)
+    if startDay is None or startDay.startAt is None or startDay.endAt is None:
+      reason = "休息日"
+    else:
+      reason = f"不在班（{startDay.startAt:%H:%M}–{startDay.endAt:%H:%M}）"
+    result.append({"employeeId": employeeId, "reason": reason})
+  return result

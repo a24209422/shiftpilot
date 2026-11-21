@@ -65,7 +65,7 @@ def testParticipantConflictThenAcknowledgeRetry(world):
 
 
 def testCrossMidnightBookingAccepted(world):
-  response = world.aliceClient.post("/api/booking/bookings", json=bodyFor(world, startAt="2026-11-24T22:00", endAt="2026-11-25T06:00"))
+  response = world.aliceClient.post("/api/booking/bookings", json=bodyFor(world, startAt="2026-11-24T22:00", endAt="2026-11-25T06:00", acknowledgeWarnings=True))
   assert response.status_code == 201
   found = world.aliceClient.get("/api/booking/bookings", params={"from": "2026-11-25T00:00", "to": "2026-11-25T23:59"}).json()
   assert [item["id"] for item in found] == [response.json()["id"]]
