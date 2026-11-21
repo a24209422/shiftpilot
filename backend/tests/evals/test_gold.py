@@ -63,3 +63,39 @@ def testSnapshotMismatchIsReported():
     gold.checkSnapshot({"id": "x99"}, [[["a"]]], {"x99": "0" * 64})
   with pytest.raises(gold.SnapshotMismatchError):
     gold.checkSnapshot({"id": "x98"}, [[["a"]]], {})
+
+
+def testHeldoutCasesFollowFormatAndQuotas():
+  from evals.heldout_cases import cases as heldout
+
+  heldoutQuotas = {"org": 3, "shift": 5, "avail": 4, "leave": 5, "meet": 4, "agg": 4}
+  assert len(heldout) == 25
+  assert Counter(case["category"] for case in heldout) == Counter(heldoutQuotas)
+  ids = [case["id"] for case in heldout]
+  assert len(set(ids)) == 25 and all(caseId.startswith("h-") for caseId in ids)
+  assert not set(ids) & {case["id"] for case in cases}
+  bad = [case["id"] for case in heldout if not (requiredKeys <= set(case) <= requiredKeys | {"compareAsSet", "alsoAccept"}) or case["asker"] not in askerNames]
+  assert bad == []
+  privileged = [case for case in heldout if case["asker"] in ("manager", "hr")]
+  assert 4 <= len(privileged) <= 6
+
+
+def testHeldoutGoldRunsAndMatchesSnapshot(world):
+  from evals.heldout_cases import cases as heldout
+
+  snapshot = gold.loadSnapshot()
+  failed, mismatched, empty = [], [], []
+  for case in heldout:
+    try:
+      results = gold.runGold(world, case)
+    except gold.GoldSqlError:
+      failed.append(case["id"])
+      continue
+    if not results[0]:
+      empty.append(case["id"])
+    try:
+      gold.checkSnapshot(case, results, snapshot)
+    except gold.SnapshotMismatchError:
+      mismatched.append(case["id"])
+  assert failed == [] and mismatched == []
+  assert len(empty) <= 2, empty
