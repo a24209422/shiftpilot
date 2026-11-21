@@ -61,24 +61,28 @@ def testPeriodForOtherKindsIsCalendarYear():
   assert rules.periodFor("seniority", None, date(2025, 1, 1), date(2025, 3, 1)) is None
 
 
-# 2026-11-23 是星期一
-@pytest.mark.parametrize(("startAt", "endAt", "kinds", "expected"), [
-  (datetime(2026, 11, 23, 9), datetime(2026, 11, 23, 18), {}, 8),
-  (datetime(2026, 11, 23, 11), datetime(2026, 11, 23, 14), {}, 2),
-  (datetime(2026, 11, 23, 12), datetime(2026, 11, 23, 13), {}, 0),
-  (datetime(2026, 11, 27, 9), datetime(2026, 11, 30, 18), {}, 16),
-  (datetime(2026, 11, 23, 9), datetime(2026, 11, 25, 18), {date(2026, 11, 24): "holiday"}, 16),
-  (datetime(2026, 11, 28, 9), datetime(2026, 11, 28, 18), {date(2026, 11, 28): "makeup_workday"}, 8),
-  (datetime(2026, 11, 28, 9), datetime(2026, 11, 28, 18), {}, 0),
-  (datetime(2026, 11, 23, 18), datetime(2026, 11, 24, 9), {}, 0),
-  (datetime(2026, 11, 23, 0), datetime(2026, 11, 24, 0), {}, 8),
+def standardWindows(day):
+  return [(datetime(2026, 11, day, 9), datetime(2026, 11, day, 12)), (datetime(2026, 11, day, 13), datetime(2026, 11, day, 18))]
+
+
+nightWindows = [(datetime(2026, 11, 23, 22), datetime(2026, 11, 24, 2)), (datetime(2026, 11, 24, 3), datetime(2026, 11, 24, 6))]
+
+
+@pytest.mark.parametrize(("startAt", "endAt", "windows", "expected"), [
+  (datetime(2026, 11, 23, 9), datetime(2026, 11, 23, 18), standardWindows(23), 8),
+  (datetime(2026, 11, 23, 11), datetime(2026, 11, 23, 14), standardWindows(23), 2),
+  (datetime(2026, 11, 23, 12), datetime(2026, 11, 23, 13), standardWindows(23), 0),
+  (datetime(2026, 11, 23, 9), datetime(2026, 11, 25, 18), standardWindows(23) + standardWindows(25), 16),
+  (datetime(2026, 11, 23, 22), datetime(2026, 11, 24, 6), nightWindows, 7),
+  (datetime(2026, 11, 24, 0), datetime(2026, 11, 24, 6), nightWindows, 5),
+  (datetime(2026, 11, 28, 9), datetime(2026, 11, 28, 18), [], 0),
 ])
-def testCountLeaveHours(startAt, endAt, kinds, expected):
-  assert rules.countLeaveHours(startAt, endAt, kinds) == expected
+def testCountLeaveHours(startAt, endAt, windows, expected):
+  assert rules.countLeaveHours(startAt, endAt, windows) == expected
 
 
 def testCountLeaveHoursRejectsNonWholeHour():
-  error = expectError("VALIDATION", rules.countLeaveHours, datetime(2026, 11, 23, 9, 30), datetime(2026, 11, 23, 18), {})
+  error = expectError("VALIDATION", rules.countLeaveHours, datetime(2026, 11, 23, 9, 30), datetime(2026, 11, 23, 18), [])
   assert error.details == {"field": "startAt"}
 
 

@@ -126,6 +126,10 @@ def testCalendarHidesLeaveTypeFromOthers(world):
     assert requests.listCalendar(conn, world.bobActor, start, end) == [{
       "id": created["id"], "employeeId": world.alice, "startAt": "2026-11-24T09:00:00", "endAt": "2026-11-24T18:00:00",
       "status": "pending", "leaveTypeName": None,
+      "segments": [
+        {"startAt": "2026-11-24T09:00:00", "endAt": "2026-11-24T12:00:00"},
+        {"startAt": "2026-11-24T13:00:00", "endAt": "2026-11-24T18:00:00"},
+      ],
     }]
     expectError("VALIDATION", requests.listCalendar, conn, world.bobActor, start, datetime(2027, 1, 1))
 

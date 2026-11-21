@@ -1,12 +1,10 @@
 import calendar
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 
 from app.infra.errors import AppError
 
 hoursPerDay = 8
-# 排班模組做好之前，所有人都用固定的上班時間；之後改成依各自的班表計算
-workWindows = ((time(9), time(12)), (time(13), time(18)))
 
 
 @dataclass(frozen=True)
@@ -62,33 +60,20 @@ def periodFor(quotaKind: str, annualCapHours: int | None, hiredOn: date, day: da
   return Period(date(day.year, 1, 1), date(day.year, 12, 31), quota)
 
 
-def isWorkday(day: date, calendarKinds: dict[date, str]) -> bool:
-  kind = calendarKinds.get(day)
-  if kind == "holiday":
-    return False
-  if kind == "makeup_workday":
-    return True
-  return day.weekday() < 5
-
-
 def requireWholeHour(value: datetime, field: str) -> None:
   if value.minute or value.second or value.microsecond:
     raise AppError("VALIDATION", "請假時間必須是整點", 422, {"field": field})
 
 
-def countLeaveHours(startAt: datetime, endAt: datetime, calendarKinds: dict[date, str]) -> int:
+def countLeaveHours(startAt: datetime, endAt: datetime, windows: list[tuple[datetime, datetime]]) -> int:
   requireWholeHour(startAt, "startAt")
   requireWholeHour(endAt, "endAt")
   total = timedelta()
-  day = startAt.date()
-  while day <= endAt.date():
-    if isWorkday(day, calendarKinds):
-      for windowStart, windowEnd in workWindows:
-        start = max(startAt, datetime.combine(day, windowStart))
-        end = min(endAt, datetime.combine(day, windowEnd))
-        if end > start:
-          total += end - start
-    day += timedelta(days=1)
+  for windowStart, windowEnd in windows:
+    start = max(startAt, windowStart)
+    end = min(endAt, windowEnd)
+    if end > start:
+      total += end - start
   return int(total.total_seconds() // 3600)
 
 

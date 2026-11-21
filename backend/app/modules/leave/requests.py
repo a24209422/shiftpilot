@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import psycopg
 from psycopg import Connection
@@ -11,6 +11,7 @@ from app.infra.serialize import camelizeRow
 from app.infra.validate import requireText
 from app.modules.core.service import writeAudit
 from app.modules.leave import rules, service
+from app.modules.shift import rules as shiftRules, service as shiftService
 
 scopes = {"mine", "toApprove", "all"}
 statuses = {"pending", "approved", "rejected", "withdrawn", "cancelled"}
@@ -39,11 +40,6 @@ def loadRequest(conn: Connection, requestId: int) -> dict:
   return camelizeRow(row)
 
 
-def calendarKindsBetween(conn: Connection, startDay: date, endDay: date) -> dict[date, str]:
-  rows = conn.execute("SELECT day, kind FROM calendar_days WHERE day BETWEEN %s AND %s", (startDay, endDay)).fetchall()
-  return {row["day"]: row["kind"] for row in rows}
-
-
 def findMeetingConflicts(conn: Connection, employeeId: int, startAt: datetime, endAt: datetime) -> list[dict]:
   rows = conn.execute(
     "SELECT b.id AS booking_id, b.title, b.start_at, b.end_at FROM booking_participants p JOIN bookings b ON b.id = p.booking_id "
@@ -69,8 +65,9 @@ def evaluate(conn: Connection, actor: Actor, data: LeaveInput, lock: bool) -> di
   rules.requireWholeHour(data.startAt, "startAt")
   rules.requireWholeHour(data.endAt, "endAt")
   period = rules.periodForRequest(leaveType["quotaKind"], leaveType["annualCapHours"], employee["hired_on"], data.startAt, data.endAt)
-  kinds = calendarKindsBetween(conn, data.startAt.date(), data.endAt.date())
-  hours = rules.countLeaveHours(data.startAt, data.endAt, kinds)
+  # 時數依這個人的班計算；班的推算（含假日、補班日）由排班模組負責
+  windows = shiftService.workWindows(conn, [employee["id"]], data.startAt, data.endAt)[employee["id"]]
+  hours = rules.countLeaveHours(data.startAt, data.endAt, windows)
   if hours == 0:
     raise AppError("LEAVE_NO_WORKING_HOURS", "這段時間沒有上班時間，不需要請假", 422)
   remainingAfter = None
@@ -261,10 +258,16 @@ def listCalendar(conn: Connection, actor: Actor, start: datetime, end: datetime)
     "WHERE r.status IN ('pending', 'approved') AND r.start_at < %s AND r.end_at > %s ORDER BY r.start_at, r.id",
     (end, start),
   ).fetchall()
+  windowsByEmployee = shiftService.workWindows(conn, sorted({row["employee_id"] for row in rows}), start, end)
   isManager = service.isLeaveManager(actor)
   result = []
   for row in rows:
     managerId = row.pop("manager_id")
+    # 前端直接畫這些片段，不用自己猜上班時間
+    row["segments"] = [
+      {"startAt": segmentStart, "endAt": segmentEnd}
+      for segmentStart, segmentEnd in shiftRules.clipWindows(windowsByEmployee[row["employee_id"]], row["start_at"], row["end_at"])
+    ]
     # 假別是私人資訊：只有本人、直屬主管、人資看得到，其他人只知道這段時間不在
     if not (isManager or (actor.employeeId is not None and actor.employeeId in (row["employee_id"], managerId))):
       row["leave_type_name"] = None
