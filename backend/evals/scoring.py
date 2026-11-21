@@ -15,6 +15,12 @@ def normalizeValue(value):
     return round(float(value), 2)
   if isinstance(value, str):
     return value.strip()
+  # array_agg、json_agg 等會回傳 list 或 dict，它們不能放進 Counter 或 set；轉成 tuple 才能比對，遞迴處理是因為內層還可能有數字或字串
+  if isinstance(value, (list, tuple)):
+    return tuple(normalizeValue(item) for item in value)
+  if isinstance(value, dict):
+    # 依 key 排序，讓 JSON 物件的鍵順序不同也視為相同；key 本身只看字串形式，避免混合型別排序出錯
+    return tuple(sorted(((key, normalizeValue(item)) for key, item in value.items()), key=lambda pair: str(pair[0])))
   return value
 
 
