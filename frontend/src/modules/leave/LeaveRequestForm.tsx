@@ -6,14 +6,12 @@ import { FormError } from "../../forms/FormError";
 import { formatRange, toLocalDate } from "../../forms/time";
 import { useSubmit } from "../../forms/useSubmit";
 import { useToast } from "../../shell/Toast";
+// 晚班、大夜班的人也要能請假，所以時間選項涵蓋全天
+import { hourOptions } from "../shift/format";
 import { useLeaveTypes } from "./queries";
 
 // 等使用者停手再試算，避免每改一個欄位就打一次 API
 const quoteDelay = 300;
-const hourOptions = Array.from({ length: 10 }, (_, index) => {
-  const value = `${String(9 + index).padStart(2, "0")}:00`;
-  return { value, label: value };
-});
 
 function tomorrow(): string {
   const now = new Date();

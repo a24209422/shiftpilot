@@ -21,13 +21,17 @@ function OverrideForm({ day, onDone }: { day: ScheduleDay; onDone(): void }) {
     () => apiSend("PUT", "/api/shift/overrides", {
       employeeId: day.employeeId, day: day.day, shiftTypeId: shiftValue === restValue ? null : Number(shiftValue), note,
     }),
-    { onSuccess: () => { toast("已設定單日調整"); onDone(); }, invalidate: [["shifts"]] },
+    { onSuccess: () => { toast("已設定單日調整"); onDone(); }, invalidate: [["shifts"], ["leave"]] },
   );
   const remove = useSubmit(
     () => apiSend("DELETE", `/api/shift/overrides/${day.employeeId}/${day.day}`),
-    { onSuccess: () => { toast("已刪除調整"); onDone(); }, invalidate: [["shifts"]] },
+    { onSuccess: () => { toast("已刪除調整"); onDone(); }, invalidate: [["shifts"], ["leave"]] },
   );
   const options = [{ value: restValue, label: "休息" }, ...(types ?? []).map((item) => ({ value: String(item.id), label: item.name }))];
+  // 原本的班別若已停用就不在啟用清單裡，補上才不會讓下拉選單顯示成別的值
+  if (day.shiftTypeId !== null && day.shiftName && !options.some((item) => item.value === String(day.shiftTypeId))) {
+    options.push({ value: String(day.shiftTypeId), label: `${day.shiftName}（已停用）` });
+  }
   return (
     <form className="form" onSubmit={(event: FormEvent) => { event.preventDefault(); void save.submit(); }}>
       <SelectField label="班別" value={shiftValue} onChange={setShiftValue} options={options} error={save.fieldErrors.shiftTypeId} />

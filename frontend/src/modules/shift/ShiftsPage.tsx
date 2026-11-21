@@ -9,6 +9,7 @@ import { useDepartments, useEmployees } from "../org/queries";
 import { toEmployeeSubjects } from "../org/timeline";
 import { DayPanel } from "./DayPanel";
 import { cellText } from "./format";
+import { sourceLabels } from "./labels";
 import { useSchedule } from "./queries";
 import { RosterPanel } from "./RosterPanel";
 
@@ -81,6 +82,7 @@ export function ShiftsPage() {
                       <td key={day}>
                         <button
                           type="button"
+                          aria-label={`${subject.label} ${formatDay(day)} ${cellText(resolved)}，${sourceLabels[resolved.source]}`}
                           className={`shiftCell shiftSource-${resolved.source}${resolved.source === "override" ? " shiftOverride" : ""}`}
                           onClick={() => setPanel({ cell: `${subject.id}:${day}` })}
                         >

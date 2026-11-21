@@ -83,6 +83,15 @@ test("testFormQuotesHoursAndSubmits", async () => {
   expect(api.calls.find((call) => call.method === "POST" && call.path === "/api/leave/requests")!.body).toMatchObject({ reason: "回診", acknowledgeWarnings: false });
 });
 
+test("testEveningHoursAreSelectable", async () => {
+  const { api } = open({ "POST /api/leave/requests/quote": () => ({ body: { hours: 8, remainingAfter: 36, conflicts: [] } }) });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "申請請假" }));
+  await user.selectOptions(await screen.findByLabelText("假別"), "1");
+  await user.selectOptions(screen.getByLabelText("結束時間"), "23:00");
+  await waitFor(() => expect(api.calls.some((call) => call.path === "/api/leave/requests/quote" && String((call.body as { endAt: string }).endAt).endsWith("T23:00"))).toBe(true));
+});
+
 test("testQuotaErrorDisablesSubmit", async () => {
   open({
     "POST /api/leave/requests/quote": () => ({ status: 422, body: { error: { code: "LEAVE_QUOTA_EXCEEDED", message: "特休只剩 4 小時，這次要 8 小時", details: { remainingHours: 4 } } } }),

@@ -80,6 +80,17 @@ def testCalendarSegmentsFollowShifts(world):
   ]
 
 
+def testCalendarLeaveOnRestDayHasNoSegments(world):
+  with openDb(world.url) as conn:
+    created = requests.createRequest(conn, world.aliceActor, leave(world, datetime(2026, 11, 24, 9), datetime(2026, 11, 24, 18)), now)
+    assert created["hours"] == 8
+    # 請完假後班才被改成休息：事件仍在，但沒有任何上班時段可畫
+    shiftService.upsertOverride(conn, world.hrActor, {"employeeId": world.alice, "day": date(2026, 11, 24), "shiftTypeId": None, "note": ""}, now)
+    items = requests.listCalendar(conn, world.bobActor, datetime(2026, 11, 24), datetime(2026, 11, 25))
+  assert len(items) == 1
+  assert items[0]["segments"] == []
+
+
 def testCalendarSegmentsAreClippedToQueryRange(world):
   with openDb(world.url) as conn:
     requests.createRequest(conn, world.aliceActor, leave(world, datetime(2026, 11, 23, 9), datetime(2026, 11, 25, 18)), now)

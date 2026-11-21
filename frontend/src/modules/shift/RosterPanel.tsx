@@ -24,7 +24,7 @@ function RosterForm({ employee, types, onDone }: { employee: Employee; types: Sh
       employeeId: employee.id, effectiveFrom,
       days: days.flatMap((value, weekday) => (value === restValue ? [] : [{ weekday, shiftTypeId: Number(value) }])),
     }),
-    { onSuccess: () => { toast("已新增週班表"); onDone(); }, invalidate: [["shifts"]] },
+    { onSuccess: () => { toast("已新增週班表"); onDone(); }, invalidate: [["shifts"], ["leave"]] },
   );
   const options = [{ value: restValue, label: "休息" }, ...types.map((item) => ({ value: String(item.id), label: item.name }))];
   return (
@@ -47,7 +47,7 @@ function DeleteRoster({ roster }: { roster: ShiftRoster }) {
   const toast = useToast();
   const remove = useSubmit(
     () => apiSend("DELETE", `/api/shift/rosters/${roster.id}`),
-    { onSuccess: () => toast("已刪除週班表"), invalidate: [["shifts"]] },
+    { onSuccess: () => toast("已刪除週班表"), invalidate: [["shifts"], ["leave"]] },
   );
   return (
     <>
