@@ -79,3 +79,45 @@ def testCloudWithoutChoicesIsUnavailable(monkeypatch):
   monkeypatch.setenv("OPENROUTER_MODELS", "m1")
   with pytest.raises(llm.LlmUnavailableError):
     llm.callModel("m1", [], client=clientWith(lambda request: httpx.Response(200, json={"error": "x"})))
+
+
+def testOllamaNon200JsonBodyIsFormatError():
+  # 代理或閘道在 200 時回 HTML，json() 會丟出 ValueError，要轉成可讀的錯誤
+  with pytest.raises(llm.LlmUnavailableError) as info:
+    llm.callModel("qwen2.5:3b", [], client=clientWith(lambda request: httpx.Response(200, text="<html>gateway</html>")))
+  assert info.value.message == "Ollama 的回應格式不正確"
+
+
+def testOllamaMissingMessageIsFormatError():
+  with pytest.raises(llm.LlmUnavailableError) as info:
+    llm.callModel("qwen2.5:3b", [], client=clientWith(lambda request: httpx.Response(200, json={})))
+  assert info.value.message == "Ollama 的回應格式不正確"
+
+
+def testCloudRetryExhaustionRaisesAfterThreeRetries(monkeypatch):
+  monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+  monkeypatch.setenv("OPENROUTER_MODELS", "m1")
+  replies = [httpx.Response(503, text="busy") for _ in range(3)]
+  waits = []
+
+  with pytest.raises(llm.LlmUnavailableError):
+    llm.callModel("m1", [], client=clientWith(lambda request: replies.pop(0)), sleep=waits.append)
+  assert waits == [2, 4]
+
+
+def testCloudErrorBodyEchoingKeyIsRedacted(monkeypatch):
+  monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-123456")
+  monkeypatch.setenv("OPENROUTER_MODELS", "m1")
+  body = "invalid key sk-test-123456"
+  with pytest.raises(llm.LlmUnavailableError) as info:
+    llm.callModel("m1", [], client=clientWith(lambda request: httpx.Response(400, text=body)))
+  assert "sk-test-123456" not in info.value.message
+  assert "***" in info.value.message
+
+
+def testSameIdInLocalAndCloudResolvesToOllama(monkeypatch):
+  monkeypatch.setenv("LOCAL_MODELS", "shared-model")
+  monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+  monkeypatch.setenv("OPENROUTER_MODELS", "shared-model")
+  assert llm.getProvider("shared-model") == "ollama"
+  assert llm.getProvider("anthropic/claude-haiku-5.5") == "ollama"

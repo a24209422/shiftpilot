@@ -50,14 +50,18 @@ def getOllamaConfig() -> dict:
   }
 
 
+def getLocalModels() -> list[str]:
+  defaultModel = getOllamaConfig()["model"]
+  return list(dict.fromkeys([defaultModel, *parseModelList(os.getenv("LOCAL_MODELS"))]))
+
+
 def getCloudConfig(provider: str) -> dict:
   config = cloudProviders[provider]
   return {"apiKey": os.getenv(config["apiKeyEnv"], "").strip(), "models": parseModelList(os.getenv(config["modelsEnv"]))}
 
 
 def listModels() -> list[dict]:
-  defaultModel = getOllamaConfig()["model"]
-  localModels = list(dict.fromkeys([defaultModel, *parseModelList(os.getenv("LOCAL_MODELS"))]))
+  localModels = getLocalModels()
   result = [{"id": model, "label": f"{model}（本機）", "remote": False} for model in localModels]
   seen = set(localModels)
   for provider, config in cloudProviders.items():
@@ -73,6 +77,9 @@ def listModels() -> list[dict]:
 
 
 def getProvider(model: str) -> str:
+  # 本機優先，和 listModels 的順序一致：同一個 id 同時出現在本機與雲端清單時，走本機
+  if model in getLocalModels():
+    return "ollama"
   # 只看清單、不看名稱有沒有斜線：Ollama 的模型名稱也可能是 hf.co/... 這種格式
   for provider in cloudProviders:
     cloud = getCloudConfig(provider)
@@ -85,12 +92,19 @@ def describeError(error: Exception, model: str, provider: str) -> str:
   if provider == "ollama":
     return f"無法呼叫 Ollama：{error}。請確認 Ollama 已啟動，且已下載 {model}。"
   config = cloudProviders[provider]
+  apiKey = getCloudConfig(provider)["apiKey"]
   response = getattr(error, "response", None)
   if response is None:
-    return f"無法呼叫 {config['label']}：{error}"
-  # 閘道錯誤常回整頁 HTML，只留開頭，畫面才不會被塞滿
-  detail = config["errorHints"].get(response.status_code, response.text[:300])
-  return f"無法呼叫 {config['label']}（HTTP {response.status_code}）：{detail}"
+    text = f"無法呼叫 {config['label']}：{error}"
+  else:
+    # 閘道錯誤常回整頁 HTML，只留開頭，畫面才不會被塞滿
+    raw = response.text[:300]
+    # 供應商可能把送出的 key 回顯在錯誤內容裡，遮掉後才能顯示到畫面上；命中 errorHints 時是我們自己寫的文字，不用處理
+    if apiKey:
+      raw = raw.replace(apiKey, "***")
+    detail = config["errorHints"].get(response.status_code, raw)
+    text = f"無法呼叫 {config['label']}（HTTP {response.status_code}）：{detail}"
+  return text
 
 
 def callOllama(client: httpx.Client, model: str, messages: list[dict]) -> str:
@@ -131,6 +145,7 @@ def callCloud(client: httpx.Client, provider: str, model: str, messages: list[di
 
 def callModel(model: str, messages: list[dict], client: httpx.Client | None = None, sleep=time.sleep) -> str:
   provider = getProvider(model)
+  label = "Ollama" if provider == "ollama" else cloudProviders[provider]["label"]
   ownClient = client is None
   client = client or httpx.Client()
   try:
@@ -139,6 +154,9 @@ def callModel(model: str, messages: list[dict], client: httpx.Client | None = No
     return callCloud(client, provider, model, messages, sleep)
   except httpx.HTTPError as error:
     raise LlmUnavailableError(describeError(error, model, provider))
+  # 2xx 但內容不是預期的 JSON 格式（例如代理回 HTML、缺 message 欄位）；只回格式錯誤，不把原始回應帶到畫面上
+  except (ValueError, KeyError, TypeError, AttributeError):
+    raise LlmUnavailableError(f"{label} 的回應格式不正確")
   finally:
     if ownClient:
       client.close()
