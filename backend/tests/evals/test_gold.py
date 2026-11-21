@@ -36,14 +36,14 @@ def testGoldSqlRunsAndMatchesSnapshot(world):
   for case in cases:
     try:
       results = gold.runGold(world, case)
-    except gold.GoldSqlError:
+    except Exception:
       failed.append(case["id"])
       continue
     if not results[0]:
       empty.append(case["id"])
     try:
       gold.checkSnapshot(case, results, snapshot)
-    except gold.SnapshotMismatchError:
+    except Exception:
       mismatched.append(case["id"])
   assert failed == [] and mismatched == []
   # 大部分題目要有資料，否則「模型回空結果」就會被算對
@@ -88,14 +88,34 @@ def testHeldoutGoldRunsAndMatchesSnapshot(world):
   for case in heldout:
     try:
       results = gold.runGold(world, case)
-    except gold.GoldSqlError:
+    except Exception:
       failed.append(case["id"])
       continue
     if not results[0]:
       empty.append(case["id"])
     try:
       gold.checkSnapshot(case, results, snapshot)
-    except gold.SnapshotMismatchError:
+    except Exception:
       mismatched.append(case["id"])
   assert failed == [] and mismatched == []
   assert len(empty) <= 2, empty
+
+
+def testWrongSandboxPasswordIsEnvironmentError(world):
+  import dataclasses
+  import re
+
+  # qaUrl 是 postgresql://帳號:密碼@主機:port/資料庫，只換掉密碼
+  badWorld = dataclasses.replace(world, qaUrl=re.sub(r"(://[^:]+:)[^@]+@", lambda match: match.group(1) + "wrong-pass@", world.qaUrl))
+  with pytest.raises(gold.SandboxUnavailableError) as info:
+    gold.runGold(badWorld, {"id": "x99", "asker": "employee", "goldSql": "SELECT 1"})
+  assert "x99" not in str(info.value) and "wrong-pass" not in str(info.value)
+
+
+def testGoldTimeoutStaysGoldError(world):
+  with pytest.raises(gold.GoldSqlError):
+    gold.runGold(world, {"id": "x98", "asker": "employee", "goldSql": "SELECT pg_sleep(10)"})
+
+
+def testWorldReprHidesPasswords(world):
+  assert "password" not in repr(world)

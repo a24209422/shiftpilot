@@ -3,6 +3,7 @@
 失敗時只回報題號：psycopg 的錯誤訊息會帶出 SQL 原文，test 題的 SQL 不能因為標準答案出錯而被印出來。
 """
 import json
+from contextlib import ExitStack
 from pathlib import Path
 
 import psycopg
@@ -19,6 +20,12 @@ class GoldSqlError(Exception):
   def __init__(self, caseIds: list[str]):
     super().__init__(f"標準答案執行失敗，題號：{', '.join(caseIds)}")
     self.caseIds = caseIds
+
+
+class SandboxUnavailableError(Exception):
+  # 訊息刻意不帶主機、網址與密碼，也不帶題號：這是環境問題，不是哪一題的標準答案壞了
+  def __init__(self):
+    super().__init__("沙盒連不上，請確認 QA_DB_PASSWORD 與 qa_sandbox 帳號")
 
 
 class SnapshotMismatchError(Exception):
@@ -43,17 +50,22 @@ def runGold(world: EvalWorld, case: dict) -> list[list[list]]:
   with openDb(world.url) as conn:
     data = sandbox.collectSandboxData(conn, world.actors[case["asker"]], fixedNow.date())
   results = []
-  try:
-    with sandbox.openSandbox(world.qaUrl, data) as sandboxConn:
+  with ExitStack() as stack:
+    # 連線失敗要跟 SQL 失敗分開：只有連線階段的 OperationalError 才算環境問題（逾時的 QueryCanceled 也是它的子類別，要留在標準答案錯誤）
+    try:
+      sandboxConn = stack.enter_context(sandbox.openSandbox(world.qaUrl, data))
+    except psycopg.OperationalError:
+      raise SandboxUnavailableError() from None
+    try:
       for sql in [case["goldSql"], *case.get("alsoAccept", [])]:
         _, rows, truncated = sandbox.runQuery(sandboxConn, sql)
         # 標準答案被截斷就無法比對完整結果，當成標準答案寫錯
         if truncated:
           raise GoldSqlError([case["id"]])
         results.append(rows)
-  except psycopg.Error:
-    # from None：不帶原本的例外，否則 traceback 照樣會印出 SQL
-    raise GoldSqlError([case["id"]]) from None
+    except psycopg.Error:
+      # from None：不帶原本的例外，否則 traceback 照樣會印出 SQL
+      raise GoldSqlError([case["id"]]) from None
   return results
 
 

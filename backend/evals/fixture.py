@@ -4,7 +4,7 @@
 """
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
@@ -46,8 +46,9 @@ employeeRows = [
 
 @dataclass
 class EvalWorld:
-  url: str
-  qaUrl: str
+  # repr=False：連線字串含密碼，pytest 失敗訊息或 traceback 不能印出來
+  url: str = field(repr=False)
+  qaUrl: str = field(repr=False)
   actors: dict[str, Actor]
 
 

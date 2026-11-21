@@ -122,9 +122,12 @@ def testFilterOnlyForDev():
     run.main(["--split", "test", "--filter", "org"])
 
 
-def testUnknownModelIsRejected():
-  with pytest.raises(SystemExit):
+def testUnknownModelIsRejected(monkeypatch):
+  # 不依賴 .env：loadEnv 換成空操作，模型清單由 OLLAMA_MODEL 決定
+  monkeypatch.setattr("evals.fixture.loadEnv", lambda: ("", ""))
+  with pytest.raises(SystemExit) as info:
     run.main(["--split", "dev", "--model", "gpt-x"])
+  assert info.value.code == 2
 
 
 def testSandboxUnavailableAbortsInsteadOfScoring(world, monkeypatch):

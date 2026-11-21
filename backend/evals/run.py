@@ -254,7 +254,7 @@ def main(argv=None) -> None:
     if args.filter and not selectCases(loadCases(args.split), args.filter):
       parser.error(f"--filter 沒有符合的題目：{args.filter}")
     runSplit(args.split, model, args.filter)
-  except (gold.GoldSqlError, gold.SnapshotMismatchError, EvalAbortError) as error:
+  except (gold.GoldSqlError, gold.SnapshotMismatchError, gold.SandboxUnavailableError, EvalAbortError) as error:
     print(error, file=sys.stderr)
     raise SystemExit(1)
 

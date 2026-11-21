@@ -50,17 +50,19 @@ docker compose exec app python -m app.cli seedDemo                              
 | 模型 | dev | test |
 |---|---|---|
 | qwen2.5:3b | 20/40 | 7/25 |
-| qwen3-vl:4b-instruct | 未量（記憶體不足） | 未量（記憶體不足） |
+| qwen3-vl:4b-instruct | 未量 | 未量 |
 
-（2026-11-22 起點分數，沒有改過任何 prompt。dev 各類別：組織 3/5、班表 4/8、誰有空 1/7、請假 6/8、會議 3/7、統計 3/5。）
+（2026-11-21 起點分數，沒有改過任何 prompt。dev 各類別：組織 3/5、班表 4/8、誰有空 1/7、請假 6/8、會議 3/7、統計 3/5。）
 
-執行（在 `backend/`，需要本機 Ollama；全部題目約 15～30 分鐘）：
+執行（在 `backend/`，需要本機 Ollama；dev 約 5～10 分鐘（3b））：
 
     python -m evals.run --split dev
     python -m evals.run --split test --model qwen3-vl:4b-instruct
     python -m evals.run --split dev --filter shift
 
-改了固定資料或沙盒邏輯導致標準答案改變時，執行器會停下並列出題號；確認改變是預期的，才執行 `python -m evals.run --split dev --update-snapshot`。
+4b 約需 3 GB 記憶體，要在終端機執行並先關掉其他程式。
+
+改了固定資料或沙盒邏輯導致標準答案改變時，執行器會停下並列出題號；確認改變是預期的，才執行 `python -m evals.run --split dev --update-snapshot` 或 `python -m evals.run --split test --update-snapshot`。
 
 已知限制：問答服務沒有告訴模型提問者是誰，所以評測題都用指名問法，量不到「我的假」這類問法。
 

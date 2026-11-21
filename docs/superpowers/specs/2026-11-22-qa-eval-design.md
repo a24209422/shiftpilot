@@ -164,3 +164,15 @@ python -m evals.run --split dev|test [--model 模型名稱] [--filter 類別或�
 - 固定資料裡的人名、部門名、會議標題
 - dev 每題的實際問法與標準答案寫法
 - 輸出的排版細節
+
+## 實作後補充
+
+- 新增結果類別 `error`（單題的意外例外或未預期的錯誤碼）：算在分母、計為答錯。
+- 環境問題（`EvalAbortError`、`gold.SandboxUnavailableError`：沙盒連不上、問答未設定）直接中止，不計分，訊息不含題號。
+- 計數用的 llm 對「回答句」那次直接回 `""`，不送給模型，只量 SQL。
+- 預檢：呼叫任何模型前先跑完所有標準答案與快照比對，一次列出全部有問題的題號（標準答案錯誤優先於快照不符）。
+- test 的 JSON 只存：`split`、`model`、`finishedAt`、`correct`、`scored`、`unavailable`、`score`、`complete`。
+- 中途中止也會存已完成的部分，`complete` 為 `false`。
+- `--update-snapshot` 不能搭配 `--filter` 或 `--model`；`--filter` 沒有符合任何題目視為錯誤。
+- 已知模糊：`blocked` 也包含「模型沒有產生 SQL」，之後做錯誤分析時再拆開。
+
