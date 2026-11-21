@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 
 import psycopg
@@ -33,7 +32,7 @@ def composeAnswer(llm, model: str, question: str, columns: list[str], rows: list
   except llmModule.LlmUnavailableError:
     # 回答句只是讓結果好讀；查詢已經成功，表格照樣給
     return fallback
-  answer = re.sub(r"<think>.*?</think>", "", reply or "", flags=re.DOTALL).strip()
+  answer = sqlguard.stripThink(reply).strip()
   return answer or fallback
 
 
@@ -49,6 +48,8 @@ def ask(
   if model not in models:
     raise AppError("QA_UNKNOWN_MODEL", "沒有這個模型", 422, {"field": "model"})
   data = sandbox.collectSandboxData(conn, actor, now.date())
+  # 資料已全部讀進記憶體；先結束交易，LLM 呼叫可能長達數分鐘，不能一直持有 ACCESS SHARE 鎖擋住遷移或 DDL
+  conn.commit()
   messages = prompt.buildSqlMessages(question, data, now)
   sql, lastError, result = "", "", None
   with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
@@ -63,7 +64,7 @@ def ask(
         lastError = describeSqlError(error)
         # 把錯誤訊息回饋給模型重試：小模型常拼錯欄位名稱，給它看錯誤通常一次就能修好
         messages = messages + [
-          {"role": "assistant", "content": reply},
+          {"role": "assistant", "content": reply or "（沒有輸出）"},
           {"role": "user", "content": f"這句 SQL 失敗了：{lastError}\n請修正後只輸出一句 SQL。"},
         ]
   if result is None:

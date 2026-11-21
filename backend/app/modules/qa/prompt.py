@@ -30,7 +30,7 @@ def buildDateReference(now: datetime) -> str:
     f"上週：{monday - timedelta(days=7)} ～ {monday - timedelta(days=1)}",
   ]
   relativeNames = {-1: "昨天", 0: "今天", 1: "明天", 2: "後天"}
-  for offset in range(-1, 14):
+  for offset in range(-14, 15):
     day = today + timedelta(days=offset)
     label = f"（{relativeNames[offset]}）" if offset in relativeNames else ""
     lines.append(f"{day} 星期{weekdayNames[day.weekday()]}{label}")

@@ -85,10 +85,14 @@ def cleanSql(sql: str) -> str:
   return "".join(out)
 
 
-def extractSql(text: str) -> str:
+def stripThink(text: str | None) -> str:
   # qwen3 這類推理模型會先輸出 <think> 區塊；沒有收尾的 <think> 代表後面都是推理過程，整段丟掉
   text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
-  text = re.sub(r"<think>.*", "", text, flags=re.DOTALL)
+  return re.sub(r"<think>.*", "", text, flags=re.DOTALL)
+
+
+def extractSql(text: str) -> str:
+  text = stripThink(text)
   fenced = re.search(r"```(?:sql)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
   if fenced:
     text = fenced.group(1)

@@ -18,6 +18,10 @@ def testModelsRequireLogin(qaClient):
   assert qaClient.get("/api/qa/models").status_code == 401
 
 
+def testAskRequiresLogin(qaClient):
+  assert qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b"}).status_code == 401
+
+
 def testModelsList(qaClient, loginAs):
   loginAs("employee", employee=True, client=qaClient)
   assert qaClient.get("/api/qa/models").json() == [{"id": "qwen2.5:3b", "label": "qwen2.5:3b（本機）", "remote": False}]
@@ -31,6 +35,8 @@ def testAskEndToEndWithFakeModel(qaClient, loginAs, monkeypatch):
   assert response.status_code == 200, response.text
   body = response.json()
   assert body["answer"] == "有一位員工。" and body["columns"] == ["name"] and len(body["rows"]) == 1
+  assert body["sql"] == "SELECT name FROM employees" and body["remote"] is False
+  assert set(body["window"]) == {"from", "to"}
 
 
 def testAskModelUnavailableIs503(qaClient, loginAs, monkeypatch):
