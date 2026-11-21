@@ -9,10 +9,11 @@ forbiddenKeywords = re.compile(
 )
 # FOR UPDATE 會鎖列，FOR SHARE / FOR KEY SHARE 也會鎖列，都不該出現在唯讀查詢
 forbiddenLocking = re.compile(r"\bfor\s+(no\s+key\s+update|share|key\s+share)\b", re.IGNORECASE)
+# ts_stat / ts_rewrite 會把字串參數當 SQL 執行，而檢查時字串內容已被清掉，所以函式本身必須擋；pg_sleep_for 等變體用 \w* 一併涵蓋
 # 底線是字元的一部分，\bset\b 擋不到 set_config，所以函式另外列；不要求後面接括號，避免 /**/ 或引號繞過
 forbiddenFunctions = re.compile(
   r"\b(set_config|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_\w+|dblink\w*"
-  r"|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|setval|nextval|currval|pg_notify|pg_sleep"
+  r"|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|setval|nextval|currval|pg_notify|pg_sleep\w*|ts_stat|ts_rewrite"
   r"|pg_advisory\w*|query_to_xml\w*|pg_ls_\w+|table_to_xml\w*|cursor_to_xml|database_to_xml\w*|schema_to_xml\w*)\b",
   re.IGNORECASE,
 )

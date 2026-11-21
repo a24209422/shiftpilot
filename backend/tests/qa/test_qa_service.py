@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from urllib.parse import urlsplit, urlunsplit
+
 import psycopg
 import pytest
 
@@ -94,6 +96,14 @@ def testAnswerFallsBackWhenSecondCallFails(world):
 def testEmptyResultAnswerStillComesFromModel(world):
   result = ask(world, scripted("SELECT name FROM employees WHERE name = 'nobody'", "查無資料。"))
   assert result["rows"] == [] and result["answer"] == "查無資料。"
+
+
+def testSandboxLoginFailureIs503WithoutLeakingDetails(world):
+  parts = urlsplit(world.qaUrl)
+  badUrl = urlunsplit(parts._replace(netloc=f"{parts.username}:wrongpassword@{parts.hostname}:{parts.port}" if parts.port else f"{parts.username}:wrongpassword@{parts.hostname}"))
+  error = expectError("QA_SANDBOX_UNAVAILABLE", ask, world, scripted("SELECT 1"), qaUrl=badUrl)
+  assert error.status == 503
+  assert parts.hostname not in error.message and "wrongpassword" not in error.message and "password authentication" not in error.message
 
 
 def testNotConfigured(world):

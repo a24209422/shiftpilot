@@ -118,7 +118,7 @@ def testOtherAskersQueriesAreNotVisible(sandbox, qaSandboxUrl, migratedUrl):
     runQuery(other, f"SELECT '{marker}' AS x")
     seen = runQuery(sandbox.conn, "SELECT query FROM pg_stat_activity")[1]
     assert not any(marker in str(row[0]) for row in seen)
-    inserted = runQuery(sandbox.conn, "SELECT coalesce(sum(n_tup_ins), 0) FROM pg_stat_all_tables WHERE relname = 'leave_requests'")[1]
+    inserted = runQuery(sandbox.conn, "SELECT coalesce(sum(n_tup_ins), 0) FROM pg_stat_all_tables WHERE relname = 'leave_requests' AND schemaname LIKE 'pg_temp%'")[1]
     assert inserted[0][0] == 0
 
 

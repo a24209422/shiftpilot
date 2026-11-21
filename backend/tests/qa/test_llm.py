@@ -115,6 +115,18 @@ def testCloudErrorBodyEchoingKeyIsRedacted(monkeypatch):
   assert "***" in info.value.message
 
 
+def testKeyStraddlingTruncationBoundaryIsFullyRedacted(monkeypatch):
+  key = "sk-test-123456"
+  monkeypatch.setenv("OPENROUTER_API_KEY", key)
+  monkeypatch.setenv("OPENROUTER_MODELS", "m1")
+  # key 從第 295 個字元開始，會跨過 300 的截斷邊界
+  body = "x" * 295 + key + "tail"
+  with pytest.raises(llm.LlmUnavailableError) as info:
+    llm.callModel("m1", [], client=clientWith(lambda request: httpx.Response(400, text=body)))
+  assert "sk-te" not in info.value.message
+  assert "***" in info.value.message
+
+
 def testSameIdInLocalAndCloudResolvesToOllama(monkeypatch):
   monkeypatch.setenv("LOCAL_MODELS", "shared-model")
   monkeypatch.setenv("OPENROUTER_API_KEY", "key")

@@ -41,6 +41,11 @@ def collect(w, actor):
     return collectSandboxData(conn, actor, today)
 
 
+def parseTime(value):
+  # listCalendar 已經把時間轉成 ISO 字串，和沙盒的 datetime 比較前要先轉回來
+  return value if isinstance(value, datetime) else datetime.fromisoformat(value)
+
+
 def leaveRows(data):
   # 欄位順序：id, employee_id, leave_type, start_at, end_at, hours, status, reason
   return {row[0]: row for row in data.rows["leave_requests"]}
@@ -84,6 +89,35 @@ def testBusyPeriodsHaveMeetingsAndLeaveSegments(world):
   assert (world.alice, datetime(2026, 11, 24, 9), datetime(2026, 11, 24, 12), "leave", "請假（待核准）") in busy
   assert (world.alice, datetime(2026, 11, 24, 13), datetime(2026, 11, 24, 18), "leave", "請假（待核准）") in busy
   assert not any(row[0] == world.bob and row[3] == "leave" for row in busy)
+
+
+def testOutOfWindowLeaveIsExcludedFromLeaveAndBusy(world):
+  with openDb(world.url) as conn:
+    leaveRequests.createRequest(conn, world.aliceActor, leaveRequests.LeaveInput(
+      world.types["personal"], datetime(2027, 6, 1, 9), datetime(2027, 6, 1, 18), "遠期",
+    ), now)
+  data = collect(world, world.hrActor)
+  assert not any(row[3].year == 2027 and row[3].month == 6 for row in data.rows["leave_requests"])
+  assert not any(row[1].year == 2027 and row[1].month == 6 for row in data.rows["busy_periods"])
+
+
+def testBusyLeaveSegmentsMatchCalendarSegmentsAcrossWeekend(world):
+  # 2026-11-27 是週五、11-30 是週一：週末不上班，片段要和時間軸一致
+  with openDb(world.url) as conn:
+    leaveRequests.createRequest(conn, world.aliceActor, leaveRequests.LeaveInput(
+      world.types["personal"], datetime(2026, 11, 27, 9), datetime(2026, 11, 30, 18), "連假",
+    ), now)
+    calendar = leaveRequests.listCalendar(conn, world.hrActor, datetime(2026, 11, 20), datetime(2026, 12, 20))
+  expected = sorted(
+    (world.alice, parseTime(segment["startAt"]), parseTime(segment["endAt"]))
+    for item in calendar if item["employeeId"] == world.alice
+    for segment in item["segments"]
+  )
+  busy = collect(world, world.hrActor).rows["busy_periods"]
+  actual = sorted((row[0], row[1], row[2]) for row in busy if row[0] == world.alice and row[3] == "leave")
+  assert actual == expected
+  assert any(start.date() == date(2026, 11, 27) for _, start, _ in actual) and any(start.date() == date(2026, 11, 30) for _, start, _ in actual)
+  assert not any(start.date() in (date(2026, 11, 28), date(2026, 11, 29)) for _, start, _ in actual)
 
 
 def testOutOfWindowBookingsAreExcluded(world):

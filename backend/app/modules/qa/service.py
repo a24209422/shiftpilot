@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 import psycopg
@@ -8,6 +9,7 @@ from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
 from app.modules.qa import prompt, sandbox, sqlguard
 
+logger = logging.getLogger(__name__)
 maxQuestionLength = 300
 
 
@@ -52,21 +54,30 @@ def ask(
   conn.commit()
   messages = prompt.buildSqlMessages(question, data, now)
   sql, lastError, result = "", "", None
-  with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
-    for _ in range(2):
-      reply = callLlm(llm, model, messages)
-      sql = sqlguard.extractSql(reply)
-      try:
-        sqlguard.validateSql(sql)
-        result = sandbox.runQuery(sandboxConn, sql)
-        break
-      except (sqlguard.UnsafeSqlError, psycopg.Error) as error:
-        lastError = describeSqlError(error)
-        # 把錯誤訊息回饋給模型重試：小模型常拼錯欄位名稱，給它看錯誤通常一次就能修好
-        messages = messages + [
-          {"role": "assistant", "content": reply or "（沒有輸出）"},
-          {"role": "user", "content": f"這句 SQL 失敗了：{lastError}\n請修正後只輸出一句 SQL。"},
-        ]
+  try:
+    with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
+      for _ in range(2):
+        reply = callLlm(llm, model, messages)
+        sql = sqlguard.extractSql(reply)
+        try:
+          sqlguard.validateSql(sql)
+          result = sandbox.runQuery(sandboxConn, sql)
+          break
+        except (sqlguard.UnsafeSqlError, psycopg.Error) as error:
+          lastError = describeSqlError(error)
+          # 把錯誤訊息回饋給模型重試：小模型常拼錯欄位名稱，給它看錯誤通常一次就能修好
+          messages = messages + [
+            {"role": "assistant", "content": reply or "（沒有輸出）"},
+            {"role": "user", "content": f"這句 SQL 失敗了：{lastError}\n請修正後只輸出一句 SQL。"},
+          ]
+  except psycopg.OperationalError:
+    # 迴圈內的資料庫錯誤都已被接住，能走到這裡的只有開沙盒連線失敗；例外文字可能含主機與 port，只寫進伺服器 log
+    logger.exception("問答沙盒連線失敗")
+    raise AppError(
+      "QA_SANDBOX_UNAVAILABLE",
+      "問答沙盒帳號連不上：請確認 .env 的 QA_DB_PASSWORD 與資料庫裡的 qa_sandbox 帳號一致（見 README 的「問答」）",
+      503,
+    )
   if result is None:
     raise AppError("QA_QUERY_FAILED", f"查詢失敗：{lastError}", 422, {"sql": sql, "error": lastError})
   columns, rows, truncated = result

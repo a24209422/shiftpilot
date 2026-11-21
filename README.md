@@ -34,10 +34,12 @@ docker compose exec app python -m app.cli seedDemo                              
    docker compose exec -T postgres sh /docker-entrypoint-initdb.d/02-create-qa-user.sh
    ```
 
-   這個 script 也會替帳號關掉 `track_activities` 與 `track_counts`（避免不同提問者從 `pg_stat_activity` 看到彼此的 SQL）；較早建立帳號的資料庫重跑一次即可套用。
+   這個 script 每次都會把帳號密碼重設成 `.env` 的 `QA_DB_PASSWORD`（改密碼後重跑即可同步），也會替帳號關掉 `track_activities` 與 `track_counts`（避免不同提問者從 `pg_stat_activity` 看到彼此的 SQL）；較早建立帳號的資料庫重跑一次即可套用。
 
 2. 本機開好 Ollama，下載 `.env` 的 `OLLAMA_MODEL`（例如 `ollama pull qwen2.5:3b`）。
 3. `docker compose up -d --build --wait`。
+
+已知限制：沙盒帳號仍讀得到資料庫的中繼資料（真實資料表的列數統計、函式原始碼），但讀不到任何資料列。
 
 沒設定 `QA_DB_PASSWORD` 時問答會停用，其他功能照常。用雲端模型時（`OPENROUTER_API_KEY`、`GOOGLE_AI_API_KEY`），問題與查詢結果會送到廠商。
 

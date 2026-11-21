@@ -98,10 +98,12 @@ def describeError(error: Exception, model: str, provider: str) -> str:
     text = f"無法呼叫 {config['label']}：{error}"
   else:
     # 閘道錯誤常回整頁 HTML，只留開頭，畫面才不會被塞滿
-    raw = response.text[:300]
+    raw = response.text
     # 供應商可能把送出的 key 回顯在錯誤內容裡，遮掉後才能顯示到畫面上；命中 errorHints 時是我們自己寫的文字，不用處理
     if apiKey:
       raw = raw.replace(apiKey, "***")
+    # 先遮 key 再截斷：key 若剛好跨過 300 字的邊界，先截斷會留下半截 key
+    raw = raw[:300]
     detail = config["errorHints"].get(response.status_code, raw)
     text = f"無法呼叫 {config['label']}（HTTP {response.status_code}）：{detail}"
   return text
