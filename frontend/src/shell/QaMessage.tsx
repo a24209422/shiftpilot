@@ -6,14 +6,19 @@ export type ChatEntry =
   | { id: number; kind: "answer"; result: QaAnswer }
   | { id: number; kind: "error"; message: string; sql: string | null };
 
-const cellText = (value: unknown) => (value === null || value === undefined ? "—" : String(value));
+// 物件與陣列直接 String() 會變成 [object Object]，改用 JSON 才看得出內容
+const cellText = (value: unknown) => {
+  if (value === null || value === undefined) return "—";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+};
 
 function ResultTable({ result }: { result: QaAnswer }) {
   if (result.columns.length === 0) return <div className="empty">沒有資料</div>;
   return (
     <div className="qaTable">
       <table>
-        <thead><tr>{result.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+        <thead><tr>{/* SELECT a.name, b.name 會有同名欄位，key 要帶順序 */}
+          {result.columns.map((column, index) => <th key={`${index}-${column}`} scope="col">{column}</th>)}</tr></thead>
         <tbody>
           {result.rows.map((row, rowIndex) => (
             <tr key={rowIndex}>{row.map((value, columnIndex) => <td key={columnIndex}>{cellText(value)}</td>)}</tr>

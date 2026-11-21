@@ -448,7 +448,7 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .chatInput { flex: 1; min-width: 0; resize: none; border: 1px solid var(--ink); background: var(--base-100); color: var(--ink); padding: 9px 11px; font: 14px/1.5 var(--font-display); }
 .chatInput:focus-visible, .chatModel:focus-visible, .chatSend:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chatFormRow { display: flex; align-items: stretch; gap: 10px; }
-.chatFormBar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.chatFormBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 .chatModel { min-width: 0; max-width: 100%; border: 1px solid var(--ink); background: var(--base-100); color: var(--ink); padding: 8px 10px; font: 12px var(--font-accent); }
 .chatSend { display: flex; align-items: center; justify-content: center; flex: none; width: 44px; border: 1px solid var(--ink); background: var(--ink); color: var(--base-100); padding: 0; cursor: pointer; }
 .chatSend:hover { background: color-mix(in oklch, var(--ink) 80%, var(--base-100)); }
@@ -486,5 +486,6 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .qaTable table { border-collapse: collapse; font-size: 12px; }
 .qaTable th, .qaTable td { border: 1px solid var(--rule); padding: 3px 6px; text-align: left; white-space: nowrap; }
 .qaSql { white-space: pre-wrap; font-size: 11px; margin: 6px 0 0; }
-.qaError { border-color: var(--stamp); }
+/* 要比 .msg.bot .bubble 的邊框更具體才蓋得過去 */
+.msg.bot .bubble.qaError { border-color: var(--stamp); }
 .chatNote { font: 11px var(--font-accent); color: var(--base-300); }

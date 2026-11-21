@@ -26,17 +26,22 @@ export function SidePanel() {
   const [question, setQuestion] = useState("");
   const { can, isLoading: permissionsLoading } = usePermissions();
   const canAsk = can("qa.ask");
-  const { data: models } = useQuery({ queryKey: ["qa", "models"], queryFn: () => apiGet<QaModel[]>("/api/qa/models"), enabled: canAsk });
+  const { data: models, isLoading: modelsLoading } = useQuery({ queryKey: ["qa", "models"], queryFn: () => apiGet<QaModel[]>("/api/qa/models"), enabled: canAsk });
   const [model, setModel] = useState("");
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [asking, setAsking] = useState(false);
   const nextId = useRef(1);
+  // state 要等下一次 render 才更新，連按兩次時用 ref 才擋得住第二次
+  const askingRef = useRef(false);
 
   // 模型清單載入後預設第一個（後端把 .env 的 OLLAMA_MODEL 放第一）
   useEffect(() => {
-    if (models && models.length > 0 && !models.some((item) => item.id === model)) setModel(models[0].id);
+    // 新清單不含目前選的模型（含清單變空）就重設，免得送出已經不存在的模型
+    if (!models) return;
+    if (!models.some((item) => item.id === model)) setModel(models[0]?.id ?? "");
   }, [models, model]);
+  const noModels = canAsk && !modelsLoading && (models?.length ?? 0) === 0;
 
   const selected = models?.find((item) => item.id === model);
   const today = new Date();
@@ -45,11 +50,12 @@ export function SidePanel() {
   async function onSend(event: FormEvent) {
     event.preventDefault();
     const text = question.trim();
-    if (!text || !canAsk || !model || asking) return;
+    if (!text || !canAsk || !model || askingRef.current) return;
     const questionId = nextId.current++;
     const pendingId = nextId.current++;
     setEntries((current) => [...current, { id: questionId, kind: "question", text }, { id: pendingId, kind: "pending" }]);
     setQuestion("");
+    askingRef.current = true;
     setAsking(true);
     try {
       const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", { question: text, model });
@@ -60,6 +66,7 @@ export function SidePanel() {
       const sql = (error.details as { sql?: string } | null)?.sql ?? null;
       setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "error", message: error.message, sql } : entry)));
     } finally {
+      askingRef.current = false;
       setAsking(false);
     }
   }
@@ -126,7 +133,7 @@ export function SidePanel() {
               </button>
             </div>
           </header>
-          <div className="chatLog">
+          <div className="chatLog" role="log" aria-live="polite">
             <div className="msg bot">
               <div className="msgMeta">DESK</div>
               {/* 權限還在載入時先顯示說明，免得有權限的人先閃過一句「沒有權限」 */}
@@ -144,12 +151,13 @@ export function SidePanel() {
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
                 }}
               />
-              <button className="chatSend" type="submit" aria-label="送出" title="送出" disabled={!canAsk || asking}><Icon name="arrowUp" size={20} /></button>
+              <button className="chatSend" type="submit" aria-label="送出" title="送出" disabled={!canAsk || asking || !model}><Icon name="arrowUp" size={20} /></button>
             </div>
             <div className="chatFormBar">
               <select className="chatModel" aria-label="模型" value={model} onChange={(event) => setModel(event.target.value)} disabled={!canAsk}>
                 {(models ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
+              {noModels && <div className="chatNote">目前沒有可用的模型</div>}
               {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}
               <div className="chatNote">資料範圍：{formatDay(shownRange.from)} ～ {formatDay(shownRange.to)}</div>
             </div>
