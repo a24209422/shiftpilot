@@ -21,10 +21,11 @@ def testConcurrentBookingsOfSameResourceOnlyOneSucceeds(migratedUrl):
       actors.append(insertActor(conn, "employee", f"{number}@example.com", employee["id"]))
     resourceIds = [service.createResource(conn, admin, {"name": f"會議室{n}", "kind": "room"})["id"] for n in range(10)]
 
+  weekdays = [d for d in (date(2026, 12, 1) + timedelta(days=n) for n in range(20)) if d.weekday() < 5][:10]
   for roundNumber, resourceId in enumerate(resourceIds):
     # 每輪用不同的日期：同一批員工不能每輪都在同一個時段，否則會先被參加者警告擋住，測不到資源撞期
     # 還要避開週末：沒排班的人在休息日也會先被不在班的警告擋住
-    day = date(2026, 12, 1) + timedelta(days=roundNumber + 2 * (roundNumber // 5))
+    day = weekdays[roundNumber]
     barrier = threading.Barrier(2)
     outcomes = [None, None]
 

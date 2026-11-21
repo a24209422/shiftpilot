@@ -60,7 +60,10 @@ def testManagerSchedulesSubordinateAndScheduleReflectsIt(world):
   # 只能刪還沒生效的班表；用很遠的日期，測試哪天跑都一樣
   future = world.bossClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2030-01-07"}).json()
   assert world.bossClient.delete(f"/api/shift/rosters/{future['id']}").status_code == 204
-  response = world.bossClient.delete(f"/api/shift/rosters/{created.json()['id']}")
+  # 已生效的班表用固定的過去日期，不隨測試執行的日期變動
+  past = world.bossClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2026-01-05"})
+  assert past.status_code == 201, past.text
+  response = world.bossClient.delete(f"/api/shift/rosters/{past.json()['id']}")
   assert response.status_code == 409 and errorOf(response)["code"] == "ROSTER_ALREADY_EFFECTIVE"
 
 
