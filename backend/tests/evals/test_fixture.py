@@ -1,4 +1,5 @@
-from datetime import date
+from collections import Counter
+from datetime import date, datetime
 
 import pytest
 
@@ -80,10 +81,93 @@ def testShiftsHolidayAndOvernight(world):
   assert shifts[(employeeIds["林小美"], date(2026, 11, 27))][2] is None
 
 
+def leaveOf(world, name, start):
+  data = sandboxFor(world, "hr")
+  employeeIds = {row[2]: row[0] for row in data.rows["employees"]}
+  return next(row for row in data.rows["leave_requests"] if row[1] == employeeIds[name] and row[3] == start)
+
+
+def testPartialDayLeaveHours(world):
+  assert leaveOf(world, "吳宗翰", datetime(2026, 11, 10, 9))[5] == 2
+  assert leaveOf(world, "劉怡君", datetime(2026, 11, 9, 7))[5] == 4
+  assert leaveOf(world, "許淑芬", datetime(2026, 11, 13, 9))[5] == 6
+  assert leaveOf(world, "李佳穎", datetime(2026, 11, 12, 14))[5] == 2
+  assert all(leaveOf(world, name, start)[6] == "approved" for name, start in [
+    ("吳宗翰", datetime(2026, 11, 10, 9)), ("劉怡君", datetime(2026, 11, 9, 7)), ("許淑芬", datetime(2026, 11, 13, 9)),
+  ])
+
+
+def testMidnightCrossingLeave(world):
+  row = leaveOf(world, "鄭家豪", datetime(2026, 11, 18, 22))
+  assert row[4] == datetime(2026, 11, 19, 7) and row[6] == "pending"
+
+
+def testMultiDayLeaveSkipsWeekendAndHoliday(world):
+  # 11-26 ～ 11-30 跨週末與 11-27 假日，只算 11-26 與 11-30 兩個工作天
+  assert leaveOf(world, "林小美", datetime(2026, 11, 26, 9))[5] == 16
+  assert leaveOf(world, "陳大文", datetime(2026, 11, 2, 9))[5] == 24
+
+
+def testPastApprovedLeaveInLastWeek(world):
+  pastWeek = [
+    row for row in sandboxFor(world, "hr").rows["leave_requests"]
+    if row[6] == "approved" and date(2026, 11, 9) <= row[3].date() <= date(2026, 11, 15)
+  ]
+  assert len(pastWeek) >= 2
+
+
+def testEmployeeAskerOwnsApprovedAndPendingLeave(world):
+  data = sandboxFor(world, "employee")
+  ownId = world.actors["employee"].employeeId
+  assert {row[6] for row in data.rows["leave_requests"] if row[1] == ownId} >= {"approved", "pending"}
+
+
+def testOverrideWorkOnRestDay(world):
+  data = sandboxFor(world, "employee")
+  employeeIds = {row[2]: row[0] for row in data.rows["employees"]}
+  saturday = next(row for row in data.rows["day_shifts"] if row[0] == employeeIds["李佳穎"] and row[1] == date(2026, 11, 21))
+  assert saturday[2] == "標準班" and saturday[7] == "override"
+
+
+def testPastHolidayInWindow(world):
+  assert (date(2026, 10, 9), "holiday", "國慶日") in sandboxFor(world, "employee").rows["calendar_days"]
+
+
+def testBookingTitlesAreUniqueAndAttendanceHasClearTop(world):
+  data = sandboxFor(world, "employee")
+  titles = [row[1] for row in data.rows["bookings"]]
+  assert len(titles) == len(set(titles))
+  counts = Counter(row[1] for row in data.rows["booking_participants"])
+  ranked = counts.most_common()
+  assert ranked[0][1] > ranked[1][1] > ranked[2][1]
+  assert ranked[0][0] == next(row[0] for row in data.rows["employees"] if row[2] == "陳大文")
+  assert len(counts) < 11
+
+
+def testNoOneIsBookedOutsideShiftOrDuringLeave(world):
+  data = sandboxFor(world, "hr")
+  windows: dict[int, list[tuple[datetime, datetime]]] = {}
+  for employeeId, _day, shiftName, startAt, endAt, breakStart, breakEnd, _source in data.rows["day_shifts"]:
+    if shiftName is None:
+      continue
+    # 休息時段不算上班，會議要整段落在休息前或休息後
+    segments = [(startAt, breakStart), (breakEnd, endAt)] if breakStart else [(startAt, endAt)]
+    windows.setdefault(employeeId, []).extend(segments)
+  bookings = {row[0]: row for row in data.rows["bookings"]}
+  for bookingId, employeeId, _role in data.rows["booking_participants"]:
+    startAt, endAt = bookings[bookingId][3], bookings[bookingId][4]
+    assert any(a <= startAt and endAt <= b for a, b in windows.get(employeeId, [])), bookings[bookingId][1]
+    for leave in data.rows["leave_requests"]:
+      if leave[1] == employeeId and leave[6] in ("pending", "approved"):
+        assert not (leave[3] < endAt and leave[4] > startAt), bookings[bookingId][1]
+
+
 def testFixtureIsDeterministic():
   def snapshot():
     with openEvalWorld() as w:
-      data = sandboxFor(w, "hr")
-      return {name: sorted(map(repr, rows)) for name, rows in data.rows.items()}
+      return {
+        asker: {name: list(map(repr, rows)) for name, rows in sandboxFor(w, asker).rows.items()}
+        for asker in askerNames
+      }
 
   assert snapshot() == snapshot()

@@ -56,7 +56,7 @@ def loadEnv() -> tuple[str, str]:
   testUrl = os.getenv("TEST_DATABASE_URL", "").strip()
   password = os.getenv("QA_DB_PASSWORD", "").strip()
   if not testUrl or not password:
-    raise SystemExit("請在 .env 設定 TEST_DATABASE_URL 與 QA_DB_PASSWORD，並建立 qa_sandbox 帳號（見根目錄 README 的「問答」）")
+    raise SystemExit("請先 docker compose up -d 啟動資料庫，並在 .env 設定 TEST_DATABASE_URL 與 QA_DB_PASSWORD，建立 qa_sandbox 帳號（見根目錄 README 的「問答」）")
   return testUrl, buildQaDatabaseUrl(testUrl, password)
 
 
@@ -117,6 +117,8 @@ def buildShifts(conn, admin: Actor, ids: dict[str, int]) -> None:
     shiftService.upsertOverride(conn, admin, {
       "employeeId": ids[name], "day": day, "shiftTypeId": types[code] if code else None, "note": note,
     }, fixedNow)
+  # 過去的假日：沙盒區間內要有已經過去的假日，才問得出「上個月放過幾天假」
+  orgService.upsertCalendarDay(conn, admin, date(2026, 10, 9), "holiday", "國慶日")
   orgService.upsertCalendarDay(conn, admin, date(2026, 11, 27), "holiday", "公司創立紀念日")
   orgService.upsertCalendarDay(conn, admin, date(2026, 12, 5), "makeup_workday", "補班日")
 
@@ -131,15 +133,22 @@ def buildBookings(conn, actors: dict[str, Actor], ids: dict[str, int]) -> None:
   bookings = {}
   # (標題, 分類, 主辦, 日期, 開始, 結束, 資源, 參加者)
   for title, category, organizer, day, start, end, resourceNames, attendees in [
-    ("工程部週會", "會議", "陳大文", "2026-11-10", 10, 11, ["A 會議室"], ["林小美"]),
-    ("工程部週會", "會議", "陳大文", "2026-11-17", 10, 11, ["A 會議室"], ["林小美", "黃志強", "劉怡君", "鄭家豪"]),
-    ("專案啟動會", "會議", "林小美", "2026-11-17", 16, 17, ["A 會議室"], ["陳大文", "黃志強"]),
-    ("需求訪談", "會議", "王建國", "2026-11-18", 14, 15, ["B 會議室", "投影機"], ["李佳穎", "林小美"]),
+    ("月會", "會議", "蔡明哲", "2026-11-09", 14, 15, ["A 會議室"], ["陳大文", "王建國", "張雅婷", "許淑芬", "林小美"]),
+    ("工程部週會 11/10", "會議", "陳大文", "2026-11-10", 10, 11, ["A 會議室"], ["林小美", "劉怡君"]),
+    ("業務週會 11/12", "會議", "王建國", "2026-11-12", 10, 11, ["B 會議室"], ["吳宗翰", "李佳穎"]),
+    ("程式碼審查", "會議", "林小美", "2026-11-13", 14, 15, ["B 會議室"], ["陳大文", "黃志強", "劉怡君"]),
+    ("工程部週會 11/17", "會議", "陳大文", "2026-11-17", 10, 11, ["A 會議室"], ["林小美", "劉怡君"]),
+    ("專案啟動會", "會議", "林小美", "2026-11-17", 16, 17, ["A 會議室"], ["陳大文", "吳宗翰", "張雅婷"]),
+    ("簡報彩排", "會議", "李佳穎", "2026-11-18", 13, 15, ["投影機"], ["吳宗翰"]),
     ("客戶拜訪", "外出", "吳宗翰", "2026-11-19", 9, 12, ["公務車"], []),
+    ("需求訪談", "會議", "王建國", "2026-11-20", 14, 15, ["B 會議室", "投影機"], ["李佳穎", "林小美"]),
     ("預算討論", "會議", "王建國", "2026-11-20", 10, 11, ["A 會議室"], ["陳大文"]),
-    ("工程部週會", "會議", "陳大文", "2026-11-24", 10, 11, ["A 會議室"], ["林小美", "黃志強", "劉怡君", "鄭家豪"]),
+    ("工程部週會 11/24", "會議", "陳大文", "2026-11-24", 10, 11, ["A 會議室"], ["林小美", "劉怡君"]),
     ("季度檢討", "會議", "陳大文", "2026-11-24", 15, 17, ["A 會議室"], ["王建國", "張雅婷", "李佳穎"]),
-    ("新人訓練", "訓練", "張雅婷", "2026-11-25", 9, 12, ["B 會議室", "投影機"], ["吳宗翰", "劉怡君"]),
+    ("新人訓練", "訓練", "張雅婷", "2026-11-25", 9, 12, ["B 會議室", "投影機"], ["吳宗翰", "許淑芬"]),
+    ("供應商拜訪", "外出", "張雅婷", "2026-11-26", 9, 12, ["公務車"], ["許淑芬"]),
+    ("下週規劃", "會議", "陳大文", "2026-11-30", 15, 16, ["A 會議室"], ["王建國", "蔡明哲", "許淑芬"]),
+    ("招募面談", "會議", "張雅婷", "2026-12-01", 10, 11, ["B 會議室"], ["陳大文", "吳宗翰"]),
   ]:
     created = bookingService.createBooking(conn, actors[organizer], BookingInput(
       title, category, at(day, start), at(day, end), [resources[name] for name in resourceNames],
@@ -172,6 +181,14 @@ def buildLeave(conn, actors: dict[str, Actor], ids: dict[str, int]) -> None:
   approve(cancelled, "王建國")
   leaveRequests.cancelRequest(conn, actors["李佳穎"], cancelled, fixedNow)
   approve(request("王建國", "annual", at("2026-10-05", 9), at("2026-10-05", 18), "陪家人"), "admin")
+  # 不同時數的部分請假（2、4、6 小時）與多天請假，分散在各部門；其中兩筆落在上週
+  approve(request("吳宗翰", "personal", at("2026-11-10", 9), at("2026-11-10", 11), "辦手續"), "王建國")
+  approve(request("李佳穎", "personal", at("2026-11-12", 14), at("2026-11-12", 16), "銀行辦事"), "王建國")
+  approve(request("劉怡君", "sick", at("2026-11-09", 7), at("2026-11-09", 11), "牙科"), "陳大文")
+  approve(request("許淑芬", "sick", at("2026-11-13", 9), at("2026-11-13", 16), "感冒"), "蔡明哲")
+  approve(request("陳大文", "annual", at("2026-11-02", 9), at("2026-11-04", 18), "家族旅行"), "蔡明哲")
+  # 李佳穎也有一筆待核准的假
+  request("李佳穎", "annual", at("2026-12-03", 9), at("2026-12-03", 18), "家人聚會")
   # 範圍外（沙盒從 2026-08-19 開始）
   approve(request("張雅婷", "personal", at("2026-06-01", 9), at("2026-06-01", 18), "搬家"), "admin")
   # 大夜班跨午夜的假，待核准
