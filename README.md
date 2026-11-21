@@ -43,6 +43,27 @@ docker compose exec app python -m app.cli seedDemo                              
 
 沒設定 `QA_DB_PASSWORD` 時問答會停用，其他功能照常。用雲端模型時（`OPENROUTER_API_KEY`、`GOOGLE_AI_API_KEY`），問題與查詢結果會送到廠商。
 
+## 問答準確率
+
+評測集在 `backend/evals/`：固定的公司資料（「現在」固定在 2026-11-17 星期二 14:30）、dev 40 題、test 25 題，每題指定提問者（一般員工、主管或人資）。比的是模型 SQL 跟標準答案 SQL 的執行結果；test 題由另一個 agent 出題後凍結，調整 prompt 時只看 dev，test 只看總分。
+
+| 模型 | dev | test |
+|---|---|---|
+| qwen2.5:3b | 20/40 | 7/25 |
+| qwen3-vl:4b-instruct | 未量（記憶體不足） | 未量（記憶體不足） |
+
+（2026-11-22 起點分數，沒有改過任何 prompt。dev 各類別：組織 3/5、班表 4/8、誰有空 1/7、請假 6/8、會議 3/7、統計 3/5。）
+
+執行（在 `backend/`，需要本機 Ollama；全部題目約 15～30 分鐘）：
+
+    python -m evals.run --split dev
+    python -m evals.run --split test --model qwen3-vl:4b-instruct
+    python -m evals.run --split dev --filter shift
+
+改了固定資料或沙盒邏輯導致標準答案改變時，執行器會停下並列出題號；確認改變是預期的，才執行 `python -m evals.run --split dev --update-snapshot`。
+
+已知限制：問答服務沒有告訴模型提問者是誰，所以評測題都用指名問法，量不到「我的假」這類問法。
+
 ## 開發
 
 - 後端（FastAPI + PostgreSQL）：見 `backend/README.md`
