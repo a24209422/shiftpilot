@@ -13,7 +13,7 @@ forbiddenLocking = re.compile(r"\bfor\s+(no\s+key\s+update|share|key\s+share)\b"
 forbiddenFunctions = re.compile(
   r"\b(set_config|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_\w+|dblink\w*"
   r"|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|setval|nextval|currval|pg_notify|pg_sleep"
-  r"|pg_advisory\w*|query_to_xml\w*)\b",
+  r"|pg_advisory\w*|query_to_xml\w*|pg_ls_\w+|table_to_xml\w*|cursor_to_xml|database_to_xml\w*|schema_to_xml\w*)\b",
   re.IGNORECASE,
 )
 # dollar quoting 可以把整段內容藏進字串，檢查時看不到，所以直接不允許
@@ -22,6 +22,15 @@ dollarQuote = re.compile(r"\$\w*\$")
 
 class UnsafeSqlError(ValueError):
   pass
+
+
+def rejectUnicodeEscape(sql: str, quoteIndex: int) -> None:
+  # U&"..." 與 U&'...' 會在解析時把 \XXXX 解碼成字元，檢查看到的是跳脫前的文字，所以直接拒絕
+  # 這裡只在引號位於字串與註解之外時呼叫，所以字串內的 U& 文字不會被誤擋
+  if quoteIndex < 2 or sql[quoteIndex - 1] != "&" or sql[quoteIndex - 2] not in "uU":
+    return
+  if quoteIndex < 3 or not (sql[quoteIndex - 3].isalnum() or sql[quoteIndex - 3] == "_"):
+    raise UnsafeSqlError("不允許 Unicode 跳脫語法 U&")
 
 
 def cleanSql(sql: str) -> str:
@@ -43,6 +52,7 @@ def cleanSql(sql: str) -> str:
       # E'...' 的反斜線跳脫會讓字串邊界判斷失準，直接拒絕以免藏住後面的指令
       if i > 0 and sql[i - 1] in "eE" and (i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] == "_")):
         raise UnsafeSqlError("不允許 E 字串")
+      rejectUnicodeEscape(sql, i)
       i += 1
       while i < n:
         if sql[i] == "'":
@@ -54,6 +64,7 @@ def cleanSql(sql: str) -> str:
         i += 1
       out.append("''")
     elif sql[i] == '"':
+      rejectUnicodeEscape(sql, i)
       i += 1
       name = []
       while i < n:

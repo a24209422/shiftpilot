@@ -102,3 +102,25 @@ def testExtractDropsClosedThinkBeforeSql():
 
 def testExtractDropsUnclosedThinkBlock():
   assert extractSql("<think>想一下 SELECT 1") == ""
+
+
+# 第三輪：U&"..." / U&'...' 會解碼 Unicode 跳脫，以及補上的 XML 與 pg_ls_ 函式
+
+@pytest.mark.parametrize("sql", [
+  "SELECT U&\"pg\005fread\005ffile\"('x')",
+  "SELECT U&\"\0073et\005fconfig\"('role','x',false)",
+  "SELECT U&'abc'",
+  "SELECT u&'abc'",
+  "SELECT pg_ls_waldir()",
+  "SELECT table_to_xml('employees', true, true, '')",
+  "SELECT cursor_to_xml('c', true, true, '')",
+  "SELECT database_to_xml(true, true, '')",
+  "SELECT schema_to_xml('public', true, true, '')",
+])
+def testUnicodeEscapeAndXmlFunctionsRejected(sql):
+  with pytest.raises(UnsafeSqlError):
+    validateSql(sql)
+
+
+def testUnicodeAmpersandInsideStringAccepted():
+  validateSql("SELECT name FROM employees WHERE note = 'U&\"x\"'")
