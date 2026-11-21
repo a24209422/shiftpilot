@@ -181,12 +181,11 @@ def runQuery(conn: Connection, sql: str) -> tuple[list[str], list[list], bool]:
   # 注意：pg_cancel_backend、pg_terminate_backend、pg_advisory_lock 這類函式無法用權限擋下（同一個角色的連線本來就能互相操作），
   # 只能靠 sqlguard 在送進來之前禁止；這裡的防線只負責「就算 SQL 檢查被繞過，沙盒本身仍然唯讀、有逾時」。
   # force_rollback：交易結束一定回滾，模型用 set_config(..., false) 改的連線設定（唯讀、逾時）都會還原。
+  # 具名游標只能執行會回傳資料列的陳述式，其他一律丟 psycopg.Error，呼叫端必須接住。
   # 具名游標在資料庫端分批取：交叉連接不會把上百萬列送到應用程式。
   with conn.transaction(force_rollback=True):
     with conn.cursor(name="qaQuery") as cursor:
       cursor.execute(sql)
-      if cursor.description is None:
-        return [], [], False
       columns = [column.name for column in cursor.description]
       fetched = cursor.fetchmany(maxRows + 1)
   return columns, [[jsonValue(value) for value in row] for row in fetched[:maxRows]], len(fetched) > maxRows
