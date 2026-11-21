@@ -4,6 +4,7 @@ import type { Booking, Resource } from "../api/types";
 import { bookingRegistration } from "../modules/booking";
 import { leaveRegistration } from "../modules/leave";
 import { orgRegistration } from "../modules/org";
+import { shiftRegistration } from "../modules/shift";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp, testUser } from "../test/renderApp";
 import { createTimelineRegistration } from "./index";
@@ -157,29 +158,31 @@ test("testNavShowsTimelineWithBookingRead", async () => {
   expect(await screen.findByRole("link", { name: "時間軸" })).toHaveAttribute("href", "/timeline");
 });
 
-const fullRegistrations = [bookingRegistration, leaveRegistration, orgRegistration, createTimelineRegistration([bookingRegistration, leaveRegistration, orgRegistration])];
+const fullRegistrations = [bookingRegistration, leaveRegistration, orgRegistration, shiftRegistration, createTimelineRegistration([bookingRegistration, leaveRegistration, orgRegistration, shiftRegistration])];
 
 const openWithEmployees = (calendar: unknown[]) =>
   renderApp({
-    route: "/timeline?date=2026-11-24&view=employees", permissions: ["booking.read", "org.read", "leave.request"], registrations: fullRegistrations,
+    route: "/timeline?date=2026-11-24&view=employees", permissions: ["booking.read", "org.read", "leave.request", "shift.read"], registrations: fullRegistrations,
     routes: {
       "GET /api/booking/resources": () => ({ body: [bigRoom] }),
       "GET /api/booking/bookings": () => ({ body: [] }),
       "GET /api/org/employees": () => ({ body: [{ id: 2, employeeNo: "E2", name: "林小美", email: null, departmentId: 1, jobTitle: "工程師", managerId: null, hiredOn: "2025-01-01", isActive: true, leftOn: null }] }),
       "GET /api/org/departments": () => ({ body: [{ id: 1, name: "工程部", parentId: null }] }),
       "GET /api/leave/calendar": () => ({ body: calendar }),
+      "GET /api/shift/schedule": () => ({ body: [] }),
     },
   });
 
 test("testViewTabsSwitchBetweenResourcesAndEmployees", async () => {
   renderApp({
-    route: "/timeline?date=2026-11-24", permissions: ["booking.read", "org.read", "leave.request"], registrations: fullRegistrations,
+    route: "/timeline?date=2026-11-24", permissions: ["booking.read", "org.read", "leave.request", "shift.read"], registrations: fullRegistrations,
     routes: {
       "GET /api/booking/resources": () => ({ body: [bigRoom] }),
       "GET /api/booking/bookings": () => ({ body: [] }),
       "GET /api/org/employees": () => ({ body: [] }),
       "GET /api/org/departments": () => ({ body: [] }),
       "GET /api/leave/calendar": () => ({ body: [] }),
+      "GET /api/shift/schedule": () => ({ body: [] }),
     },
   });
   expect(await screen.findByText("3F 大會議室")).toBeInTheDocument();
@@ -200,4 +203,27 @@ test("testLeaveBlockWithLinkOpensRequest", async () => {
   openWithEmployees([{ id: 5, employeeId: 2, startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00", status: "pending", leaveTypeName: "事假", segments: [{ startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00" }] }]);
   await userEvent.setup().click(await screen.findByRole("button", { name: /事假（待核准）/ }));
   expect(location()).toBe("/leave?id=5");
+});
+
+test("testShiftStatusIsDrawnBelowLeaveBlock", async () => {
+  renderApp({
+    route: "/timeline?date=2026-11-24&view=employees", permissions: ["booking.read", "org.read", "leave.request", "shift.read"], registrations: fullRegistrations,
+    routes: {
+      "GET /api/booking/resources": () => ({ body: [bigRoom] }),
+      "GET /api/booking/bookings": () => ({ body: [] }),
+      "GET /api/org/employees": () => ({ body: [{ id: 2, employeeNo: "E2", name: "林小美", email: null, departmentId: 1, jobTitle: "工程師", managerId: null, hiredOn: "2025-01-01", isActive: true, leftOn: null }] }),
+      "GET /api/org/departments": () => ({ body: [{ id: 1, name: "工程部", parentId: null }] }),
+      "GET /api/leave/calendar": () => ({ body: [{ id: 5, employeeId: 2, startAt: "2026-11-24T13:00:00", endAt: "2026-11-24T18:00:00", status: "approved", leaveTypeName: "事假", segments: [{ startAt: "2026-11-24T13:00:00", endAt: "2026-11-24T18:00:00" }] }] }),
+      "GET /api/shift/schedule": () => ({ body: [{
+        employeeId: 2, day: "2026-11-24", source: "default", shiftTypeId: 1, shiftName: "標準班", startAt: "2026-11-24T09:00:00", endAt: "2026-11-24T18:00:00",
+        breakStartAt: "2026-11-24T12:00:00", breakEndAt: "2026-11-24T13:00:00", holidayName: null, overrideNote: null,
+      }] }),
+    },
+  });
+  const block = await screen.findByTitle(/^事假 /);
+  const statuses = document.querySelectorAll(".tlStatus");
+  expect(statuses).toHaveLength(2);
+  // 底色要排在區塊前面，才會被區塊蓋住
+  expect(statuses[0].compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(statuses[0].tagName).toBe("DIV");
 });

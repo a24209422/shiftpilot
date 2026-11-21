@@ -7,8 +7,8 @@ export interface TimelineQuery<T> {
 // 時間軸上的一個項目；所有模組共用這個格式
 export interface TimelineItem {
   key: string;
-  // event：會議這類有明確起訖的長條；block：請假這類「這段時間不在」的區塊
-  kind: "event" | "block";
+  // event：會議這類有明確起訖的長條；block：請假這類「這段時間不在」的區塊；status：上班時段這類整列的底色
+  kind: "event" | "block" | "status";
   subjectId: number;
   startAt: string;
   endAt: string;

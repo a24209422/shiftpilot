@@ -119,7 +119,10 @@ function TimelineBoard({ view, sources, create, tabs }: {
               <div className="tlGroupName">{group.name}</div>
               {group.subjects.map((subject) => {
                 const row = placed.filter((entry) => entry.item.subjectId === subject.id);
-                const spans = row.map((entry) => entry.span);
+                const statuses = row.filter((entry) => entry.item.kind === "status");
+                const items = row.filter((entry) => entry.item.kind !== "status");
+                // 底色不佔用時段：點空檔新增排程時只看長條與區塊
+                const spans = items.map((entry) => entry.span);
                 // 跟範本一樣每一列一個顏色；用列在整張圖的順序輪流，換日期也不會變色
                 const tone = rows.indexOf(subject) % toneCount;
                 return (
@@ -128,6 +131,9 @@ function TimelineBoard({ view, sources, create, tabs }: {
                     <div className="tlTrack">
                       {hours.map((minute, index) => index % 2 === 1 && (
                         <div key={minute} className="tlStripe" style={placeStyle(axis, minute, minute + 60)} />
+                      ))}
+                      {statuses.map(({ item, span }) => (
+                        <div key={item.key} className="tlStatus" style={placeStyle(axis, span.startMinute, span.endMinute)} title={`${item.label} ${formatRange(item.startAt, item.endAt)}`} />
                       ))}
                       {create && cells.map((cell) => {
                         const slot = slotFor(cell, spans);
@@ -140,7 +146,7 @@ function TimelineBoard({ view, sources, create, tabs }: {
                           />
                         );
                       })}
-                      {row.map(({ item, span }) => {
+                      {items.map(({ item, span }) => {
                         const className = `${item.kind === "block" ? "tlBlock" : "tlBar"}${item.muted ? " tlMuted" : ""}`;
                         const style = placeStyle(axis, span.startMinute, span.endMinute);
                         const title = `${item.label} ${formatRange(item.startAt, item.endAt)}`;

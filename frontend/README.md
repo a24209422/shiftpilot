@@ -26,6 +26,7 @@ src/
   timeline/   時間軸頁與時間計算；資料由各模組登記的檢視、來源提供
   modules/    每個後端模組一個資料夾，裡面是頁面與 index.ts 登記
     leave/     請假頁、假別與額度頁；時間軸的請假來源
+    shift/     班表頁（一週表格、單日調整、週班表）、班別頁；時間軸的上班底色
   styles/     global.css（從原型搬來的樣式）
 ```
 
@@ -38,7 +39,7 @@ src/
 
 ## 讓模組的資料出現在時間軸
 
-在模組的 `ModuleRegistration` 加 `timelineSources`（提供長條）；如果模組擁有一種新的「列」（例如員工），再加 `timelineViews`。型別在 `src/timeline/types.ts`，範例是 `src/modules/booking/timeline.ts`。查詢的 `queryKey` 要放在模組既有的前綴底下（例如 `["bookings", …]`），寫入後現有的 invalidate 才會順便更新時間軸。設計見 `docs/superpowers/specs/2026-11-20-timeline-design.md`。項目有兩種畫法：`event`（長條，例如會議）與 `block`（區塊，例如請假）；沒有 `link` 的項目畫成不能點的區塊。時間軸頁有多種看得到的檢視時，上方會出現檢視分頁（網址參數 `view`）。
+在模組的 `ModuleRegistration` 加 `timelineSources`（提供長條）；如果模組擁有一種新的「列」（例如員工），再加 `timelineViews`。型別在 `src/timeline/types.ts`，範例是 `src/modules/booking/timeline.ts`。查詢的 `queryKey` 要放在模組既有的前綴底下（例如 `["bookings", …]`），寫入後現有的 invalidate 才會順便更新時間軸。設計見 `docs/superpowers/specs/2026-11-20-timeline-design.md`。項目有三種畫法：`event`（長條，例如會議）、`block`（區塊，例如請假）、`status`（整列底色，例如上班時段，畫在最底層、不能點、不佔用點空檔新增的時段）；沒有 `link` 的項目畫成不能點的區塊。時間軸頁有多種看得到的檢視時，上方會出現檢視分頁（網址參數 `view`）。
 
 ## 注意
 

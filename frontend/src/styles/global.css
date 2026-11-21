@@ -434,6 +434,8 @@ a.navItem { text-decoration: none; }
 button.tlBlock { cursor: pointer; }
 button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .tlMuted { opacity: 0.55; }
+/* 上班時段的底色：在長條與區塊之下、不能點，顏色依種類固定，不跟著列的色調變 */
+.tlStatus { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--success) 22%, transparent); border-radius: 0; pointer-events: none; }
 .tlTone0 { --tone: var(--primary); --tone-content: var(--primary-content); }
 .tlTone1 { --tone: var(--accent); --tone-content: var(--accent-content); }
 .tlTone2 { --tone: var(--success); --tone-content: var(--success-content); }
