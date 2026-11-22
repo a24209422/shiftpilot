@@ -207,7 +207,11 @@ def proposeBooking(data: SandboxData, asker: Asker | None, arguments: dict) -> d
   summary = [
     item("標題", title), item("時間", formatRange(start, end)),
     item("參加者", participantText(data, asker, [asker.employeeId, *participantIds])), item("會議室", resourceText(data, resourceIds)),
+    item("類別", "會議"),
   ]
+  # 確認卡要跟實際送出的 body 一致，有備註就一併列出
+  if note:
+    summary.append(item("備註", note))
   return proposal("booking.create", "POST", "/api/booking/bookings", body, summary)
 
 

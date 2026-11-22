@@ -77,6 +77,14 @@ def testProposeBookingWithoutResourcesAndWithNote(world):
   assert summary["參加者"] == "你" and summary["會議室"] == "不預約"
 
 
+def testBookingSummaryShowsCategoryAndNote(world):
+  # 確認卡要列出 body 送出的每一項，使用者才知道按下確認會寫入什麼
+  withNote = summaryOf(executeProposal(world.bobData, world.bobAsker, "propose_booking", bookingArguments(note="帶筆電")))
+  assert withNote["類別"] == "會議" and withNote["備註"] == "帶筆電"
+  withoutNote = summaryOf(executeProposal(world.bobData, world.bobAsker, "propose_booking", bookingArguments()))
+  assert withoutNote["類別"] == "會議" and "備註" not in withoutNote
+
+
 def testAmbiguousNameListsCandidates(world):
   result = executeProposal(world.bobData, world.bobAsker, "propose_booking", bookingArguments(participants=["bo"]))
   assert not result.ok and "bob" in result.error and "boss" in result.error

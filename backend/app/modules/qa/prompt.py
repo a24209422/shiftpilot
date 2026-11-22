@@ -146,9 +146,12 @@ def buildAssistantMessages(question: str, history: list[dict], data: SandboxData
 
 工具使用原則：
 1. 問「誰有空」用 find_available_people。
-2. 時間參數一律用 YYYY-MM-DD HH:MM，日期以下方「日期參考」為準；「下午」是 12:00～18:00，「上午」是 09:00～12:00。
-3. 工具回傳錯誤時，依錯誤訊息修正後再試。
-4. 資料只涵蓋 {data.windowStart} ～ {data.windowEnd}。
+2. 問某個人或某個資源（會議室、設備、公務車）某段時間有沒有事、誰在請假，用 get_busy_periods。
+3. 其他問題用 run_sql，只寫一句 SELECT，只能用下方的資料表與欄位；不要用 CURRENT_DATE 或 now()。
+4. 時間參數一律用 YYYY-MM-DD HH:MM，日期以下方「日期參考」為準；「下午」是 12:00～18:00，「上午」是 09:00～12:00。
+5. 工具回傳錯誤時，依錯誤訊息修正後再試。
+6. 回答時只能用查詢結果裡的資訊，不要猜測，不要提到 SQL、工具或資料表。查無資料就回答查無資料。
+7. 資料只涵蓋 {data.windowStart} ～ {data.windowEnd}。
 
 助理規則：
 1. 使用者要辦事時，先用查詢工具確認（例如找空檔），再呼叫提議工具；資訊不夠（時間、對象不明）就反問，不要猜。

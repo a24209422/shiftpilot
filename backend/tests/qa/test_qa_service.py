@@ -401,6 +401,8 @@ def testAssistantPromptHasAskerAndHistory(toolWorld):
   assert f"提問者：bob（employee_id = {toolWorld.bob}，工程部）" in system["content"]
   assert "find_available_resources" in system["content"] and "（系統紀錄）" in system["content"] and "請確認" in system["content"]
   assert "2026-11-22 星期日（明天）" in system["content"]
+  # 查詢工具的用法與「只能根據查詢結果回答」要跟 agent 模式一樣交代
+  assert "get_busy_periods" in system["content"] and "不要用 CURRENT_DATE" in system["content"] and "不要猜測" in system["content"]
   assert messages[1:] == [
     {"role": "user", "content": "嗨"}, {"role": "assistant", "content": "你好"}, {"role": "user", "content": "再來呢"},
   ]
