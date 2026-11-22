@@ -129,3 +129,11 @@ def testVocabularyListsNames(world):
   vocabulary = collect(world, world.bobActor).vocabulary
   assert "工程部" in vocabulary["departments"] and "標準班" in vocabulary["shifts"]
   assert "事假" in vocabulary["leaveTypes"] and "A 會議室" in vocabulary["resources"]
+
+
+def testLeaveTypesCarryIds(world):
+  data = collect(world, world.bobActor)
+  assert {name for _, name in data.leaveTypes} == set(data.vocabulary["leaveTypes"])
+  assert all(typeId in world.types.values() for typeId, _ in data.leaveTypes)
+  # 假別 id 只給助理提案用，不能進沙盒資料表
+  assert "leaveTypes" not in data.rows

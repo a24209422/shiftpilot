@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
@@ -37,6 +37,8 @@ class SandboxData:
   windowEnd: date
   rows: dict[str, list[tuple]]
   vocabulary: dict[str, list[str]]
+  # 助理提案要帶假別 id；放在這裡而不是沙盒資料表，模型的 SQL 看不到
+  leaveTypes: list[tuple[int, str]] = field(default_factory=list)
 
 
 def dataWindow(today: date) -> tuple[date, date]:
@@ -131,7 +133,8 @@ def collectSandboxData(conn: Connection, actor: Actor, today: date) -> SandboxDa
     "leaveTypes": names(conn, "SELECT name FROM leave_types WHERE is_active ORDER BY id"),
     "resources": [row[1] for row in rows["resources"]],
   }
-  return SandboxData(windowStart, windowEnd, rows, vocabulary)
+  leaveTypes = tuples(conn, "SELECT id, name FROM leave_types WHERE is_active ORDER BY id")
+  return SandboxData(windowStart, windowEnd, rows, vocabulary, leaveTypes)
 
 
 @contextmanager
