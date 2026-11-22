@@ -4,8 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.infra.db import openDb
-from app.modules.qa import agent, prompt
+from app.modules.qa import agent, prompt, tools
 from app.modules.qa.llm import ToolCall, ToolReply
+from app.modules.qa.tools import ToolResult
 from app.modules.qa.sandbox import collectSandboxData, openSandbox
 from tests.qa.test_qa_tools import makeToolWorld
 
@@ -146,3 +147,45 @@ def testRejectsToolOutsideAllowed(sandbox):
   assert outcome.steps[0]["error"] == "這題只能用 find_available_people" and outcome.steps[0]["rowCount"] is None
   # 沒執行：模型收到的是錯誤文字，不是資料列
   assert fake.calls[1][-1]["content"] == "錯誤：這題只能用 find_available_people"
+
+
+def runCustom(sandbox, fake, execute, **options):
+  definitions = [{"type": "function", "function": {"name": "x", "parameters": {}}}]
+  return agent.runAgent(
+    sandbox.conn, fake, "m", [{"role": "user", "content": "q"}],
+    definitions=definitions, execute=execute, **options,
+  )
+
+
+def testCustomExecutorAndLimit(sandbox):
+  fake = scriptedTools(*[reply(call("x", {})) for _ in range(8)])
+  outcome = runCustom(sandbox, fake, lambda conn, name, arguments: tools.failed("壞"), maxCalls=6)
+  assert outcome.toolCalls == 6 and outcome.exhausted
+  assert fake.toolSets[0] == ["x"]
+
+
+def proposalExecute(seen):
+  def execute(conn, name, arguments):
+    seen.append(arguments)
+    return ToolResult(True, [], [], False, None, None, {"kind": "booking.cancel"})
+  return execute
+
+
+def testProposalStopsLoop(sandbox):
+  fake = scriptedTools(reply(call("p", {}), content="要取消嗎？"))
+  outcome = runCustom(sandbox, fake, proposalExecute([]))
+  assert outcome.proposal == {"kind": "booking.cancel"}
+  assert outcome.answer == "要取消嗎？" and len(fake.calls) == 1 and outcome.result is None
+
+
+def testOnlyFirstProposalIsKept(sandbox):
+  seen = []
+  fake = scriptedTools(reply(call("p", {"a": 1}, "c1"), call("p", {"a": 2}, "c2")))
+  outcome = runCustom(sandbox, fake, proposalExecute(seen))
+  assert seen == [{"a": 1}] and len(outcome.steps) == 1
+
+
+def testProposalWithoutTextUsesDefaultAnswer(sandbox):
+  fake = scriptedTools(reply(call("p", {}), content=""))
+  outcome = runCustom(sandbox, fake, proposalExecute([]))
+  assert outcome.answer == "請確認以下內容。"

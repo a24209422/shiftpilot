@@ -78,6 +78,8 @@ class ToolResult:
   truncated: bool
   sql: str | None
   error: str | None
+  # 助理模式的提議工具回傳這個；放最後並給預設值，才不影響既有的位置參數呼叫
+  proposal: dict | None = None
 
 
 class ToolArgumentError(ValueError):
