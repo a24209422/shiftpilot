@@ -77,8 +77,24 @@ def fewShots(now: datetime) -> list[tuple[str, str]]:
   ]
 
 
-def buildSqlMessages(question: str, data: SandboxData, now: datetime) -> list[dict]:
+def contextSections(data: SandboxData, now: datetime) -> str:
+  # 舊流程與 agent 共用同一段資料說明，兩種模式看到的資料表與日期才一致
   vocabulary = data.vocabulary
+  return f"""## 資料表
+{schemaText}
+
+## 目前資料中的值
+- 部門：{', '.join(vocabulary['departments']) or '（尚無）'}
+- 班別：{', '.join(vocabulary['shifts']) or '（尚無）'}
+- 假別：{', '.join(vocabulary['leaveTypes']) or '（尚無）'}
+- 資源：{', '.join(vocabulary['resources']) or '（尚無）'}
+
+## 日期參考
+{buildDateReference(now)}
+"""
+
+
+def buildSqlMessages(question: str, data: SandboxData, now: datetime) -> list[dict]:
   systemPrompt = f"""你是 PostgreSQL 專家，負責把使用者的中文問題轉成一句 PostgreSQL 查詢。
 
 規則：
@@ -91,24 +107,30 @@ def buildSqlMessages(question: str, data: SandboxData, now: datetime) -> list[di
 7. 判斷某段時間誰有空：day_shifts 的班要蓋住那段時間，而且 busy_periods 在那段時間沒有重疊。
 8. 資料只涵蓋 {data.windowStart} ～ {data.windowEnd}，超出範圍的日期查不到資料。
 
-## 資料表
-{schemaText}
-
-## 目前資料中的值
-- 部門：{', '.join(vocabulary['departments']) or '（尚無）'}
-- 班別：{', '.join(vocabulary['shifts']) or '（尚無）'}
-- 假別：{', '.join(vocabulary['leaveTypes']) or '（尚無）'}
-- 資源：{', '.join(vocabulary['resources']) or '（尚無）'}
-
-## 日期參考
-{buildDateReference(now)}
-"""
+{contextSections(data, now)}"""
   messages = [{"role": "system", "content": systemPrompt}]
   for exampleQuestion, exampleSql in fewShots(now):
     messages.append({"role": "user", "content": exampleQuestion})
     messages.append({"role": "assistant", "content": f"```sql\n{exampleSql}\n```"})
   messages.append({"role": "user", "content": question})
   return messages
+
+
+def buildAgentMessages(question: str, data: SandboxData, now: datetime) -> list[dict]:
+  # 不放 few-shot：範例都是「直接寫 SQL」，放進來小模型會傾向不用工具
+  systemPrompt = f"""你是公司內部系統的助理，先用工具查資料，再用一到兩句正體中文（台灣用語）回答使用者。
+
+工具使用原則：
+1. 問「誰有空」用 find_available_people。
+2. 問某個人或某個資源（會議室、設備、公務車）某段時間有沒有事、誰在請假，用 get_busy_periods。
+3. 其他問題用 run_sql，只寫一句 SELECT，只能用下方的資料表與欄位；不要用 CURRENT_DATE 或 now()。
+4. 時間參數一律用 YYYY-MM-DD HH:MM，日期以下方「日期參考」為準；「下午」是 12:00～18:00，「上午」是 09:00～12:00。
+5. 工具回傳錯誤時，依錯誤訊息修正後再試。
+6. 查到結果後直接回答，只能用查詢結果裡的資訊，不要猜測，不要提到 SQL、工具或資料表。查無資料就回答查無資料。
+7. 資料只涵蓋 {data.windowStart} ～ {data.windowEnd}。
+
+{contextSections(data, now)}"""
+  return [{"role": "system", "content": systemPrompt}, {"role": "user", "content": question}]
 
 
 def buildAnswerMessages(question: str, columns: list[str], rows: list[list], rowCount: int, truncated: bool) -> list[dict]:
