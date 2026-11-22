@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, apiSend } from "../../api/client";
-import type { LeaveQuote, MeetingConflict } from "../../api/types";
+import type { LeaveQuote } from "../../api/types";
 import { SelectField, TextArea, TextField } from "../../forms/fields";
 import { FormError } from "../../forms/FormError";
-import { formatRange, toLocalDate } from "../../forms/time";
+import { toLocalDate } from "../../forms/time";
 import { useSubmit } from "../../forms/useSubmit";
 import { useToast } from "../../shell/Toast";
 // 晚班、大夜班的人也要能請假，所以時間選項涵蓋全天
 import { hourOptions } from "../shift/format";
+import { MeetingWarning } from "./MeetingWarning";
 import { useLeaveTypes } from "./queries";
 
 // 等使用者停手再試算，避免每改一個欄位就打一次 API
@@ -16,20 +17,6 @@ const quoteDelay = 300;
 function tomorrow(): string {
   const now = new Date();
   return toLocalDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-}
-
-function MeetingWarning({ error, pending, onOverride }: { error: ApiError | null; pending: boolean; onOverride(): void }) {
-  if (error?.code !== "MEETING_CONFLICT") return null;
-  const conflicts = ((error.details as { conflicts?: MeetingConflict[] } | null)?.conflicts ?? []);
-  return (
-    <div className="formWarn" role="alert">
-      這段時間你有會議：
-      <ul>
-        {conflicts.map((item) => <li key={item.bookingId}>{item.title}（{formatRange(item.startAt, item.endAt)}）</li>)}
-      </ul>
-      <button className="primary" type="button" disabled={pending} onClick={onOverride}>仍要送出</button>
-    </div>
-  );
 }
 
 export function LeaveRequestForm({ onDone }: { onDone(): void }) {

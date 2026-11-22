@@ -49,9 +49,9 @@ export function SidePanel() {
   const shownRange = range ?? { from: toLocalDate(addDays(today, -windowDays)), to: toLocalDate(addDays(today, windowDays)) };
 
   // 確認卡做完動作後補一行系統紀錄，下一輪對話模型才知道動作成功或失敗
-  // 之後由確認卡使用
   const addNote = (text: string) => setEntries((current) => [...current, { id: nextId.current++, kind: "note", text }]);
-  void addNote;
+  // 只有最後一張確認卡能按，避免使用者對已經改過的舊提議按確認
+  const activeProposalId = entries.reduce<number | null>((last, entry) => (entry.kind === "answer" && entry.result.proposal ? entry.id : last), null);
 
   async function onSend(event: FormEvent) {
     event.preventDefault();
@@ -147,7 +147,7 @@ export function SidePanel() {
               {/* 權限還在載入時先顯示說明，免得有權限的人先閃過一句「沒有權限」 */}
               <div className="bubble">{canAsk || permissionsLoading ? "用中文問組織、會議、請假或班表，例如「黃志強明天上什麼班？」「下週二下午誰有空？」" : "沒有使用問答的權限"}</div>
             </div>
-            {entries.map((entry) => <ChatMessage key={entry.id} entry={entry} />)}
+            {entries.map((entry) => <ChatMessage key={entry.id} entry={entry} proposalActive={entry.id === activeProposalId} onNote={addNote} />)}
           </div>
           <form className="chatForm" onSubmit={onSend}>
             <div className="chatFormRow">

@@ -1,4 +1,5 @@
 import type { QaAnswer, QaHistoryItem, QaRoute, QaStep } from "../api/types";
+import { ProposalCard } from "./ProposalCard";
 
 export type ChatEntry =
   | { id: number; kind: "question"; text: string }
@@ -69,7 +70,8 @@ function StepList({ steps, route }: { steps: QaStep[]; route?: QaRoute }) {
   );
 }
 
-export function ChatMessage({ entry }: { entry: ChatEntry }) {
+// proposalActive：這則是不是最後一則帶提議的回答，舊的提議要標成已被取代
+export function ChatMessage({ entry, proposalActive = false, onNote = () => {} }: { entry: ChatEntry; proposalActive?: boolean; onNote?(text: string): void }) {
   if (entry.kind === "question") {
     return <div className="msg user"><div className="bubble">{entry.text}</div></div>;
   }
@@ -104,6 +106,7 @@ export function ChatMessage({ entry }: { entry: ChatEntry }) {
           {/* agent 用固定邏輯的工具查到結果時沒有 SQL */}
           {result.sql && <pre className="mono qaSql">{result.sql}</pre>}
         </details>
+        {result.proposal && <ProposalCard proposal={result.proposal} active={proposalActive} onNote={onNote} />}
       </div>
     </div>
   );
