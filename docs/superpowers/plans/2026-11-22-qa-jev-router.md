@@ -68,13 +68,13 @@ git commit -m "設計：補上 Jev 呼叫格式"
 - Produces:
   - `jevOptions: list[str] = ["run_sql", "find_available_people", "get_busy_periods"]`
   - `@dataclass JevDecision(tool: str | None, confidence: float | None, fallbackReason: str | None, promptTokens: int | None, seconds: float)`
-  - `getJevConfig() -> dict`：`{"apiKey", "url", "model", "minConfidence"}`。`url` 預設用 Task 0 查到的；`model` 預設 `typesafe/jev-latest`（Task 0 若查到別的名稱就用那個）；`apiKey` 取 `JEV_API_KEY`，若空白且 `url` 的 host 是 `openrouter.ai`，改取 `OPENROUTER_API_KEY`
+  - `getJevConfig() -> dict`：`{"apiKey", "url", "model", "minConfidence"}`。`url` 預設 `https://api.typesafe.ai/v1/systemone`（`JEV_URL` 可覆寫）；`model` 預設 `jev-latest`（`JEV_MODEL` 可覆寫）；`apiKey` 只取 `JEV_API_KEY`，沒有 OpenRouter 退路（Task 0 實測：OpenRouter 的 Jev 是另一個端點，key 不通用）
   - `isConfigured() -> bool`：`apiKey` 非空
   - `buildJevRequest(question: str, now: datetime) -> dict`
   - `parseJevResponse(payload) -> tuple[str, float, int | None]`：回傳（最高機率的選項、機率、輸入 tokens）；格式不對、選項不在 `jevOptions`、機率不是 0～1 的數字 → `ValueError`。**這是唯一知道 Jev 回應格式的函式**
   - `chooseTool(question: str, now: datetime, client: httpx.Client | None = None) -> JevDecision`：永不丟例外
 
-- [ ] **Step 1: 寫失敗的測試**（用 `httpx.MockTransport` 造回應；回應樣本照 Task 0 寫進 spec 的格式）
+- [ ] **Step 1: 寫失敗的測試**（用 `httpx.MockTransport` 造回應；請求與回應樣本照 spec「Jev 呼叫格式」小節：`state`＋`questions.tool`，答案在 `answers.tool`）
 
 ```python
 def testBuildRequestHasOnlyQuestionDateAndOptions():
@@ -91,7 +91,7 @@ def testBadResponses():                    # parametrize：選項名不在清單
 def testHttpErrorFallsBack():              # 429、500、401 → reason "unavailable"，只送出 1 次請求（不重試）
 def testTimeoutFallsBack():                # transport 丟 httpx.ReadTimeout → "unavailable"；並斷言 client.post 收到 timeout=10
 def testMasksKeyInLog(caplog, monkeypatch): # 401 回應內容含 key → caplog.text 不含 key、含 "***"
-def testOpenRouterKeyFallback(monkeypatch): # JEV_API_KEY 空、JEV_URL 是 openrouter.ai → apiKey 等於 OPENROUTER_API_KEY
+def testApiKeyOnlyFromJevEnv(monkeypatch):  # 設了 OPENROUTER_API_KEY、JEV_API_KEY 空 → isConfigured() 是 False
 ```
 
 - [ ] **Step 2: 跑測試確認失敗**

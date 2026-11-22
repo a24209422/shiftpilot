@@ -121,7 +121,32 @@
 
 ## Jev 呼叫格式
 
-（第 1 步完成後補上）
+2026-11-22 實測（用 TypeSafe 直接申請的 key，呼叫 2 次，都是 200）。來源：TypeSafe 自己的 API 文件（docs.typesafe.ai/api）加實測。
+
+- 網址：`POST https://api.typesafe.ai/v1/systemone`；標頭 `Authorization: Bearer <JEV_API_KEY>`
+- **不用 chat completions，也不用 `response_format`**（前面「限制」小節的說法作廢）。OpenRouter 的 Jev 是另一個端點，key 不通用，所以**不做 OpenRouter 退路**，只認 `JEV_API_KEY`
+- 請求：
+
+```json
+{"model": "jev-latest",
+ "state": "今天是 2026-11-22（週日）。使用者的問題：下週二下午兩點到三點，工程部有誰有空？",
+ "questions": {"tool": {"type": "choice", "instructions": "這題該用哪個工具回答？",
+   "criteria": {"run_sql": "…", "find_available_people": "…", "get_busy_periods": "…"}}}}
+```
+
+- 回應：
+
+```json
+{"model": "jev-1.14.0",
+ "answers": {"tool": {"type": "choice", "choice": "find_available_people", "confidence": 1.0,
+   "probabilities": {"run_sql": 0.0, "find_available_people": 1.0, "get_busy_periods": 0.0}}},
+ "usage": {"input_tokens": 439, "output_tokens": 47}}
+```
+
+- 選項機率在 `answers.tool.probabilities`；輸入 tokens 在 `usage.input_tokens`；輸出 tokens 免費
+- 實測兩題：「下週二下午兩點到三點，工程部有誰有空？」→ `find_available_people`（1.0）；「本月每個部門有幾位員工？」→ `run_sql`（1.0）。信心都是 1.0，所以門檻 0.5 在這兩題上沒有作用，要看完整 dev 才知道
+- 每次約 440 輸入 tokens；價格官方頁沒寫，第三方（Vercel AI Gateway 文章）寫 $0.042／百萬輸入 tokens，約 $0.0000185 一次。**價格未經官方確認**，README 對照表要標明
+- 錯誤（第三方資料）：429 限流、401 key 錯、529 過載；TypeSafe 文件只記 400、422
 
 ## 留給實作者決定的
 
