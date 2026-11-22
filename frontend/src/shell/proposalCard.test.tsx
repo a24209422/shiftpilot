@@ -1,7 +1,7 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QaAnswer, QaModel, QaProposal } from "../api/types";
-import type { MockCall, MockRoutes } from "../test/mockApi";
+import type { MockCall, MockResponse, MockRoutes } from "../test/mockApi";
 import { renderApp } from "../test/renderApp";
 
 beforeEach(() => {
@@ -86,6 +86,56 @@ test("testParticipantConflictThenOverride", async () => {
   expect(await within(panel()).findByText("（系統紀錄）使用者已確認，建立了會議 #43")).toBeInTheDocument();
   const bodies = api.calls.filter((item) => item.path === "/api/booking/bookings").map((item) => item.body);
   expect(bodies).toEqual([bookingBody, { ...bookingBody, acknowledgeWarnings: true }]);
+});
+
+test("testResourceConflictIsFailure", async () => {
+  const { user } = await askWith({
+    "POST /api/qa/ask": () => ({ body: answerWith(bookingProposal) }),
+    "POST /api/booking/bookings": () => ({
+      status: 409,
+      body: { error: { code: "RESOURCE_CONFLICT", message: "資源在這個時段已被預約", details: { conflicts: [{ bookingId: 9, title: "團隊週會", startAt: "2026-11-24T10:00", endAt: "2026-11-24T11:00", resourceId: 3, resourceName: "A 會議室" }] } } },
+    }),
+  });
+  await user.click(await within(panel()).findByRole("button", { name: "確認" }));
+  expect(await within(panel()).findByText("（系統紀錄）送出失敗：資源在這個時段已被預約")).toBeInTheDocument();
+  expect(within(panel()).getByText(/A 會議室：團隊週會/)).toBeInTheDocument();
+  expect(within(panel()).queryByRole("button", { name: "仍要排" })).toBeNull();
+});
+
+test("testOverrideFlagDoesNotLeakIntoRetry", async () => {
+  let count = 0;
+  const { api, user } = await askWith({
+    "POST /api/qa/ask": () => ({ body: answerWith(bookingProposal) }),
+    "POST /api/booking/bookings": () => {
+      count += 1;
+      if (count === 1) {
+        return { status: 409, body: { error: { code: "PARTICIPANT_CONFLICT", message: "參加者不方便", details: { conflicts: [{ employeeId: 5, name: "黃志強", reason: "請假", title: null, startAt: null, endAt: null }] } } } };
+      }
+      if (count === 2) return { status: 422, body: { error: { code: "VALIDATION_ERROR", message: "標題太長", details: null } } };
+      return { body: { id: 44, ...bookingBody } };
+    },
+  });
+  await user.click(await within(panel()).findByRole("button", { name: "確認" }));
+  const override = await within(panel()).findByRole("button", { name: "仍要排" });
+  // 同一個 act 裡連點兩下：第二下時畫面還沒變成送出中，按鈕還沒停用
+  act(() => { override.click(); override.click(); });
+  expect(await within(panel()).findByText("（系統紀錄）送出失敗：標題太長")).toBeInTheDocument();
+  await user.click(within(panel()).getByRole("button", { name: "確認" }));
+  expect(await within(panel()).findByText("（系統紀錄）使用者已確認，建立了會議 #44")).toBeInTheDocument();
+  const bodies = api.calls.filter((item) => item.path === "/api/booking/bookings").map((item) => item.body);
+  expect(bodies).toEqual([bookingBody, { ...bookingBody, acknowledgeWarnings: true }, bookingBody]);
+});
+
+test("testLeaveConfirmWaitsForQuote", async () => {
+  let finishQuote: (response: MockResponse) => void = () => {};
+  await askWith({
+    "POST /api/qa/ask": () => ({ body: answerWith(leaveProposal) }),
+    "POST /api/leave/requests/quote": () => new Promise<MockResponse>((resolve) => { finishQuote = resolve; }),
+  });
+  expect(await within(panel()).findByRole("button", { name: "確認" })).toBeDisabled();
+  act(() => finishQuote({ body: { hours: 8, remainingAfter: 48, conflicts: [] } }));
+  expect(await within(panel()).findByText("時數 8 小時")).toBeInTheDocument();
+  expect(within(panel()).getByRole("button", { name: "確認" })).toBeEnabled();
 });
 
 test("testLeaveCardShowsQuote", async () => {

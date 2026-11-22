@@ -12,12 +12,19 @@ export type ChatEntry =
 const historyMaxItems = 40;
 const historyMaxChars = 1000;
 
+// 提議的內容只在確認卡上，不附上去的話，下一輪模型不知道自己提議了什麼（例如「換一間」要換掉哪一間）
+const answerText = (result: QaAnswer) => {
+  if (!result.proposal) return result.answer;
+  const summary = result.proposal.summary.map((item) => `${item.label}=${item.value}`).join("；");
+  return `${result.answer}\n（提議：${summary}）`;
+};
+
 // 只送真正的對話：等待中與錯誤沒有內容，不放進去；系統紀錄用 user 角色，模型才看得到動作結果
 export function toHistory(entries: ChatEntry[]): QaHistoryItem[] {
   const items: QaHistoryItem[] = [];
   for (const entry of entries) {
     if (entry.kind === "question" || entry.kind === "note") items.push({ role: "user", content: entry.text });
-    else if (entry.kind === "answer") items.push({ role: "assistant", content: entry.result.answer });
+    else if (entry.kind === "answer") items.push({ role: "assistant", content: answerText(entry.result) });
   }
   return items.slice(-historyMaxItems).map((item) => ({ role: item.role, content: item.content.slice(0, historyMaxChars) }));
 }

@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { QaAnswer, QaModel } from "../api/types";
+import type { QaAnswer, QaModel, QaProposal } from "../api/types";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp } from "../test/renderApp";
 import { toHistory, type ChatEntry } from "./QaMessage";
@@ -278,6 +278,19 @@ test("testToHistoryMapsAndTrims", () => {
   expect(history.every((item) => Object.keys(item).sort().join() === "content,role")).toBe(true);
   expect(history.some((item) => item.content === "壞了")).toBe(false);
   expect(toHistory([{ id: 1, kind: "question", text: "長".repeat(1200) }])[0].content).toHaveLength(1000);
+});
+
+test("testToHistoryIncludesProposalSummary", () => {
+  const proposal: QaProposal = {
+    kind: "booking.create",
+    request: { method: "POST", path: "/api/booking/bookings", body: {} },
+    summary: [{ label: "標題", value: "週會" }, { label: "會議室", value: "A 會議室" }],
+    quote: null,
+  };
+  const history = toHistory([{ id: 1, kind: "answer", result: { ...answer, answer: "請確認。", proposal } }]);
+  expect(history).toEqual([{ role: "assistant", content: "請確認。\n（提議：標題=週會；會議室=A 會議室）" }]);
+  const long = toHistory([{ id: 2, kind: "answer", result: { ...answer, answer: "長".repeat(990), proposal } }]);
+  expect(long[0].content).toHaveLength(1000);
 });
 
 test("testAssistantSendsHistory", async () => {

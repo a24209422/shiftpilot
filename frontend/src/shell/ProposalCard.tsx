@@ -15,8 +15,10 @@ const doneText: Record<QaProposal["kind"], string> = {
   "leave.create": "送出了請假申請",
   "leave.withdraw": "撤回了請假申請",
 };
-// 這幾種是警告或撞期，交給各自的提示畫明細（有些可以「仍要送出」），不算送出失敗
+// 這幾種交給各自的提示畫明細，不另外顯示錯誤訊息
 const conflictCodes = new Set(["RESOURCE_CONFLICT", "PARTICIPANT_CONFLICT", "MEETING_CONFLICT"]);
+// 只有可以「仍要送出」的警告不算失敗；資源撞期沒辦法略過，跟其他錯誤一樣記成送出失敗
+const overridableCodes = new Set(["PARTICIPANT_CONFLICT", "MEETING_CONFLICT"]);
 
 // 助理提議的動作：使用者按確認才真的呼叫寫入 API，結果寫回對話讓下一輪模型知道
 export function ProposalCard({ proposal, active, onNote }: { proposal: QaProposal; active: boolean; onNote(text: string): void }) {
@@ -57,7 +59,10 @@ export function ProposalCard({ proposal, active, onNote }: { proposal: QaProposa
   );
 
   useEffect(() => {
-    if (!error || conflictCodes.has(error.code)) return;
+    if (!error) return;
+    // 送出中又按「仍要排」時 submit 不會執行，旗標會留下來；請求結束就清掉，免得帶進下一次的普通確認
+    acknowledge.current = false;
+    if (overridableCodes.has(error.code)) return;
     setStatus("failed");
     onNoteRef.current(`（系統紀錄）送出失敗：${error.message}`);
   }, [error]);
@@ -71,6 +76,8 @@ export function ProposalCard({ proposal, active, onNote }: { proposal: QaProposa
     setStatus("cancelled");
     onNoteRef.current("（系統紀錄）使用者取消了這個提議");
   };
+  // 試算還沒回來就確認，使用者會在沒看到時數與餘額的情況下送出
+  const quoteLoading = proposal.kind === "leave.create" && proposal.quote !== null && quote === null && quoteError === null;
   const superseded = !active && status === "open";
   // 舊卡失敗後也不讓重試，免得對已經被取代的提議送出
   const showActions = active && (status === "open" || status === "failed");
@@ -92,7 +99,7 @@ export function ProposalCard({ proposal, active, onNote }: { proposal: QaProposa
       {superseded && <div className="formNote">已被新的提議取代</div>}
       {showActions && (
         <div className="formActions">
-          <button className="primary" type="button" disabled={pending || quoteError !== null} onClick={() => void submit()}>確認</button>
+          <button className="primary" type="button" disabled={pending || quoteLoading || quoteError !== null} onClick={() => void submit()}>確認</button>
           <button className="secondary" type="button" disabled={pending} onClick={cancel}>取消</button>
         </div>
       )}
