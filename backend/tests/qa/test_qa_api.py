@@ -89,3 +89,20 @@ def testAskAcceptsJevMode(qaClient, loginAs, monkeypatch):
   assert response.status_code == 200, response.text
   body = response.json()
   assert body["mode"] == "jev" and body["route"]["tool"] == "run_sql" and body["route"]["promptTokens"] == 440
+
+
+def testAskAssistantModeEndToEnd(qaClient, loginAs, monkeypatch):
+  received = []
+
+  def fake(model, messages, tools):
+    received.append(messages)
+    return ToolReply("請問要約哪一天？", [], None, None)
+
+  monkeypatch.setattr(qaLlm, "callModelWithTools", fake)
+  loginAs("employee", employee=True, client=qaClient)
+  history = [{"role": "user", "content": "幫我約會議"}, {"role": "assistant", "content": "跟誰？"}]
+  response = qaClient.post("/api/qa/ask", json={"question": "跟老闆", "model": "qwen2.5:3b", "mode": "assistant", "history": history})
+  assert response.status_code == 200, response.text
+  body = response.json()
+  assert body["mode"] == "assistant" and body["answer"] == "請問要約哪一天？" and body["proposal"] is None
+  assert received[0][1:] == [*history, {"role": "user", "content": "跟老闆"}]

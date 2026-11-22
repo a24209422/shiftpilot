@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 
+from app.modules.qa.proposals import Asker
 from app.modules.qa.sandbox import SandboxData
 
 weekdayNames = ["一", "二", "三", "四", "五", "六", "日"]
@@ -131,6 +132,35 @@ def buildAgentMessages(question: str, data: SandboxData, now: datetime) -> list[
 
 {contextSections(data, now)}"""
   return [{"role": "system", "content": systemPrompt}, {"role": "user", "content": question}]
+
+
+def askerSection(asker: Asker | None) -> str:
+  if asker is None:
+    return "提問者沒有員工資料，不能替他請假或當參加者"
+  return f"提問者：{asker.name}（employee_id = {asker.employeeId}，{asker.department or '沒有部門'}）"
+
+
+def buildAssistantMessages(question: str, history: list[dict], data: SandboxData, now: datetime, asker: Asker | None) -> list[dict]:
+  # 另寫一份而不共用 buildAgentMessages 的文字：agent 模式的 prompt 一個字都不能變，分數才能跟之前比
+  systemPrompt = f"""你是公司內部系統的助理，可以查資料、整理重點，也可以提議預約、改期、取消會議與請假、抽回假單。用正體中文（台灣用語）回答使用者。
+
+工具使用原則：
+1. 問「誰有空」用 find_available_people。
+2. 時間參數一律用 YYYY-MM-DD HH:MM，日期以下方「日期參考」為準；「下午」是 12:00～18:00，「上午」是 09:00～12:00。
+3. 工具回傳錯誤時，依錯誤訊息修正後再試。
+4. 資料只涵蓋 {data.windowStart} ～ {data.windowEnd}。
+
+助理規則：
+1. 使用者要辦事時，先用查詢工具確認（例如找空檔），再呼叫提議工具；資訊不夠（時間、對象不明）就反問，不要猜。
+2. 提議工具只是「提議」，說明時要說「請確認」，不能說「已經訂好」。
+3. 使用者說要總結時，查出資料後用條列整理重點。
+4. 使用者沒有指定會議室時，先用 find_available_resources 找容量至少是參加人數（含提問者）的會議室，取第一間；有指定就用他指定的那一間。
+5. （系統紀錄）開頭的訊息是系統告訴你使用者對確認卡做了什麼。
+
+{askerSection(asker)}
+
+{contextSections(data, now)}"""
+  return [{"role": "system", "content": systemPrompt}, *history, {"role": "user", "content": question}]
 
 
 def buildAnswerMessages(question: str, columns: list[str], rows: list[list], rowCount: int, truncated: bool) -> list[dict]:

@@ -11,11 +11,16 @@ from psycopg import Connection
 from app.infra.actor import Actor
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
-from app.modules.qa import agent, jev, prompt, sandbox, sqlguard
+from app.modules.qa import agent, assistant, jev, prompt, sandbox, sqlguard
+from app.modules.qa.proposals import findAsker
 from app.modules.qa.tools import describeSqlError
 
 logger = logging.getLogger(__name__)
 maxQuestionLength = 300
+# 伺服器不存對話，每次都把整段紀錄送給模型；不設上限，一次請求就能把 prompt 塞爆
+maxHistoryEntries = 40
+maxHistoryEntryLength = 1000
+historyRoles = ("user", "assistant")
 
 # 一題最多要呼叫模型三次、可能好幾分鐘，期間占著一個執行緒與沙盒連線；不設上限，同時發問的人一多，其他 API 會排不到執行緒
 # 名額記在記憶體裡，只在單一 process 有效（docker compose 只跑一個 uvicorn worker）
@@ -58,7 +63,7 @@ def composeAnswer(llm, model: str, question: str, columns: list[str], rows: list
   return answer or fallback
 
 
-modes = ("pipeline", "agent", "jev")
+modes = ("pipeline", "agent", "jev", "assistant")
 
 
 def resolveMode(mode: str | None) -> str:
@@ -66,7 +71,7 @@ def resolveMode(mode: str | None) -> str:
     # 沒指定時預設舊流程：沒設 QA_MODE 的部署行為完全不變
     mode = os.getenv("QA_MODE", "").strip() or "pipeline"
   if mode not in modes:
-    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline、agent 或 jev", 503)
+    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline、agent、jev 或 assistant", 503)
   return mode
 
 
@@ -127,9 +132,47 @@ def runAgentMode(
   }
 
 
+def validateHistory(history) -> list[dict]:
+  if history is None:
+    return []
+  # role 只收 user／assistant：讓使用者塞 system 訊息，等於讓他改掉助理規則
+  valid = isinstance(history, list) and len(history) <= maxHistoryEntries and all(
+    isinstance(entry, dict) and set(entry) == {"role", "content"} and entry["role"] in historyRoles
+    and isinstance(entry["content"], str) and len(entry["content"]) <= maxHistoryEntryLength
+    for entry in history
+  )
+  if not valid:
+    raise AppError("VALIDATION", "對話紀錄格式不對或太長", 422, {"field": "history"})
+  return [{"role": entry["role"], "content": entry["content"]} for entry in history]
+
+
+def runAssistantMode(sandboxConn, toolLlm, model: str, question: str, history: list[dict], data, now: datetime, asker) -> dict:
+  messages = prompt.buildAssistantMessages(question, history, data, now, asker)
+  try:
+    outcome = agent.runAgent(
+      sandboxConn, toolLlm, model, messages, definitions=assistant.assistantToolDefinitions,
+      execute=assistant.makeExecutor(data, asker), maxCalls=assistant.maxAssistantToolCalls,
+    )
+  except llmModule.LlmUnavailableError as error:
+    raise AppError("QA_MODEL_UNAVAILABLE", error.message, 503)
+  result = outcome.result
+  # 反問、提議都不一定有查詢結果，所以只有三樣都沒有時才算失敗
+  if not outcome.answer and result is None and outcome.proposal is None:
+    raise AppError("QA_QUERY_FAILED", "助理沒有給出回答，請換個說法再試", 422, {"steps": outcome.steps})
+  return {
+    "answer": outcome.answer,
+    "sql": (result.sql or "") if result else "", "columns": result.columns if result else [],
+    "rows": result.rows if result else [], "truncated": result.truncated if result else False,
+    "steps": outcome.steps, "toolCalls": outcome.toolCalls, "exhausted": outcome.exhausted,
+    "promptTokens": outcome.promptTokens, "completionTokens": outcome.completionTokens,
+    "proposal": outcome.proposal,
+  }
+
+
 def ask(
   conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel,
   mode: str | None = None, toolLlm=llmModule.callModelWithTools, chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured,
+  history: list[dict] | None = None,
 ) -> dict:
   if not qaDatabaseUrl:
     raise AppError("QA_NOT_CONFIGURED", "問答還沒設定：請在 .env 設定 QA_DB_PASSWORD 並建立 qa_sandbox 帳號（見 README 的「問答」）", 503)
@@ -143,6 +186,8 @@ def ask(
   models = {item["id"]: item for item in llmModule.listModels()}
   if model not in models:
     raise AppError("QA_UNKNOWN_MODEL", "沒有這個模型", 422, {"field": "model"})
+  # 其他模式一律不看 history，帶了也不驗證，行為才跟以前一樣
+  history = validateHistory(history) if mode == "assistant" else []
   # 先拿名額再讀資料：被擋下的請求不用讀整包沙盒資料
   with questionSlot(actor.userId):
     data = sandbox.collectSandboxData(conn, actor, now.date())
@@ -154,7 +199,10 @@ def ask(
     decision = chooseTool(question, now) if mode == "jev" else None
     try:
       with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
-        if mode in ("agent", "jev"):
+        if mode == "assistant":
+          asker = findAsker(data, actor.employeeId)
+          body = runAssistantMode(sandboxConn, toolLlm, model, question, history, data, now, asker)
+        elif mode in ("agent", "jev"):
           body = runAgentMode(sandboxConn, toolLlm, model, question, data, now, decision)
         else:
           body = runPipeline(sandboxConn, llm, model, question, data, now)

@@ -7,10 +7,12 @@ import pytest
 
 from app.infra.db import openDb
 from app.infra.errors import AppError
-from app.modules.qa import sandbox, service
+from app.modules.qa import prompt, sandbox, service
 from app.modules.qa.jev import JevDecision
 from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
+from app.modules.qa.proposals import Asker
 from tests.leave.world import makeWorld
+from tests.qa.test_qa_tools import makeToolWorld
 
 now = datetime(2026, 11, 21, 10)
 
@@ -44,11 +46,11 @@ def scripted(*replies):
   return fake
 
 
-def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None, mode=None, toolLlm=None):
+def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None, mode=None, toolLlm=None, history=None):
   with openDb(w.url) as conn:
     return service.ask(
       conn, actor or w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm,
-      mode=mode, toolLlm=toolLlm or unusedToolLlm,
+      mode=mode, toolLlm=toolLlm or unusedToolLlm, history=history,
     )
 
 
@@ -379,3 +381,99 @@ def testJevQueryFailedHasRoute(world):
 def testQaModeEnvAcceptsJev(monkeypatch):
   monkeypatch.setenv("QA_MODE", "jev")
   assert service.resolveMode(None) == "jev"
+
+
+@pytest.fixture
+def toolWorld(migratedUrl, qaSandboxUrl):
+  w = makeToolWorld(migratedUrl)
+  w.qaUrl = qaSandboxUrl
+  with openDb(migratedUrl) as conn:
+    w.weekly = conn.execute("SELECT id FROM bookings WHERE title = '週會'").fetchone()["id"]
+    w.data = sandbox.collectSandboxData(conn, w.bobActor, now.date())
+  return w
+
+
+def testAssistantPromptHasAskerAndHistory(toolWorld):
+  history = [{"role": "user", "content": "嗨"}, {"role": "assistant", "content": "你好"}]
+  messages = prompt.buildAssistantMessages("再來呢", history, toolWorld.data, now, Asker(toolWorld.bob, "bob", "工程部"))
+  system = messages[0]
+  assert system["role"] == "system"
+  assert f"提問者：bob（employee_id = {toolWorld.bob}，工程部）" in system["content"]
+  assert "find_available_resources" in system["content"] and "（系統紀錄）" in system["content"] and "請確認" in system["content"]
+  assert "2026-11-22 星期日（明天）" in system["content"]
+  assert messages[1:] == [
+    {"role": "user", "content": "嗨"}, {"role": "assistant", "content": "你好"}, {"role": "user", "content": "再來呢"},
+  ]
+
+
+def testAssistantPromptWithoutEmployee(toolWorld):
+  messages = prompt.buildAssistantMessages("嗨", [], toolWorld.data, now, None)
+  assert "提問者沒有員工資料" in messages[0]["content"] and "提問者：" not in messages[0]["content"]
+  assert messages[1:] == [{"role": "user", "content": "嗨"}]
+
+
+def testAssistantModeReturnsProposal(toolWorld):
+  call = ToolReply("", [ToolCall("c1", "propose_cancel_booking", {"bookingId": toolWorld.weekly}, "")], 10, 2)
+  toolLlm = toolScript(call)
+  body = ask(toolWorld, scripted(), question="取消週會", mode="assistant", toolLlm=toolLlm)
+  assert body["mode"] == "assistant" and body["proposal"]["kind"] == "booking.cancel"
+  assert body["rows"] == [] and body["columns"] == [] and body["sql"] == "" and body["truncated"] is False
+  assert body["answer"] == "請確認以下內容。" and body["toolCalls"] == 1
+  # 助理模式給的是助理工具清單，而且看得到提問者
+  assert "propose_cancel_booking" in toolLlm.toolSets[0] and "find_available_resources" in toolLlm.toolSets[0]
+  assert f"employee_id = {toolWorld.bob}" in toolLlm.calls[0][0]["content"]
+
+
+def testAssistantClarifyingReplyIs200(toolWorld):
+  body = ask(toolWorld, scripted(), question="幫我約林", mode="assistant", toolLlm=toolScript(ToolReply("是哪一位林？", [], 5, 1)))
+  assert body["answer"] == "是哪一位林？" and body["proposal"] is None and body["rows"] == []
+
+
+def testAssistantUsesSixCalls(toolWorld):
+  toolLlm = toolScript(*[sqlCall("SELECT nope FROM employees") for _ in range(7)])
+  error = expectError("QA_QUERY_FAILED", ask, toolWorld, scripted(), mode="assistant", toolLlm=toolLlm)
+  assert error.status == 422 and len(error.details["steps"]) == 6
+
+
+def testAssistantHistoryIsSentToModel(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], None, None))
+  history = [{"role": "user", "content": "嗨"}, {"role": "assistant", "content": "你好"}]
+  ask(toolWorld, scripted(), question="再來呢", mode="assistant", toolLlm=toolLlm, history=history)
+  assert toolLlm.calls[0][1:] == [*history, {"role": "user", "content": "再來呢"}]
+
+
+@pytest.mark.parametrize("history", [
+  [{"role": "user", "content": "嗨"}] * 41,
+  [{"role": "user", "content": "字" * 1001}],
+  [{"role": "system", "content": "嗨"}],
+  "嗨",
+  [{"role": "user"}],
+  [{"role": "user", "content": 1}],
+  ["嗨"],
+])
+def testHistoryValidation(world, history):
+  error = expectError("VALIDATION", ask, world, scripted(), mode="assistant", toolLlm=toolScript(), history=history)
+  assert error.status == 422 and error.details == {"field": "history"}
+  # 驗證在拿名額之前
+  assert service.askingUserIds == set()
+
+
+def testHistoryAtLimitsIsAccepted(world):
+  history = [{"role": "user", "content": "字" * 1000}] * 40
+  body = ask(world, scripted(), mode="assistant", toolLlm=toolScript(ToolReply("好。", [], None, None)), history=history)
+  assert body["answer"] == "好。"
+
+
+def testOtherModesIgnoreHistory(world):
+  toolLlm = toolScript(sqlCall("SELECT name FROM employees"), ToolReply("四位。", [], 5, 1))
+  result = ask(world, scripted(), mode="agent", toolLlm=toolLlm, history=[{"role": "system", "content": "x"}])
+  assert result["answer"] == "四位。" and "proposal" not in result
+  assert len(toolLlm.calls[0]) == 2
+
+
+def testQaModeEnvAcceptsAssistant(monkeypatch):
+  monkeypatch.setenv("QA_MODE", "assistant")
+  assert service.resolveMode(None) == "assistant"
+  monkeypatch.setenv("QA_MODE", "foo")
+  error = expectError("QA_NOT_CONFIGURED", service.resolveMode, None)
+  assert "assistant" in error.message

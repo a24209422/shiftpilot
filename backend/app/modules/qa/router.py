@@ -15,7 +15,9 @@ askQa = requirePermission("qa.ask")
 class AskBody(BaseModel):
   question: str
   model: str
-  mode: Literal["pipeline", "agent", "jev"] | None = None
+  mode: Literal["pipeline", "agent", "jev", "assistant"] | None = None
+  # 每一則的格式與長度交給 service 驗證，錯誤才會是統一的 VALIDATION 格式
+  history: list[dict] | None = None
 
 
 @router.get("/models")
@@ -29,5 +31,5 @@ def ask(body: AskBody, request: Request, actor: Actor = Depends(askQa), conn=con
   return service.ask(
     conn, actor, body.question, body.model, request.app.state.qaDatabaseUrl, datetime.now(),
     llm=llm.callModel, mode=body.mode, toolLlm=llm.callModelWithTools,
-    chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured,
+    chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured, history=body.history,
   )
