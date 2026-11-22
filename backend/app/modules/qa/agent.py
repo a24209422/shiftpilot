@@ -24,11 +24,15 @@ def fallbackAnswer(result: ToolResult) -> str:
   return f"查到 {len(result.rows)}{' 筆以上' if result.truncated else ' 筆'}資料。"
 
 
-def runAgent(conn: Connection, toolLlm, model: str, messages: list[dict]) -> AgentOutcome:
+def runAgent(conn: Connection, toolLlm, model: str, messages: list[dict], allowedTools: list[str] | None = None) -> AgentOutcome:
   outcome = AgentOutcome(answer="", result=None)
   messages = list(messages)
+  # allowedTools 是 None 時三個工具都給（agent 模式）；jev 模式只給 Jev 選中的那一個
+  definitions = tools.toolDefinitions if allowedTools is None else [
+    item for item in tools.toolDefinitions if item["function"]["name"] in allowedTools
+  ]
   while True:
-    reply = toolLlm(model, messages, tools.toolDefinitions)
+    reply = toolLlm(model, messages, definitions)
     outcome.promptTokens += reply.promptTokens or 0
     outcome.completionTokens += reply.completionTokens or 0
     if not reply.toolCalls:
@@ -39,7 +43,11 @@ def runAgent(conn: Connection, toolLlm, model: str, messages: list[dict]) -> Age
       if outcome.toolCalls >= maxToolCalls:
         outcome.exhausted = True
         break
-      result = tools.executeTool(conn, toolCall.name, toolCall.arguments)
+      if allowedTools is not None and toolCall.name not in allowedTools:
+        # 只給了被選中的工具，模型仍可能照記憶呼叫別的；不執行，告訴它能用什麼
+        result = tools.failed(f"這題只能用 {', '.join(allowedTools)}")
+      else:
+        result = tools.executeTool(conn, toolCall.name, toolCall.arguments)
       outcome.toolCalls += 1
       outcome.steps.append({
         "tool": toolCall.name, "arguments": toolCall.arguments,

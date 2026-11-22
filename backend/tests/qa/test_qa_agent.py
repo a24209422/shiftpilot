@@ -30,14 +30,16 @@ def reply(*calls, content="", tokens=(None, None)):
 
 
 def scriptedTools(*replies):
-  calls = []
+  calls, toolSets = [], []
 
   def fake(model, messages, tools):
     # 存副本：agent 之後會繼續往同一份對話加訊息
     calls.append(list(messages))
+    toolSets.append([item["function"]["name"] for item in tools])
     return replies[len(calls) - 1]
 
   fake.calls = calls
+  fake.toolSets = toolSets
   return fake
 
 
@@ -118,3 +120,29 @@ def testRawToolCallTextAfterSuccessFallsBack(sandbox):
     reply(content='<tool_call>{"name": "run_sql", "arguments": {}}</tool_call>'),
   )
   assert run(sandbox, fake).answer == "查到 4 筆資料。"
+
+
+def testAllowedToolsLimitsDefinitions(sandbox):
+  fake = scriptedTools(reply(content="好"))
+  agent.runAgent(sandbox.conn, fake, "m", [{"role": "user", "content": "q"}], allowedTools=["find_available_people"])
+  assert fake.toolSets == [["find_available_people"]]
+
+
+def testAllowedToolsNoneKeepsAll(sandbox):
+  fake = scriptedTools(reply(content="好"))
+  run(sandbox, fake)
+  assert fake.toolSets == [["run_sql", "find_available_people", "get_busy_periods"]]
+
+
+def testRejectsToolOutsideAllowed(sandbox):
+  fake = scriptedTools(
+    reply(call("run_sql", {"sql": "SELECT name FROM employees"}, "a")),
+    reply(content="沒辦法。"),
+  )
+  outcome = agent.runAgent(
+    sandbox.conn, fake, "m", [{"role": "user", "content": "q"}], allowedTools=["find_available_people"],
+  )
+  assert outcome.toolCalls == 1 and outcome.result is None
+  assert outcome.steps[0]["error"] == "這題只能用 find_available_people" and outcome.steps[0]["rowCount"] is None
+  # 沒執行：模型收到的是錯誤文字，不是資料列
+  assert fake.calls[1][-1]["content"] == "錯誤：這題只能用 find_available_people"
