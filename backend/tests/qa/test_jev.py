@@ -5,7 +5,7 @@ from datetime import datetime
 import httpx
 import pytest
 
-from app.modules.qa import jev
+from app.modules.qa import jev, prompt
 from app.modules.qa.prompt import buildDateReference
 
 fixedNow = datetime(2026, 11, 22, 10, 0)
@@ -45,7 +45,7 @@ def testBuildRequestHasOnlyQuestionDateAndOptions():
   assert "下週二下午誰有空？" in payload["state"] and buildDateReference(fixedNow) in payload["state"]
   assert all(option in text for option in jev.jevOptions)
   # 沒有資料表說明或任何資料列
-  assert "employees" not in text and "busy_periods" not in text
+  assert prompt.schemaText not in text and "day_shifts" not in text and "employees" not in text
   assert payload["model"] == "jev-latest"
   assert list(payload["questions"]["tool"]["criteria"]) == jev.jevOptions
 
