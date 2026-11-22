@@ -16,7 +16,7 @@ const models: QaModel[] = [
 ];
 const answer: QaAnswer = {
   answer: "黃志強明天上晚班，14:00 到 23:00。", sql: "SELECT shift_name FROM day_shifts", columns: ["shift_name", "start_at"],
-  rows: [["晚班", "2026-11-23T14:00:00"]], truncated: false, model: "qwen2.5:3b", remote: false,
+  rows: [["晚班", "2026-11-23T14:00:00"]], truncated: false, model: "qwen2.5:3b", remote: false, mode: "pipeline",
   window: { from: "2026-08-23", to: "2027-02-20" },
 };
 
@@ -51,7 +51,7 @@ test("testAskShowsAnswerTableAndSql", async () => {
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   expect(await within(panel()).findByText("黃志強明天上晚班，14:00 到 23:00。")).toBeInTheDocument();
   expect(within(panel()).getByText("黃志強明天上什麼班？", { selector: ".bubble" })).toBeInTheDocument();
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b" });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b", mode: "pipeline" });
   await user.click(within(panel()).getByText("看查詢結果"));
   expect(within(panel()).getByRole("cell", { name: "晚班" })).toBeInTheDocument();
   expect(within(panel()).getByText("SELECT shift_name FROM day_shifts")).toBeInTheDocument();
@@ -68,7 +68,7 @@ test("testRemoteAnswerIsMarked", async () => {
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   expect(await within(panel()).findByText("gemini-x・已送到雲端")).toBeInTheDocument();
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "問題", model: "gemini-x" });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "問題", model: "gemini-x", mode: "pipeline" });
 });
 
 test("testPendingShownWhileWaitingAndDoubleSubmitSendsOnce", async () => {
@@ -179,4 +179,44 @@ test("testDragWidensPanel", async () => {
   fireEvent.pointerMove(window, { clientX: 950 });
   fireEvent.pointerUp(window);
   expect(handle).toHaveAttribute("aria-valuenow", "450");
+});
+
+const askQuestion = async (text = "下週二下午誰有空？") => {
+  const user = userEvent.setup();
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), text);
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  return user;
+};
+
+test("testModeIsSentWithQuestion", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const user = userEvent.setup();
+  const mode = await within(panel()).findByRole("combobox", { name: "模式" });
+  expect(mode).toHaveValue("pipeline");
+  await user.selectOptions(mode, "agent");
+  await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "下週二下午誰有空？", model: "qwen2.5:3b", mode: "agent" });
+});
+
+test("testAgentStepsAreListed", async () => {
+  const steps = [
+    { tool: "find_available_people", arguments: { start: "2026-11-24 14:00", end: "2026-11-24 15:00", department: "工程部" }, rowCount: 3, error: null },
+    { tool: "run_sql", arguments: { sql: "SELECT nope" }, rowCount: null, error: "欄位不存在" },
+  ];
+  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "agent", steps } }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("find_available_people（2026-11-24 14:00，2026-11-24 15:00，工程部）→ 3 筆")).toBeInTheDocument();
+  expect(within(panel()).getByText("run_sql（SELECT nope）→ 失敗：欄位不存在")).toBeInTheDocument();
+});
+
+test("testEmptySqlIsHidden", async () => {
+  const { container } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, sql: "", mode: "agent", steps: [] } }) });
+  await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  expect(container.querySelector(".qaSql")).toBeNull();
+  expect(within(panel()).queryByText("看工具步驟")).toBeNull();
 });

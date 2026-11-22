@@ -1,4 +1,4 @@
-import type { QaAnswer } from "../api/types";
+import type { QaAnswer, QaStep } from "../api/types";
 
 export type ChatEntry =
   | { id: number; kind: "question"; text: string }
@@ -31,6 +31,22 @@ function ResultTable({ result }: { result: QaAnswer }) {
   );
 }
 
+// 參數值依模型給的順序列出，展示 agent 時看得出它每一步怎麼填參數
+const stepText = (step: QaStep) => {
+  const args = Object.values(step.arguments ?? {}).map(cellText).join("，");
+  const outcome = step.error === null ? `${step.rowCount ?? 0} 筆` : `失敗：${step.error}`;
+  return `${step.tool}（${args}）→ ${outcome}`;
+};
+
+function StepList({ steps }: { steps: QaStep[] }) {
+  return (
+    <details>
+      <summary>看工具步驟</summary>
+      <ol className="qaSteps">{steps.map((step, index) => <li key={index}>{stepText(step)}</li>)}</ol>
+    </details>
+  );
+}
+
 export function ChatMessage({ entry }: { entry: ChatEntry }) {
   if (entry.kind === "question") {
     return <div className="msg user"><div className="bubble">{entry.text}</div></div>;
@@ -56,10 +72,12 @@ export function ChatMessage({ entry }: { entry: ChatEntry }) {
       <div className="msgMeta">{result.model}{result.remote ? "・已送到雲端" : ""}</div>
       <div className="bubble">
         {result.answer}
+        {result.steps && result.steps.length > 0 && <StepList steps={result.steps} />}
         <details>
           <summary>看查詢結果</summary>
           <ResultTable result={result} />
-          <pre className="mono qaSql">{result.sql}</pre>
+          {/* agent 用固定邏輯的工具查到結果時沒有 SQL */}
+          {result.sql && <pre className="mono qaSql">{result.sql}</pre>}
         </details>
       </div>
     </div>

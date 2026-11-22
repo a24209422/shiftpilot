@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { ApiError, apiGet, apiSend } from "../api/client";
-import type { QaAnswer, QaModel } from "../api/types";
+import type { QaAnswer, QaMode, QaModel } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, toLocalDate } from "../forms/time";
 import { Icon } from "./icons";
@@ -28,6 +28,7 @@ export function SidePanel() {
   const canAsk = can("qa.ask");
   const { data: models, isLoading: modelsLoading } = useQuery({ queryKey: ["qa", "models"], queryFn: () => apiGet<QaModel[]>("/api/qa/models"), enabled: canAsk });
   const [model, setModel] = useState("");
+  const [mode, setMode] = useState<QaMode>("pipeline");
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [asking, setAsking] = useState(false);
@@ -58,7 +59,7 @@ export function SidePanel() {
     askingRef.current = true;
     setAsking(true);
     try {
-      const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", { question: text, model });
+      const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", { question: text, model, mode });
       setRange(result.window);
       setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "answer", result } : entry)));
     } catch (caught) {
@@ -156,6 +157,10 @@ export function SidePanel() {
             <div className="chatFormBar">
               <select className="chatModel" aria-label="模型" value={model} onChange={(event) => setModel(event.target.value)} disabled={!canAsk}>
                 {(models ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+              <select className="chatModel" aria-label="模式" value={mode} onChange={(event) => setMode(event.target.value as QaMode)} disabled={!canAsk}>
+                <option value="pipeline">舊流程</option>
+                <option value="agent">Agent</option>
               </select>
               {noModels && <div className="chatNote">目前沒有可用的模型</div>}
               {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}
