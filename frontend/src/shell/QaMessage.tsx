@@ -1,10 +1,25 @@
-import type { QaAnswer, QaRoute, QaStep } from "../api/types";
+import type { QaAnswer, QaHistoryItem, QaRoute, QaStep } from "../api/types";
 
 export type ChatEntry =
   | { id: number; kind: "question"; text: string }
   | { id: number; kind: "pending" }
   | { id: number; kind: "answer"; result: QaAnswer }
-  | { id: number; kind: "error"; message: string; sql: string | null };
+  | { id: number; kind: "error"; message: string; sql: string | null }
+  | { id: number; kind: "note"; text: string };
+
+// 後端上限：最多 40 則、每則 1000 字；超過會被 422 擋掉，所以送出前先裁
+const historyMaxItems = 40;
+const historyMaxChars = 1000;
+
+// 只送真正的對話：等待中與錯誤沒有內容，不放進去；系統紀錄用 user 角色，模型才看得到動作結果
+export function toHistory(entries: ChatEntry[]): QaHistoryItem[] {
+  const items: QaHistoryItem[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "question" || entry.kind === "note") items.push({ role: "user", content: entry.text });
+    else if (entry.kind === "answer") items.push({ role: "assistant", content: entry.result.answer });
+  }
+  return items.slice(-historyMaxItems).map((item) => ({ role: item.role, content: item.content.slice(0, historyMaxChars) }));
+}
 
 // 物件與陣列直接 String() 會變成 [object Object]，改用 JSON 才看得出內容
 const cellText = (value: unknown) => {
@@ -57,6 +72,9 @@ function StepList({ steps, route }: { steps: QaStep[]; route?: QaRoute }) {
 export function ChatMessage({ entry }: { entry: ChatEntry }) {
   if (entry.kind === "question") {
     return <div className="msg user"><div className="bubble">{entry.text}</div></div>;
+  }
+  if (entry.kind === "note") {
+    return <div className="chatNote qaNote">{entry.text}</div>;
   }
   if (entry.kind === "pending") {
     return <div className="msg bot"><div className="msgMeta">DESK</div><div className="bubble">查詢中…</div></div>;

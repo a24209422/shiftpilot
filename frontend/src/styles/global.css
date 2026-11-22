@@ -489,3 +489,6 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 /* 要比 .msg.bot .bubble 的邊框更具體才蓋得過去 */
 .msg.bot .bubble.qaError { border-color: var(--stamp); }
 .chatNote { font: 11px var(--font-accent); color: var(--base-300); }
+.qaNote { align-self: flex-start; }
+.chatClear { font: 11px var(--font-accent); color: var(--base-300); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 0; }
+.chatClear:disabled { cursor: default; text-decoration: none; opacity: 0.5; }

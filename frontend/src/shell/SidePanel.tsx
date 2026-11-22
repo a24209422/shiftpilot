@@ -5,7 +5,7 @@ import type { QaAnswer, QaMode, QaModel } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, toLocalDate } from "../forms/time";
 import { Icon } from "./icons";
-import { ChatMessage, type ChatEntry } from "./QaMessage";
+import { ChatMessage, toHistory, type ChatEntry } from "./QaMessage";
 
 // 跟後端的沙盒範圍一致：還沒問過問題前，先用今天前後各 90 天提示
 const windowDays = 90;
@@ -48,6 +48,11 @@ export function SidePanel() {
   const today = new Date();
   const shownRange = range ?? { from: toLocalDate(addDays(today, -windowDays)), to: toLocalDate(addDays(today, windowDays)) };
 
+  // 確認卡做完動作後補一行系統紀錄，下一輪對話模型才知道動作成功或失敗
+  // 之後由確認卡使用
+  const addNote = (text: string) => setEntries((current) => [...current, { id: nextId.current++, kind: "note", text }]);
+  void addNote;
+
   async function onSend(event: FormEvent) {
     event.preventDefault();
     const text = question.trim();
@@ -59,7 +64,9 @@ export function SidePanel() {
     askingRef.current = true;
     setAsking(true);
     try {
-      const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", { question: text, model, mode });
+      // history 取發問前的紀錄（此時 entries 還是 render 當下的值，不含這一題）；只有助理模式會讀
+      const body = mode === "assistant" ? { question: text, model, mode, history: toHistory(entries) } : { question: text, model, mode };
+      const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", body);
       setRange(result.window);
       setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "answer", result } : entry)));
     } catch (caught) {
@@ -162,7 +169,9 @@ export function SidePanel() {
                 <option value="pipeline">舊流程</option>
                 <option value="agent">Agent</option>
                 <option value="jev">Agent＋Jev</option>
+                <option value="assistant">助理</option>
               </select>
+              <button className="chatClear" type="button" onClick={() => setEntries([])} disabled={entries.length === 0 || asking}>清除對話</button>
               {noModels && <div className="chatNote">目前沒有可用的模型</div>}
               {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}
               <div className="chatNote">資料範圍：{formatDay(shownRange.from)} ～ {formatDay(shownRange.to)}</div>

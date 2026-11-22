@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { QaAnswer, QaModel } from "../api/types";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp } from "../test/renderApp";
+import { toHistory, type ChatEntry } from "./QaMessage";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -258,4 +259,63 @@ test("testJevRouteShownEvenWithoutSteps", async () => {
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
   expect(within(panel()).getByText("Jev 沒選定（呼叫失敗），三個工具都給")).toBeInTheDocument();
+});
+
+const askBodies = (api: { calls: { path: string; body?: unknown }[] }) => api.calls.filter((call) => call.path === "/api/qa/ask").map((call) => call.body as Record<string, unknown>);
+
+test("testToHistoryMapsAndTrims", () => {
+  const entries: ChatEntry[] = [];
+  for (let index = 0; index < 45; index += 1) {
+    entries.push({ id: index * 2, kind: "question", text: `問${index}` });
+    entries.push({ id: index * 2 + 1, kind: "answer", result: { ...answer, answer: `答${index}` } });
+  }
+  entries.push({ id: 100, kind: "note", text: "（系統紀錄）已建立" });
+  entries.push({ id: 101, kind: "error", message: "壞了", sql: null });
+  entries.push({ id: 102, kind: "pending" });
+  const history = toHistory(entries);
+  expect(history).toHaveLength(40);
+  expect(history[history.length - 1]).toEqual({ role: "user", content: "（系統紀錄）已建立" });
+  expect(history.every((item) => Object.keys(item).sort().join() === "content,role")).toBe(true);
+  expect(history.some((item) => item.content === "壞了")).toBe(false);
+  expect(toHistory([{ id: 1, kind: "question", text: "長".repeat(1200) }])[0].content).toHaveLength(1000);
+});
+
+test("testAssistantSendsHistory", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) });
+  const user = userEvent.setup();
+  await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "assistant");
+  await askQuestion("第一題");
+  await within(panel()).findByText(answer.answer);
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "第二題");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  await waitFor(() => expect(askBodies(api)).toHaveLength(2));
+  expect(askBodies(api)[0]).toEqual({ question: "第一題", model: "qwen2.5:3b", mode: "assistant", history: [] });
+  expect(askBodies(api)[1].history).toEqual([{ role: "user", content: "第一題" }, { role: "assistant", content: answer.answer }]);
+});
+
+test("testAgentModeSendsNoHistory", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const user = userEvent.setup();
+  await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "agent");
+  await askQuestion("第一題");
+  await within(panel()).findByText(answer.answer);
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "第二題");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  await waitFor(() => expect(askBodies(api)).toHaveLength(2));
+  expect(askBodies(api)[1]).not.toHaveProperty("history");
+});
+
+test("testClearConversation", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) });
+  const user = userEvent.setup();
+  await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "assistant");
+  await askQuestion("第一題");
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByRole("button", { name: "清除對話" }));
+  expect(within(panel()).queryByText("第一題", { selector: ".bubble" })).toBeNull();
+  expect(within(panel()).queryByText(answer.answer)).toBeNull();
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "第二題");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  await waitFor(() => expect(askBodies(api)).toHaveLength(2));
+  expect(askBodies(api)[1].history).toEqual([]);
 });
