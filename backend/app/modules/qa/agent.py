@@ -52,6 +52,7 @@ def runAgent(conn: Connection, toolLlm, model: str, messages: list[dict]) -> Age
     if outcome.exhausted or outcome.toolCalls >= maxToolCalls:
       outcome.exhausted = True
       break
-  if outcome.result is not None and (outcome.exhausted or not outcome.answer):
+  # Ollama 解析 tool call 模板失敗時，呼叫會變成 <tool_call> 純文字；那不是給人看的回答
+  if outcome.result is not None and (outcome.exhausted or not outcome.answer or "<tool_call>" in outcome.answer):
     outcome.answer = fallbackAnswer(outcome.result)
   return outcome

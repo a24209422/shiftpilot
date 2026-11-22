@@ -232,3 +232,21 @@ def testToolCallRetriesAndRedactionMatchCallModel(monkeypatch):
   with pytest.raises(llm.LlmUnavailableError) as info:
     llm.callModelWithTools("m1", [], tools, client=clientWith(lambda request: httpx.Response(401, text="no")), sleep=lambda seconds: None)
   assert "OPENROUTER_API_KEY" in info.value.message
+
+
+def testCloudExtraToolCallFieldsAreEchoed(monkeypatch):
+  # Gemini 這類供應商會在 tool_calls 附額外欄位，下一輪要原樣帶回
+  cloudEnv(monkeypatch)
+  rawCall = {"id": "abc", "type": "function", "function": {"name": "run_sql", "arguments": '{"sql": "SELECT 1"}'},
+             "extra_content": {"google": {"thought_signature": "sig"}}}
+  first = llm.callModelWithTools("m1", [], tools, client=clientWith(lambda request: cloudReply({"content": "", "tool_calls": [rawCall]})))
+  seen = {}
+
+  def handler(request):
+    seen["body"] = json.loads(request.content)
+    return cloudReply({"content": "好"})
+
+  history = [{"role": "assistant", "content": "", "toolCalls": first.toolCalls},
+             {"role": "tool", "toolCallId": "abc", "name": "run_sql", "content": "結果"}]
+  llm.callModelWithTools("m1", history, tools, client=clientWith(handler))
+  assert seen["body"]["messages"][0]["tool_calls"] == [rawCall]

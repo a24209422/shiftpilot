@@ -117,3 +117,13 @@ def testFormatForModelLimitsRows():
 
 def testToolDefinitionsNames():
   assert [item["function"]["name"] for item in tools.toolDefinitions] == ["run_sql", "find_available_people", "get_busy_periods"]
+
+
+def testTimezoneDatesAreRejected(sandbox):
+  # 沙盒的時間欄位沒有時區；混用會讓比較丟 TypeError，兩邊都帶時區則會依 session 時區偏掉
+  for arguments in [
+    {"start": "2026-11-23T09:00+08:00", "end": "2026-11-23 10:00"},
+    {"start": "2026-11-23T09:00+08:00", "end": "2026-11-23T10:00+08:00"},
+  ]:
+    result = tools.executeTool(sandbox.conn, "find_available_people", arguments)
+    assert not result.ok and "時區" in result.error

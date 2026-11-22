@@ -119,6 +119,9 @@ def parseRange(arguments: dict) -> tuple[datetime, datetime]:
       bounds.append(datetime.fromisoformat(text))
     except ValueError:
       raise ToolArgumentError(f"{name} 的格式要是 YYYY-MM-DD HH:MM，收到：{text}")
+    # 沙盒的時間欄位沒有時區：帶時區的值無法和沒帶的比較，跟資料表比也會依 session 時區偏掉
+    if bounds[-1].tzinfo is not None:
+      raise ToolArgumentError(f"{name} 不要帶時區，用 YYYY-MM-DD HH:MM，收到：{text}")
   if bounds[1] < bounds[0]:
     raise ToolArgumentError("end 不能早於 start")
   return bounds[0], bounds[1]

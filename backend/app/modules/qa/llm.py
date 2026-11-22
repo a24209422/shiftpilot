@@ -117,6 +117,8 @@ class ToolCall:
   name: str
   arguments: dict | None
   rawArguments: str
+  # 雲端供應商回傳的原始 tool call；有些（例如 Gemini 的 thought_signature）要求下一輪原樣帶回
+  raw: dict | None = None
 
 
 @dataclass
@@ -195,7 +197,8 @@ def toCloudMessages(messages: list[dict]) -> list[dict]:
   for message in messages:
     if message["role"] == "assistant" and message.get("toolCalls"):
       calls = [
-        {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.rawArguments}}
+        # 原始資料沒有 id 時改用自己補的 id，才對得上 tool 訊息的 tool_call_id
+        call.raw if call.raw and call.raw.get("id") else {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.rawArguments}}
         for call in message["toolCalls"]
       ]
       result.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": calls})
@@ -224,7 +227,7 @@ def parseToolCalls(rawCalls) -> list[ToolCall]:
     function = rawCall.get("function") or {}
     arguments, rawArguments = parseArguments(function.get("arguments"))
     # 舊版 Ollama 不給 id；自己補一個，同一輪內不重複即可
-    result.append(ToolCall(rawCall.get("id") or f"call_{index}", function.get("name") or "", arguments, rawArguments))
+    result.append(ToolCall(rawCall.get("id") or f"call_{index}", function.get("name") or "", arguments, rawArguments, rawCall))
   return result
 
 

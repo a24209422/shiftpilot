@@ -109,3 +109,12 @@ def testAgentPromptHasToolsGuideWithoutFewShots(sandbox):
   assert "find_available_people" in system and "get_busy_periods" in system and "日期參考" in system
   assert "busy_periods" in system and "工程部" in system
   assert [message["role"] for message in messages] == ["system", "user"] and messages[1]["content"] == "誰有空？"
+
+
+def testRawToolCallTextAfterSuccessFallsBack(sandbox):
+  # Ollama 解析模板失敗時，tool call 會變成純文字；不能把這段原文當回答顯示
+  fake = scriptedTools(
+    reply(call("run_sql", {"sql": "SELECT name FROM employees"})),
+    reply(content='<tool_call>{"name": "run_sql", "arguments": {}}</tool_call>'),
+  )
+  assert run(sandbox, fake).answer == "查到 4 筆資料。"
