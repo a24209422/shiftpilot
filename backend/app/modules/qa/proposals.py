@@ -79,10 +79,10 @@ def formatDay(value: datetime) -> str:
 
 
 def formatRange(start: datetime, end: datetime) -> str:
-  # 同一天的短橫線不加空白，跨日的加空白，跟前端 forms/time.formatRange 的分段方式相同
+  # 跟前端 forms/time.formatRange 一字不差：同一天的短橫線不加空白，跨日的加空白
   if start.date() == end.date():
-    return f"{formatDay(start)}{start:%H:%M}–{end:%H:%M}"
-  return f"{formatDay(start)}{start:%H:%M} – {formatDay(end)}{end:%H:%M}"
+    return f"{formatDay(start)} {start:%H:%M}–{end:%H:%M}"
+  return f"{formatDay(start)} {start:%H:%M} – {formatDay(end)} {end:%H:%M}"
 
 
 def apiTime(value: datetime) -> str:

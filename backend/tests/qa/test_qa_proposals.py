@@ -38,10 +38,10 @@ def bookingArguments(**overrides):
 
 
 def testFormatRange():
-  assert formatRange(datetime(2026, 11, 25, 14), datetime(2026, 11, 25, 15)) == "11/25（三）14:00–15:00"
-  assert formatRange(datetime(2026, 11, 24, 9), datetime(2026, 11, 25, 18)) == "11/24（二）09:00 – 11/25（三）18:00"
+  assert formatRange(datetime(2026, 11, 25, 14), datetime(2026, 11, 25, 15)) == "11/25（三） 14:00–15:00"
+  assert formatRange(datetime(2026, 11, 24, 9), datetime(2026, 11, 25, 18)) == "11/24（二） 09:00 – 11/25（三） 18:00"
   # 週日要是「日」
-  assert formatRange(datetime(2026, 11, 22, 9), datetime(2026, 11, 22, 10)) == "11/22（日）09:00–10:00"
+  assert formatRange(datetime(2026, 11, 22, 9), datetime(2026, 11, 22, 10)) == "11/22（日） 09:00–10:00"
 
 
 def testFindAsker(world):
@@ -65,7 +65,7 @@ def testProposeBooking(world):
     "resourceIds": [world.bRoom], "participantEmployeeIds": [world.alice],
   }}
   summary = summaryOf(result)
-  assert summary["標題"] == "討論" and summary["參加者"] == "你、alice" and summary["時間"] == "11/25（三）14:00–15:00"
+  assert summary["標題"] == "討論" and summary["參加者"] == "你、alice" and summary["時間"] == "11/25（三） 14:00–15:00"
   assert summary["會議室"] == "B 會議室"
 
 
@@ -112,7 +112,7 @@ def testRescheduleAndCancelNeedKnownBooking(world):
     "method": "PATCH", "path": f"/api/booking/bookings/{weekly}", "body": {"startAt": "2026-11-27T10:00", "endAt": "2026-11-27T11:00"},
   }
   summary = summaryOf(moved)
-  assert summary["標題"] == "週會" and summary["時間"] == "11/26（四）10:00–11:00 → 11/27（五）10:00–11:00"
+  assert summary["標題"] == "週會" and summary["時間"] == "11/26（四） 10:00–11:00 → 11/27（五） 10:00–11:00"
   cancel = executeProposal(world.bobData, world.bobAsker, "propose_cancel_booking", {"bookingId": weekly})
   assert cancel.ok and cancel.proposal["kind"] == "booking.cancel"
   assert cancel.proposal["request"] == {"method": "POST", "path": f"/api/booking/bookings/{weekly}/cancel", "body": None}
@@ -128,7 +128,7 @@ def testProposeLeaveHasQuote(world):
   assert request["body"]["leaveTypeId"] == world.types["personal"]
   assert result.proposal["quote"] == {"path": "/api/leave/requests/quote", "body": request["body"]}
   summary = summaryOf(result)
-  assert summary["假別"] == typeName and summary["原因"] == "（未填）" and summary["時間"] == "11/25（三）09:00–18:00"
+  assert summary["假別"] == typeName and summary["原因"] == "（未填）" and summary["時間"] == "11/25（三） 09:00–18:00"
 
 
 def testWithdrawOnlyOwnPending(world):
