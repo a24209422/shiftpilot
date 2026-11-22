@@ -43,6 +43,8 @@ docker compose exec app python -m app.cli seedDemo                              
 
 沒設定 `QA_DB_PASSWORD` 時問答會停用，其他功能照常。用雲端模型時（`OPENROUTER_API_KEY`、`GOOGLE_AI_API_KEY`），問題與查詢結果會送到廠商。
 
+同時最多處理 3 題、每人同時 1 題，滿了會直接回「忙碌中」（不排隊），避免慢的問答占滿執行緒、拖慢其他功能。上限在 `backend/app/modules/qa/service.py` 的 `maxConcurrentQuestions`；名額記在記憶體裡，只在單一 uvicorn worker 下有效。
+
 ## 問答準確率
 
 評測集在 `backend/evals/`：固定的公司資料（「現在」固定在 2026-11-17 星期二 14:30）、dev 40 題、test 25 題，每題指定提問者（一般員工、主管或人資）。比的是模型 SQL 跟標準答案 SQL 的執行結果；test 題由另一個 agent 出題後凍結，調整 prompt 時只看 dev，test 只看總分。

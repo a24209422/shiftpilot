@@ -42,9 +42,9 @@ def scripted(*replies):
   return fake
 
 
-def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b"):
+def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None):
   with openDb(w.url) as conn:
-    return service.ask(conn, w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm)
+    return service.ask(conn, actor or w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm)
 
 
 def expectError(code, call, *args, **kwargs):
@@ -139,15 +139,49 @@ def testClosedThinkIsStrippedFromAnswer(world):
   assert result["answer"] == "四位。"
 
 
-def testNoTransactionHeldDuringLlmCalls(world):
-  statuses = []
+def testRequestConnectionClosedDuringLlmCalls(world):
+  closedStates = []
   with openDb(world.url) as conn:
     def fake(model, messages):
-      statuses.append(conn.info.transaction_status)
-      return "SELECT name FROM employees" if len(statuses) == 1 else "好。"
+      closedStates.append(conn.closed)
+      return "SELECT name FROM employees" if len(closedStates) == 1 else "好。"
 
     service.ask(conn, world.bobActor, "有哪些員工？", "qwen2.5:3b", world.qaUrl, now, llm=fake)
-  assert statuses == [psycopg.pq.TransactionStatus.IDLE] * 2
+  assert closedStates == [True, True]
+
+
+def askDuringFirstQuestion(w, secondActor):
+  # 第一題（bob）還在等模型回覆時送出第二題，回傳第二題的結果
+  second = {}
+
+  def firstLlm(model, messages):
+    if "result" not in second:
+      second["result"] = ask(w, scripted("SELECT 1", "好。"), actor=secondActor)
+      return "SELECT name FROM employees"
+    return "好。"
+
+  ask(w, firstLlm)
+  return second["result"]
+
+
+def testSameUserCannotAskWhileQuestionRunning(world):
+  error = expectError("QA_USER_BUSY", askDuringFirstQuestion, world, world.bobActor)
+  assert error.status == 429
+
+
+def testAskRejectedWhenAllSlotsBusy(world, monkeypatch):
+  monkeypatch.setattr(service, "maxConcurrentQuestions", 1)
+  error = expectError("QA_BUSY", askDuringFirstQuestion, world, world.aliceActor)
+  assert error.status == 429
+
+
+def testOtherUserCanAskWhileSlotsRemain(world):
+  assert askDuringFirstQuestion(world, world.aliceActor)["rows"] == [[1]]
+
+
+def testSlotReleasedAfterFailedQuestion(world):
+  expectError("QA_MODEL_UNAVAILABLE", ask, world, scripted(LlmUnavailableError("無法呼叫 Ollama：refused")))
+  assert ask(world, scripted("SELECT 1", "好。"))["rows"] == [[1]]
 
 
 def testRetryFeedbackContainsErrorAndPreviousReply(world):
