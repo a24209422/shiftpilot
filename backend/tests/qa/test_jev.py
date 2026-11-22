@@ -146,3 +146,17 @@ def testBusyPeriodsCriterionSaysWhatItCannotAnswer():
   text = jev.jevCriteria["get_busy_periods"]
   # 它的欄位只有誰、起訖、種類、標題；要假別、核准狀態、參加者或統計時得用 run_sql
   assert all(word in text for word in ("假別", "核准", "參加者", "run_sql"))
+
+
+def testMasksKeyCutByTruncation(caplog):
+  # key 剛好跨過第 200 個字元：先截斷再遮，會把半截 key 原樣寫進 log
+  client = clientReturning(text="x" * 190 + secretKey, status=401)
+  with caplog.at_level(logging.WARNING):
+    jev.chooseTool("誰有空", fixedNow, client)
+  assert secretKey[:8] not in caplog.text
+
+
+def testInvalidUrlFallsBack(monkeypatch):
+  monkeypatch.setenv("JEV_URL", "https://api.typesafe.ai:abc/")
+  decision = jev.chooseTool("誰有空", fixedNow, clientReturning(goodPayload()))
+  assert decision.tool is None and decision.fallbackReason == "unavailable"

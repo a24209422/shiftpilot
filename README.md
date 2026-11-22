@@ -100,7 +100,7 @@ agent 模式讓模型自己呼叫三個工具：`run_sql`（沿用 SQL 檢查與
 
 ### agent vs agent＋Jev（決策模型選工具）
 
-jev 模式在 agent 前面加一步：先問 Jev（TypeSafe 的決策模型，只回答事先定義的選項、不產生文字）「這題該用哪個工具」，再讓 LLM 只拿到被選中的那個工具去填參數。Jev 沒設定、信心低於 0.5、逾時或回應格式不對時，退回三個工具都給的 agent。要用先在 `.env` 填 `JEV_API_KEY`（見 `.env.example`），API 的 `mode` 設 `jev`，問答面板選「Agent＋Jev」。Jev 只看到問題文字、日期參考和三個選項的說明，看不到任何資料。
+jev 模式在 agent 前面加一步：先問 Jev（TypeSafe 的決策模型，只回答事先定義的選項、不產生文字）「這題該用哪個工具」，再讓 LLM 只拿到被選中的那個工具去填參數。Jev 信心低於 0.5、逾時或回應格式不對時，退回三個工具都給的 agent；沒設 `JEV_API_KEY` 則直接回 503，不會退回。要用先在 `.env` 填 `JEV_API_KEY`（見 `.env.example`），API 的 `mode` 設 `jev`，問答面板選「Agent＋Jev」。Jev 只看到問題文字、日期參考和三個選項的說明，看不到任何資料。
 
 | 2026-11-22 | dev | 誰有空 | test | 平均秒數 | LLM 輸入 tokens（dev） | Jev tokens（dev） |
 |---|---|---|---|---|---|---|

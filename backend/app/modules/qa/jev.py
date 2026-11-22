@@ -102,14 +102,17 @@ def chooseTool(question: str, now: datetime, client: httpx.Client | None = None)
     )
     response.raise_for_status()
     tool, confidence, tokens = parseJevResponse(response.json())
-  except httpx.HTTPError as error:
+  # InvalidURL 不是 HTTPError 的子類別：JEV_URL 寫壞時也要退回，不能讓每個請求都變 500
+  except (httpx.HTTPError, httpx.InvalidURL) as error:
     detail = str(error)
     response = getattr(error, "response", None)
     if response is not None:
-      detail = f"HTTP {response.status_code}：{response.text[:200]}"
-    # 供應商可能把送出的 key 回顯在錯誤內容裡，寫進 log 前先遮掉
+      detail = response.text
+    # 供應商可能把送出的 key 回顯在錯誤內容裡；先遮再截斷，否則 key 跨過截斷點時會留下半截明文
     if config["apiKey"]:
       detail = detail.replace(config["apiKey"], "***")
+    if response is not None:
+      detail = f"HTTP {response.status_code}：{detail[:200]}"
     logger.warning("Jev 呼叫失敗：%s", detail)
     return fallback("unavailable")
   except (ValueError, KeyError, TypeError, AttributeError):
