@@ -56,11 +56,16 @@ def isConfigured() -> bool:
   return bool(getJevConfig()["apiKey"])
 
 
+def buildJevDateReference(now: datetime) -> str:
+  # 選工具用不到「下週三是幾號」；只留開頭 4 行（今天與本週、下週、上週範圍），省掉逐日表
+  return "\n".join(prompt.buildDateReference(now).splitlines()[:4])
+
+
 def buildJevRequest(question: str, now: datetime) -> dict:
   # 只送問題、日期參考與選項說明：選工具用不到資料，送得越少越少資料離開本機
   return {
     "model": getJevConfig()["model"],
-    "state": f"{prompt.buildDateReference(now)}\n\n使用者的問題：{question}",
+    "state": f"{buildJevDateReference(now)}\n\n使用者的問題：{question}",
     "questions": {questionName: {
       "type": "choice",
       "instructions": "這題該用哪個工具回答？",

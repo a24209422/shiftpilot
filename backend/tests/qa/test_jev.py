@@ -42,7 +42,12 @@ def clientReturning(payload=None, status=200, text=None, calls=None):
 def testBuildRequestHasOnlyQuestionDateAndOptions():
   payload = jev.buildJevRequest("下週二下午誰有空？", fixedNow)
   text = json.dumps(payload, ensure_ascii=False)
-  assert "下週二下午誰有空？" in payload["state"] and buildDateReference(fixedNow) in payload["state"]
+  assert "下週二下午誰有空？" in payload["state"]
+  # Jev 只選工具，不需要逐日的日期表；留今天與本週、下週、上週的範圍就夠
+  assert "今天是 2026-11-22 星期日" in payload["state"]
+  assert "下週：2026-11-23 ～ 2026-11-29" in payload["state"]
+  assert "2026-11-24 星期二" not in payload["state"]
+  assert len(payload["state"]) < len(buildDateReference(fixedNow)) / 2
   assert all(option in text for option in jev.jevOptions)
   # 沒有資料表說明或任何資料列
   assert prompt.schemaText not in text and "day_shifts" not in text and "employees" not in text
