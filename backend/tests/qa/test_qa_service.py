@@ -8,7 +8,7 @@ import pytest
 from app.infra.db import openDb
 from app.infra.errors import AppError
 from app.modules.qa import sandbox, service
-from app.modules.qa.llm import LlmUnavailableError
+from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 from tests.leave.world import makeWorld
 
 now = datetime(2026, 11, 21, 10)
@@ -17,6 +17,7 @@ now = datetime(2026, 11, 21, 10)
 @pytest.fixture(autouse=True)
 def localModelsOnly(monkeypatch):
   monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+  monkeypatch.delenv("QA_MODE", raising=False)
   for name in ("LOCAL_MODELS", "OPENROUTER_API_KEY", "GOOGLE_AI_API_KEY"):
     monkeypatch.setenv(name, "")
 
@@ -42,9 +43,16 @@ def scripted(*replies):
   return fake
 
 
-def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None):
+def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None, mode=None, toolLlm=None):
   with openDb(w.url) as conn:
-    return service.ask(conn, actor or w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm)
+    return service.ask(
+      conn, actor or w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm,
+      mode=mode, toolLlm=toolLlm or unusedToolLlm,
+    )
+
+
+def unusedToolLlm(model, messages, tools):
+  raise AssertionError("舊流程不該呼叫 tool calling")
 
 
 def expectError(code, call, *args, **kwargs):
@@ -226,3 +234,84 @@ def testDateReferenceCoversTwoWeeksEachSide(world):
   ask(world, llm)
   system = llm.calls[0][0]["content"]
   assert "2026-11-07 星期六" in system and "2026-12-05 星期六" in system
+
+
+def toolScript(*replies):
+  calls = []
+
+  def fake(model, messages, tools):
+    calls.append(list(messages))
+    item = replies[len(calls) - 1]
+    if isinstance(item, Exception):
+      raise item
+    return item
+
+  fake.calls = calls
+  return fake
+
+
+def sqlCall(sql):
+  return ToolReply("", [ToolCall("c1", "run_sql", {"sql": sql}, "")], 10, 2)
+
+
+def testDefaultModeIsPipeline(world):
+  assert ask(world, scripted("SELECT 1 AS n", "一。"))["mode"] == "pipeline"
+
+
+def testEnvModeAgent(world, monkeypatch):
+  monkeypatch.setenv("QA_MODE", "agent")
+  toolLlm = toolScript(sqlCall("SELECT name FROM employees"), ToolReply("四位。", [], 5, 1))
+  result = ask(world, scripted(), toolLlm=toolLlm)
+  assert result["mode"] == "agent" and len(toolLlm.calls) == 2
+
+
+def testBodyModeOverridesEnv(world, monkeypatch):
+  monkeypatch.setenv("QA_MODE", "agent")
+  assert ask(world, scripted("SELECT 1 AS n", "一。"), mode="pipeline")["mode"] == "pipeline"
+
+
+def testBadEnvMode(world, monkeypatch):
+  monkeypatch.setenv("QA_MODE", "foo")
+  expectError("QA_NOT_CONFIGURED", ask, world, scripted())
+
+
+def testAgentSuccessShape(world):
+  toolLlm = toolScript(sqlCall("SELECT name FROM employees ORDER BY name"), ToolReply("四位。", [], 5, 1))
+  result = ask(world, scripted(), mode="agent", toolLlm=toolLlm)
+  assert result["answer"] == "四位。" and result["mode"] == "agent" and result["columns"] == ["name"] and len(result["rows"]) == 4
+  assert result["sql"] == "SELECT name FROM employees ORDER BY name" and result["toolCalls"] == 1 and result["exhausted"] is False
+  assert result["steps"] == [{"tool": "run_sql", "arguments": {"sql": "SELECT name FROM employees ORDER BY name"}, "rowCount": 4, "error": None}]
+  assert (result["promptTokens"], result["completionTokens"]) == (15, 3)
+  assert result["window"] and result["remote"] is False
+  system = toolLlm.calls[0][0]["content"]
+  assert "find_available_people" in system
+
+
+def testAgentFixedToolResultHasEmptySql(world):
+  call = ToolReply("", [ToolCall("c1", "get_busy_periods", {"start": "2026-11-21", "end": "2026-11-22"}, "")], None, None)
+  result = ask(world, scripted(), mode="agent", toolLlm=toolScript(call, ToolReply("沒有。", [], None, None)))
+  assert result["sql"] == "" and result["columns"] == ["who", "start_at", "end_at", "kind", "label"]
+
+
+def testAgentNoResultIsQueryFailed(world):
+  error = expectError("QA_QUERY_FAILED", ask, world, scripted(), mode="agent", toolLlm=toolScript(ToolReply("直接回答", [], None, None)))
+  assert error.details["toolCalls"] == 0 and error.details["exhausted"] is False and error.details["sql"] == ""
+  assert "模型沒有呼叫工具" in error.message
+
+
+def testAgentAllToolsFailedKeepsLastSql(world):
+  toolLlm = toolScript(sqlCall("SELECT nope FROM employees"), ToolReply("算了", [], None, None))
+  error = expectError("QA_QUERY_FAILED", ask, world, scripted(), mode="agent", toolLlm=toolLlm)
+  assert error.details["sql"] == "SELECT nope FROM employees" and "nope" in error.details["error"]
+  assert error.details["steps"][0]["error"]
+
+
+def testAgentModelUnavailable(world):
+  toolLlm = toolScript(LlmUnavailableError("無法呼叫 Ollama：refused"))
+  error = expectError("QA_MODEL_UNAVAILABLE", ask, world, scripted(), mode="agent", toolLlm=toolLlm)
+  assert error.status == 503
+
+
+def testAgentReleasesSlot(world):
+  expectError("QA_QUERY_FAILED", ask, world, scripted(), mode="agent", toolLlm=toolScript(ToolReply("x", [], None, None)))
+  assert ask(world, scripted("SELECT 1", "好。"))["rows"] == [[1]]

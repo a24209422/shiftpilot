@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.main import createApp
 from app.modules.qa import llm as qaLlm
-from app.modules.qa.llm import LlmUnavailableError
+from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 
 
 @pytest.fixture
@@ -11,6 +11,7 @@ def qaClient(migratedUrl, qaSandboxUrl, monkeypatch):
   monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
   for name in ("LOCAL_MODELS", "OPENROUTER_API_KEY", "GOOGLE_AI_API_KEY"):
     monkeypatch.setenv(name, "")
+  monkeypatch.delenv("QA_MODE", raising=False)
   return TestClient(createApp(migratedUrl, qaDatabaseUrl=qaSandboxUrl), headers={"X-App-Client": "web"})
 
 
@@ -55,3 +56,19 @@ def testAskWithoutSandboxConfigured(migratedUrl, loginAs, monkeypatch):
   loginAs("employee", employee=True, client=client)
   response = client.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b"})
   assert response.status_code == 503 and response.json()["error"]["code"] == "QA_NOT_CONFIGURED"
+
+
+def testAskAgentModeEndToEnd(qaClient, loginAs, monkeypatch):
+  replies = iter([ToolReply("", [ToolCall("c1", "run_sql", {"sql": "SELECT name FROM employees"}, "")], None, None), ToolReply("一位。", [], None, None)])
+  monkeypatch.setattr(qaLlm, "callModelWithTools", lambda model, messages, tools: next(replies))
+  loginAs("employee", employee=True, client=qaClient)
+  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "agent"})
+  assert response.status_code == 200, response.text
+  body = response.json()
+  assert body["mode"] == "agent" and len(body["steps"]) == 1 and body["answer"] == "一位。"
+
+
+def testAskRejectsUnknownMode(qaClient, loginAs):
+  loginAs("employee", employee=True, client=qaClient)
+  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "x"})
+  assert response.status_code == 422

@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from datetime import datetime
@@ -9,7 +10,7 @@ from psycopg import Connection
 from app.infra.actor import Actor
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
-from app.modules.qa import prompt, sandbox, sqlguard
+from app.modules.qa import agent, prompt, sandbox, sqlguard
 from app.modules.qa.tools import describeSqlError
 
 logger = logging.getLogger(__name__)
@@ -56,11 +57,75 @@ def composeAnswer(llm, model: str, question: str, columns: list[str], rows: list
   return answer or fallback
 
 
+modes = ("pipeline", "agent")
+
+
+def resolveMode(mode: str | None) -> str:
+  if mode is None:
+    # 沒指定時預設舊流程：沒設 QA_MODE 的部署行為完全不變
+    mode = os.getenv("QA_MODE", "").strip() or "pipeline"
+  if mode not in modes:
+    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline 或 agent", 503)
+  return mode
+
+
+def runPipeline(sandboxConn, llm, model: str, question: str, data, now: datetime) -> dict:
+  messages = prompt.buildSqlMessages(question, data, now)
+  sql, lastError, result = "", "", None
+  for _ in range(2):
+    reply = callLlm(llm, model, messages)
+    sql = sqlguard.extractSql(reply)
+    try:
+      sqlguard.validateSql(sql)
+      result = sandbox.runQuery(sandboxConn, sql)
+      break
+    except (sqlguard.UnsafeSqlError, psycopg.Error) as error:
+      lastError = describeSqlError(error)
+      # 把錯誤訊息回饋給模型重試：小模型常拼錯欄位名稱，給它看錯誤通常一次就能修好
+      messages = messages + [
+        {"role": "assistant", "content": reply or "（沒有輸出）"},
+        {"role": "user", "content": f"這句 SQL 失敗了：{lastError}\n請修正後只輸出一句 SQL。"},
+      ]
+  if result is None:
+    raise AppError("QA_QUERY_FAILED", f"查詢失敗：{lastError}", 422, {"sql": sql, "error": lastError})
+  columns, rows, truncated = result
+  return {
+    "answer": composeAnswer(llm, model, question, columns, rows, truncated),
+    "sql": sql, "columns": columns, "rows": rows, "truncated": truncated,
+  }
+
+
+def runAgentMode(sandboxConn, toolLlm, model: str, question: str, data, now: datetime) -> dict:
+  try:
+    outcome = agent.runAgent(sandboxConn, toolLlm, model, prompt.buildAgentMessages(question, data, now))
+  except llmModule.LlmUnavailableError as error:
+    raise AppError("QA_MODEL_UNAVAILABLE", error.message, 503)
+  extra = {
+    "steps": outcome.steps, "toolCalls": outcome.toolCalls, "exhausted": outcome.exhausted,
+    "promptTokens": outcome.promptTokens, "completionTokens": outcome.completionTokens,
+  }
+  if outcome.result is None:
+    lastError = next((step["error"] for step in reversed(outcome.steps) if step["error"]), None) or "模型沒有呼叫工具"
+    lastSql = next((step["arguments"].get("sql") for step in reversed(outcome.steps)
+                    if step["tool"] == "run_sql" and isinstance(step["arguments"], dict)), None)
+    raise AppError("QA_QUERY_FAILED", f"查詢失敗：{lastError}", 422, {
+      "sql": lastSql if isinstance(lastSql, str) else "", "error": lastError,
+      "steps": outcome.steps, "toolCalls": outcome.toolCalls, "exhausted": outcome.exhausted,
+    })
+  result = outcome.result
+  return {
+    "answer": outcome.answer, "sql": result.sql or "", "columns": result.columns, "rows": result.rows, "truncated": result.truncated,
+    **extra,
+  }
+
+
 def ask(
-  conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel
+  conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel,
+  mode: str | None = None, toolLlm=llmModule.callModelWithTools,
 ) -> dict:
   if not qaDatabaseUrl:
     raise AppError("QA_NOT_CONFIGURED", "問答還沒設定：請在 .env 設定 QA_DB_PASSWORD 並建立 qa_sandbox 帳號（見 README 的「問答」）", 503)
+  mode = resolveMode(mode)
   question = (question or "").strip()
   if not question or len(question) > maxQuestionLength:
     raise AppError("VALIDATION", f"問題要 1 到 {maxQuestionLength} 個字", 422, {"field": "question"})
@@ -74,38 +139,21 @@ def ask(
     # 也不該一直占著一條連線：之後只用沙盒連線，請求的連線先關掉（psycopg 離開 with 時遇到已關閉的連線會直接略過）
     conn.commit()
     conn.close()
-    messages = prompt.buildSqlMessages(question, data, now)
-    sql, lastError, result = "", "", None
     try:
       with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
-        for _ in range(2):
-          reply = callLlm(llm, model, messages)
-          sql = sqlguard.extractSql(reply)
-          try:
-            sqlguard.validateSql(sql)
-            result = sandbox.runQuery(sandboxConn, sql)
-            break
-          except (sqlguard.UnsafeSqlError, psycopg.Error) as error:
-            lastError = describeSqlError(error)
-            # 把錯誤訊息回饋給模型重試：小模型常拼錯欄位名稱，給它看錯誤通常一次就能修好
-            messages = messages + [
-              {"role": "assistant", "content": reply or "（沒有輸出）"},
-              {"role": "user", "content": f"這句 SQL 失敗了：{lastError}\n請修正後只輸出一句 SQL。"},
-            ]
+        if mode == "agent":
+          body = runAgentMode(sandboxConn, toolLlm, model, question, data, now)
+        else:
+          body = runPipeline(sandboxConn, llm, model, question, data, now)
     except psycopg.OperationalError:
-      # 迴圈內的資料庫錯誤都已被接住，能走到這裡的只有開沙盒連線失敗；例外文字可能含主機與 port，只寫進伺服器 log
+      # 兩種模式內的資料庫錯誤都已被接住，能走到這裡的只有開沙盒連線失敗；例外文字可能含主機與 port，只寫進伺服器 log
       logger.exception("問答沙盒連線失敗")
       raise AppError(
         "QA_SANDBOX_UNAVAILABLE",
         "問答沙盒帳號連不上：請確認 .env 的 QA_DB_PASSWORD 與資料庫裡的 qa_sandbox 帳號一致（見 README 的「問答」）",
         503,
       )
-    if result is None:
-      raise AppError("QA_QUERY_FAILED", f"查詢失敗：{lastError}", 422, {"sql": sql, "error": lastError})
-    columns, rows, truncated = result
     return {
-      "answer": composeAnswer(llm, model, question, columns, rows, truncated),
-      "sql": sql, "columns": columns, "rows": rows, "truncated": truncated,
-      "model": model, "remote": models[model]["remote"],
+      **body, "mode": mode, "model": model, "remote": models[model]["remote"],
       "window": {"from": data.windowStart.isoformat(), "to": data.windowEnd.isoformat()},
     }
