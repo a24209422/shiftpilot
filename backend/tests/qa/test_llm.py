@@ -133,3 +133,102 @@ def testSameIdInLocalAndCloudResolvesToOllama(monkeypatch):
   monkeypatch.setenv("OPENROUTER_MODELS", "shared-model")
   assert llm.getProvider("shared-model") == "ollama"
   assert llm.getProvider("anthropic/claude-haiku-5.5") == "ollama"
+
+
+tools = [{"type": "function", "function": {"name": "run_sql", "description": "x", "parameters": {"type": "object", "properties": {}}}}]
+conversation = [
+  {"role": "user", "content": "hi"},
+  {"role": "assistant", "content": "", "toolCalls": [llm.ToolCall("abc", "run_sql", {"sql": "SELECT 1"}, '{"sql": "SELECT 1"}')]},
+  {"role": "tool", "toolCallId": "abc", "name": "run_sql", "content": "結果"},
+]
+
+
+def cloudEnv(monkeypatch):
+  monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+  monkeypatch.setenv("OPENROUTER_MODELS", "m1")
+
+
+def cloudReply(message, usage=None):
+  payload = {"choices": [{"message": message}]}
+  if usage:
+    payload["usage"] = usage
+  return httpx.Response(200, json=payload)
+
+
+def testOllamaToolCallsAreParsed():
+  seen = {}
+
+  def handler(request):
+    seen["body"] = json.loads(request.content)
+    return httpx.Response(200, json={
+      "message": {"content": "", "tool_calls": [{"function": {"name": "run_sql", "arguments": {"sql": "SELECT 1"}}}]},
+      "prompt_eval_count": 120, "eval_count": 8,
+    })
+
+  reply = llm.callModelWithTools("qwen2.5:3b", [{"role": "user", "content": "hi"}], tools, client=clientWith(handler))
+  assert seen["body"]["tools"] == tools
+  assert seen["body"]["options"] == {"temperature": 0, "num_ctx": 8192}
+  assert reply.toolCalls[0].name == "run_sql" and reply.toolCalls[0].arguments == {"sql": "SELECT 1"}
+  assert reply.toolCalls[0].id
+  assert (reply.promptTokens, reply.completionTokens) == (120, 8)
+  assert reply.content == ""
+
+
+def testOllamaMessagesAreConverted():
+  seen = {}
+
+  def handler(request):
+    seen["body"] = json.loads(request.content)
+    return httpx.Response(200, json={"message": {"content": "好"}})
+
+  reply = llm.callModelWithTools("qwen2.5:3b", conversation, tools, client=clientWith(handler))
+  assert reply.content == "好" and reply.toolCalls == []
+  assert (reply.promptTokens, reply.completionTokens) == (None, None)
+  sent = seen["body"]["messages"]
+  assert sent[1] == {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "run_sql", "arguments": {"sql": "SELECT 1"}}}]}
+  assert sent[2] == {"role": "tool", "content": "結果"}
+
+
+def testCloudToolCallsAndUsage(monkeypatch):
+  cloudEnv(monkeypatch)
+  message = {"content": None, "tool_calls": [{"id": "abc", "type": "function", "function": {
+    "name": "get_busy_periods", "arguments": '{"start": "2026-11-24 12:00"}'}}]}
+  handler = lambda request: cloudReply(message, {"prompt_tokens": 300, "completion_tokens": 20})
+  reply = llm.callModelWithTools("m1", [], tools, client=clientWith(handler))
+  assert reply.toolCalls[0].id == "abc" and reply.toolCalls[0].arguments == {"start": "2026-11-24 12:00"}
+  assert (reply.promptTokens, reply.completionTokens) == (300, 20)
+  assert reply.content == ""
+
+
+def testCloudMessagesAreConverted(monkeypatch):
+  cloudEnv(monkeypatch)
+  seen = {}
+
+  def handler(request):
+    seen["body"] = json.loads(request.content)
+    return cloudReply({"content": "好"})
+
+  llm.callModelWithTools("m1", conversation, tools, client=clientWith(handler))
+  sent = seen["body"]["messages"]
+  assert sent[1] == {"role": "assistant", "content": "", "tool_calls": [
+    {"id": "abc", "type": "function", "function": {"name": "run_sql", "arguments": '{"sql": "SELECT 1"}'}}]}
+  assert sent[2] == {"role": "tool", "tool_call_id": "abc", "content": "結果"}
+  assert seen["body"]["tools"] == tools and seen["body"]["temperature"] == 0
+
+
+def testCloudInvalidArgumentsJsonKeepsRaw(monkeypatch):
+  cloudEnv(monkeypatch)
+  message = {"content": "", "tool_calls": [{"id": "x", "type": "function", "function": {"name": "run_sql", "arguments": "{start: oops"}}]}
+  reply = llm.callModelWithTools("m1", [], tools, client=clientWith(lambda request: cloudReply(message)))
+  assert reply.toolCalls[0].arguments is None and reply.toolCalls[0].rawArguments == "{start: oops"
+
+
+def testToolCallRetriesAndRedactionMatchCallModel(monkeypatch):
+  cloudEnv(monkeypatch)
+  replies = [httpx.Response(429, text="slow"), cloudReply({"content": "好"})]
+  waits = []
+  reply = llm.callModelWithTools("m1", [], tools, client=clientWith(lambda request: replies.pop(0)), sleep=waits.append)
+  assert reply.content == "好" and waits == [2]
+  with pytest.raises(llm.LlmUnavailableError) as info:
+    llm.callModelWithTools("m1", [], tools, client=clientWith(lambda request: httpx.Response(401, text="no")), sleep=lambda seconds: None)
+  assert "OPENROUTER_API_KEY" in info.value.message
