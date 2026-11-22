@@ -1,4 +1,4 @@
-import type { QaAnswer, QaStep } from "../api/types";
+import type { QaAnswer, QaRoute, QaStep } from "../api/types";
 
 export type ChatEntry =
   | { id: number; kind: "question"; text: string }
@@ -38,10 +38,17 @@ const stepText = (step: QaStep) => {
   return `${step.tool}（${args}）→ ${outcome}`;
 };
 
-function StepList({ steps }: { steps: QaStep[] }) {
+const fallbackText: Record<string, string> = { low_confidence: "信心不足", unavailable: "呼叫失敗", bad_response: "回應格式不對" };
+
+const routeText = (route: QaRoute) =>
+  route.tool ? `Jev 選了 ${route.tool}（信心 ${(route.confidence ?? 0).toFixed(2)}）`
+    : `Jev 沒選定（${fallbackText[route.fallbackReason ?? ""] ?? "原因不明"}），三個工具都給`;
+
+function StepList({ steps, route }: { steps: QaStep[]; route?: QaRoute }) {
   return (
     <details>
       <summary>看工具步驟</summary>
+      {route && <p className="qaRoute">{routeText(route)}</p>}
       <ol className="qaSteps">{steps.map((step, index) => <li key={index}>{stepText(step)}</li>)}</ol>
     </details>
   );
@@ -72,7 +79,7 @@ export function ChatMessage({ entry }: { entry: ChatEntry }) {
       <div className="msgMeta">{result.model}{result.remote ? "・已送到雲端" : ""}</div>
       <div className="bubble">
         {result.answer}
-        {result.steps && result.steps.length > 0 && <StepList steps={result.steps} />}
+        {((result.steps && result.steps.length > 0) || result.route) && <StepList steps={result.steps ?? []} route={result.route} />}
         <details>
           <summary>看查詢結果</summary>
           <ResultTable result={result} />

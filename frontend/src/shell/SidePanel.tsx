@@ -161,6 +161,7 @@ export function SidePanel() {
               <select className="chatModel" aria-label="模式" value={mode} onChange={(event) => setMode(event.target.value as QaMode)} disabled={!canAsk}>
                 <option value="pipeline">舊流程</option>
                 <option value="agent">Agent</option>
+                <option value="jev">Agent＋Jev</option>
               </select>
               {noModels && <div className="chatNote">目前沒有可用的模型</div>}
               {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}

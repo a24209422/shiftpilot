@@ -220,3 +220,42 @@ test("testEmptySqlIsHidden", async () => {
   expect(container.querySelector(".qaSql")).toBeNull();
   expect(within(panel()).queryByText("看工具步驟")).toBeNull();
 });
+
+const jevSteps = [{ tool: "find_available_people", arguments: { start: "2026-11-24 14:00", end: "2026-11-24 15:00" }, rowCount: 3, error: null }];
+
+test("testJevModeIsSent", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const user = userEvent.setup();
+  const mode = await within(panel()).findByRole("combobox", { name: "模式" });
+  await user.selectOptions(mode, "jev");
+  await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "下週二下午誰有空？", model: "qwen2.5:3b", mode: "jev" });
+});
+
+test("testJevRouteIsShown", async () => {
+  const route = { tool: "find_available_people", confidence: 0.923, fallbackReason: null, promptTokens: 439, seconds: 0.2 };
+  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "jev", steps: jevSteps, route } }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("Jev 選了 find_available_people（信心 0.92）")).toBeInTheDocument();
+});
+
+test("testJevFallbackShowsReason", async () => {
+  const route = { tool: null, confidence: 0.3, fallbackReason: "low_confidence", promptTokens: 439, seconds: 0.2 };
+  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "jev", steps: jevSteps, route } }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("Jev 沒選定（信心不足），三個工具都給")).toBeInTheDocument();
+});
+
+test("testJevRouteShownEvenWithoutSteps", async () => {
+  const route = { tool: null, confidence: null, fallbackReason: "unavailable", promptTokens: null, seconds: 10 };
+  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "jev", steps: [], route } }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("Jev 沒選定（呼叫失敗），三個工具都給")).toBeInTheDocument();
+});
