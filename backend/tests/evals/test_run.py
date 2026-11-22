@@ -1,5 +1,7 @@
 import pytest
 
+from app.modules.qa import jev
+from app.modules.qa.jev import JevDecision
 from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 from evals import gold, run
 from evals.fixture import openEvalWorld
@@ -152,7 +154,7 @@ hiddenCases = [
 # 平均秒數、工具次數、token 總和都是整份的彙總，不會帶出單題內容
 allowedTestKeys = {
   "split", "model", "finishedAt", "correct", "scored", "unavailable", "score", "complete",
-  "mode", "avgSeconds", "avgToolCalls", "promptTokens", "completionTokens",
+  "mode", "avgSeconds", "avgToolCalls", "promptTokens", "completionTokens", "jevFallbacks", "jevPromptTokens",
 }
 
 
@@ -399,3 +401,82 @@ def testHiddenSplitAgentStillHidesDetails(world):
 def testModeFlagChoices():
   with pytest.raises(SystemExit):
     run.main(["--split", "dev", "--mode", "x"])
+
+
+def jevChooser(tool="run_sql", reason=None):
+  return lambda question, now: JevDecision(tool, 0.92 if tool else 0.3, reason, 439, 0.2)
+
+
+@pytest.fixture
+def jevOn(monkeypatch):
+  monkeypatch.setattr(jev, "isConfigured", lambda: True)
+
+
+def evaluateJev(world, toolLlm, chooser, case=miniCases[0]):
+  return run.evaluateCase(world, case, "qwen2.5:3b", run.makeCountingLlm(lambda model, messages: ""), mode="jev",
+                          toolLlm=run.makeCountingToolLlm(toolLlm), chooseTool=chooser)
+
+
+def testJevModeRecordsRoute(world, jevOn):
+  result = evaluateJev(world, toolReplies(sqlTool(miniCases[0]["goldSql"]), ToolReply("好。", [], 10, 1)), jevChooser())
+  assert result["outcome"] == "correct" and result["mode"] == "jev" and result["toolCalls"] == 1
+  assert (result["routeTool"], result["routeConfidence"], result["routeFallback"]) == ("run_sql", 0.92, None)
+  assert (result["jevPromptTokens"], result["jevSeconds"]) == (439, 0.2)
+
+
+def testJevRouteRecordedWhenQueryFails(world, jevOn):
+  result = evaluateJev(world, toolReplies(sqlTool("SELECT nope FROM employees"), ToolReply("算了", [], None, None)),
+                       jevChooser(None, "low_confidence"))
+  assert result["outcome"] == "sqlFailed" and result["routeFallback"] == "low_confidence" and result["routeTool"] is None
+
+
+def testJevSummary():
+  base = {"category": "org", "seconds": 1.0, "toolCalls": 1, "promptTokens": 10, "completionTokens": 1}
+  results = [
+    {**base, "outcome": "correct", "routeTool": "find_available_people", "routeFallback": None, "jevPromptTokens": 400},
+    {**base, "outcome": "wrong", "routeTool": "find_available_people", "routeFallback": None, "jevPromptTokens": 420},
+    {**base, "outcome": "correct", "routeTool": None, "routeFallback": "low_confidence", "jevPromptTokens": 430},
+    {**base, "outcome": "unavailable", "routeTool": None, "routeFallback": None, "jevPromptTokens": None},
+  ]
+  summary = run.summarize("dev", "qwen2.5:3b", results, "jev")
+  assert summary["jevFallbacks"] == 1 and summary["jevPromptTokens"] == 1250
+  assert summary["routeCounts"] == {"find_available_people": 2, "fallback": 1}
+  assert run.summarize("dev", "qwen2.5:3b", results, "agent")["jevFallbacks"] is None
+
+
+def testJevOutputLines():
+  lines = []
+  base = {"id": "d01", "asker": "boss", "outcome": "correct", "retried": False, "seconds": 1.0, "sql": None, "mode": "jev",
+          "tools": ["find_available_people"], "toolCalls": 1}
+  run.printCase(lines.append, {**base, "routeTool": "find_available_people", "routeConfidence": 0.923, "routeFallback": None})
+  run.printCase(lines.append, {**base, "routeTool": None, "routeConfidence": 0.3, "routeFallback": "low_confidence"})
+  assert "   Jev：find_available_people（0.92）" in lines and "   Jev：退回（low_confidence）" in lines
+
+
+def testJevResultFileNameAndHiddenKeys(world, jevOn):
+  import json
+
+  snapshotOf(hiddenCases[:2], world)
+  toolLlm = toolReplies(sqlTool("SELECT name FROM employees"), ToolReply("好。", [], 10, 1))
+  lines = []
+  run.runSplit("test", "qwen2.5:3b", out=lines.append, world=world, casesOverride=hiddenCases[:2], mode="jev",
+               toolLlm=toolLlm, chooseTool=jevChooser())
+  path = next(run.resultsDir.glob("test-jev-*.json"))
+  saved = json.loads(path.read_text(encoding="utf-8"))
+  # 各工具被選中的次數會洩漏 test 題型的分布，只留退回次數和 token 總和
+  assert set(saved) == allowedTestKeys and saved["jevPromptTokens"] == 878
+  assert not any("Jev" in line or "run_sql" in line for line in lines)
+
+
+def testJevWithoutKeyAbortsEval(world, monkeypatch):
+  monkeypatch.setattr(jev, "isConfigured", lambda: False)
+  with pytest.raises(run.EvalAbortError):
+    evaluateJev(world, toolReplies(ToolReply("x", [], None, None)), jevChooser())
+
+
+def testModeFlagAcceptsJev(monkeypatch):
+  seen = {}
+  monkeypatch.setattr(run, "runSplit", lambda *args, **kwargs: seen.update(kwargs))
+  monkeypatch.setattr(run.llmModule, "listModels", lambda: [{"id": "qwen2.5:3b"}])
+  run.main(["--split", "dev", "--mode", "jev"])
+  assert seen["mode"] == "jev"

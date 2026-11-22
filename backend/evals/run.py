@@ -1,6 +1,6 @@
 """跑問答準確率評測。
 
-執行（在 backend/）：python -m evals.run --split dev|test [--mode pipeline|agent] [--model 模型名稱] [--filter 類別或題號] [--update-snapshot]
+執行（在 backend/）：python -m evals.run --split dev|test [--mode pipeline|agent|jev] [--model 模型名稱] [--filter 類別或題號] [--update-snapshot]
 """
 import argparse
 import json
@@ -12,7 +12,7 @@ from pathlib import Path
 from app.infra.db import openDb
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
-from app.modules.qa import service, sqlguard
+from app.modules.qa import jev, service, sqlguard
 from evals import gold
 from evals.cases import cases as devCases
 from evals.cases import categories
@@ -64,13 +64,17 @@ def makeCountingToolLlm(toolLlm):
   return counting
 
 
+# agent 與 jev 都是多步工具呼叫，計分與失敗分類共用同一套
+agentModes = ("agent", "jev")
+
+
 def classifyFailure(error: AppError, mode: str = "pipeline") -> str:
   # 沙盒帳號連不上、問答未設定都是環境問題，不是模型答錯；計分會讓整份結果失真，所以直接中止
   if error.code in ("QA_SANDBOX_UNAVAILABLE", "QA_NOT_CONFIGURED"):
     raise EvalAbortError(f"評測環境有問題（{error.code}）：{error.message}")
   if error.code == "QA_MODEL_UNAVAILABLE":
     return "unavailable"
-  if error.code == "QA_QUERY_FAILED" and mode == "agent":
+  if error.code == "QA_QUERY_FAILED" and mode in agentModes:
     details = error.details or {}
     if details.get("exhausted"):
       return "stepsExhausted"
@@ -89,30 +93,36 @@ def classifyFailure(error: AppError, mode: str = "pipeline") -> str:
   return "error"
 
 
-def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pipeline", toolLlm=None) -> dict:
+def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pipeline", toolLlm=None, chooseTool=None) -> dict:
   if goldResults is None:
     goldResults = gold.runGold(world, case)
   toolLlm = toolLlm or llmModule.callModelWithTools
+  chooseTool = chooseTool or jev.chooseTool
   startedAt = time.perf_counter()
   sql, predicted, errorType, errorMessage = None, None, None, None
   agentInfo = {"toolCalls": None, "tools": [], "noTool": False, "promptTokens": None, "completionTokens": None}
+  routeInfo = {"routeTool": None, "routeConfidence": None, "routeFallback": None, "jevPromptTokens": None, "jevSeconds": None}
   with openDb(world.url) as conn:
     try:
       # 走跟 app 完全相同的 ask（含失敗重試），量到的才是使用者實際會遇到的準確率
       answer = service.ask(
         conn, world.actors[case["asker"]], case["question"], model, world.qaUrl, fixedNow, llm=llm, mode=mode, toolLlm=toolLlm,
+        # 都在呼叫時才取 jev 的函式，測試才換得掉
+        chooseTool=chooseTool, jevConfigured=jev.isConfigured,
       )
       sql, predicted = answer["sql"], answer["rows"]
-      if mode == "agent":
+      if mode in agentModes:
         agentInfo.update(collectAgentInfo(answer))
+        routeInfo.update(collectRouteInfo(answer.get("route")))
       matched = any(resultsMatch(expected, predicted, case.get("compareAsSet", False)) for expected in goldResults)
       outcome = "correct" if matched else "wrong"
     except AppError as error:
       outcome = classifyFailure(error, mode)
       details = error.details or {}
       sql = details.get("sql")
-      if mode == "agent" and error.code == "QA_QUERY_FAILED":
+      if mode in agentModes and error.code == "QA_QUERY_FAILED":
         agentInfo.update(collectAgentInfo(details))
+        routeInfo.update(collectRouteInfo(details.get("route")))
         agentInfo["noTool"] = details.get("toolCalls") == 0
       if outcome == "error":
         errorType, errorMessage = error.code, error.message
@@ -125,7 +135,7 @@ def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pip
     "id": case["id"], "category": case["category"], "asker": case["asker"], "outcome": outcome, "sql": sql,
     "predicted": predicted, "gold": goldResults[0], "retried": mode == "pipeline" and getattr(llm, "calls", 1) > 1,
     "seconds": round(time.perf_counter() - startedAt, 1),
-    "errorType": errorType, "errorMessage": errorMessage, "mode": mode, **agentInfo,
+    "errorType": errorType, "errorMessage": errorMessage, "mode": mode, **agentInfo, **routeInfo,
   }
 
 
@@ -137,9 +147,28 @@ def collectAgentInfo(body: dict) -> dict:
   }
 
 
+def collectRouteInfo(route: dict | None) -> dict:
+  if not route:
+    return {}
+  return {
+    "routeTool": route.get("tool"), "routeConfidence": route.get("confidence"), "routeFallback": route.get("fallbackReason"),
+    "jevPromptTokens": route.get("promptTokens"), "jevSeconds": route.get("seconds"),
+  }
+
+
 def average(values):
   values = [value for value in values if value is not None]
   return round(sum(values) / len(values), 2) if values else None
+
+
+def routeCounts(results: list[dict]) -> dict:
+  counts = {}
+  for result in results:
+    # 模型連不上的題目沒有選路紀錄（Jev 的結果在例外裡帶不出來），不算進分布
+    name = result.get("routeTool") or ("fallback" if result.get("routeFallback") else None)
+    if name:
+      counts[name] = counts.get(name, 0) + 1
+  return counts
 
 
 def summarize(split: str, model: str, results: list[dict], mode: str = "pipeline") -> dict:
@@ -155,15 +184,20 @@ def summarize(split: str, model: str, results: list[dict], mode: str = "pipeline
     "split": split, "model": model, "total": len(results), "scored": scored, "correct": correct, "unavailable": unavailable,
     "score": round(correct / scored, 4) if scored else None, "byCategory": byCategory, "mode": mode,
     "avgSeconds": average(result["seconds"] for result in results),
-    "avgToolCalls": average(result.get("toolCalls") for result in results) if mode == "agent" else None,
-    "promptTokens": sum(result.get("promptTokens") or 0 for result in results) if mode == "agent" else None,
-    "completionTokens": sum(result.get("completionTokens") or 0 for result in results) if mode == "agent" else None,
+    "avgToolCalls": average(result.get("toolCalls") for result in results) if mode in agentModes else None,
+    "promptTokens": sum(result.get("promptTokens") or 0 for result in results) if mode in agentModes else None,
+    "completionTokens": sum(result.get("completionTokens") or 0 for result in results) if mode in agentModes else None,
+    "jevFallbacks": sum(bool(result.get("routeFallback")) for result in results) if mode == "jev" else None,
+    "jevPromptTokens": sum(result.get("jevPromptTokens") or 0 for result in results) if mode == "jev" else None,
+    "routeCounts": routeCounts(results) if mode == "jev" else None,
   }
 
 
 def printCase(out, result: dict) -> None:
   out(f"{marks[result['outcome']]} {result['id']}（{result['asker']}）{' 重試' if result['retried'] else ''} {result['seconds']}s")
-  if result.get("mode") == "agent":
+  if result.get("mode") == "jev" and (result.get("routeTool") or result.get("routeFallback")):
+    out(f"   Jev：{result['routeTool']}（{result['routeConfidence']:.2f}）" if result.get("routeTool") else f"   Jev：退回（{result['routeFallback']}）")
+  if result.get("mode") in agentModes:
     out("   工具：" + (" → ".join(result["tools"]) + f"（{result['toolCalls']} 次）" if result["tools"] else "（沒呼叫工具）"))
   if result["sql"]:
     out("   " + result["sql"].replace("\n", "\n   "))
@@ -209,14 +243,14 @@ def preflight(world, selected, snapshot) -> dict:
   return goldByCase
 
 
-def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=None) -> dict:
+def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=None, chooseTool=None) -> dict:
   hidden = split in hiddenSplits
   goldByCase = preflight(world, selected, gold.loadSnapshot())
   results = []
   complete = False
   try:
     for index, case in enumerate(selected, start=1):
-      result = evaluateCase(world, case, model, makeCountingLlm(llm), goldByCase[case["id"]], mode, makeCountingToolLlm(toolLlm))
+      result = evaluateCase(world, case, model, makeCountingLlm(llm), goldByCase[case["id"]], mode, makeCountingToolLlm(toolLlm), chooseTool)
       results.append(result)
       if hidden:
         out(f"{index}/{len(selected)}")
@@ -232,6 +266,8 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
       # test 的存檔只留總分欄位：類別分數與逐題資料都會洩漏題目內容
       del partial["byCategory"]
       del partial["total"]
+      # 各工具被選中的次數會洩漏 test 題型的分布
+      del partial["routeCounts"]
     else:
       partial["results"] = results
     try:
@@ -247,20 +283,22 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
   for category, counts in summary["byCategory"].items():
     out(f"{category:6} {counts['correct']}/{counts['scored']}")
   out(f"總分：{summary['correct']}/{summary['scored']}（重試 {sum(result['retried'] for result in results)} 題、模型連不上 {summary['unavailable']} 題）")
-  if mode == "agent":
+  if mode in agentModes:
     out(f"平均 {summary['avgSeconds']} 秒、平均工具呼叫 {summary['avgToolCalls']} 次、token 輸入 {summary['promptTokens']} 輸出 {summary['completionTokens']}")
+  if mode == "jev":
+    out(f"Jev：退回 {summary['jevFallbacks']} 題、選工具分布 {summary['routeCounts']}、token 輸入 {summary['jevPromptTokens']}")
   return summary
 
 
 def runSplit(
   split, model, filterText=None, llm=llmModule.callModel, out=print, world=None, casesOverride=None,
-  mode="pipeline", toolLlm=llmModule.callModelWithTools,
+  mode="pipeline", toolLlm=llmModule.callModelWithTools, chooseTool=None,
 ) -> dict:
   selected = selectCases(casesOverride if casesOverride is not None else loadCases(split), filterText)
   if world is not None:
-    return runCases(world, split, model, selected, llm, out, mode, toolLlm)
+    return runCases(world, split, model, selected, llm, out, mode, toolLlm, chooseTool)
   with openEvalWorld() as ownWorld:
-    return runCases(ownWorld, split, model, selected, llm, out, mode, toolLlm)
+    return runCases(ownWorld, split, model, selected, llm, out, mode, toolLlm, chooseTool)
 
 
 def updateSnapshot(split, world=None, casesOverride=None) -> list[str]:
@@ -281,7 +319,7 @@ def updateSnapshot(split, world=None, casesOverride=None) -> list[str]:
 def main(argv=None) -> None:
   parser = argparse.ArgumentParser(description="問答準確率評測")
   parser.add_argument("--split", required=True, choices=["dev", "test"])
-  parser.add_argument("--mode", choices=["pipeline", "agent"], default="pipeline", help="問答模式，預設 pipeline（舊流程）")
+  parser.add_argument("--mode", choices=["pipeline", "agent", "jev"], default="pipeline", help="問答模式，預設 pipeline（舊流程）；jev 要先在 .env 填 JEV_API_KEY")
   parser.add_argument("--model", help="模型名稱，預設 .env 的 OLLAMA_MODEL；必須在模型清單裡")
   parser.add_argument("--filter", help="只跑某個類別或題號（只能用在 dev）")
   parser.add_argument("--update-snapshot", action="store_true", help="重算標準答案快照（確認答案改變是預期的才用）")
