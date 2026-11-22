@@ -147,10 +147,12 @@ def testCriteriaAreIndependentOfAgentToolDescriptions():
   assert all(jev.jevCriteria[name] != agentTexts[name] for name in jev.jevOptions)
 
 
-def testBusyPeriodsCriterionSaysWhatItCannotAnswer():
-  text = jev.jevCriteria["get_busy_periods"]
-  # 它的欄位只有誰、起訖、種類、標題；要假別、核准狀態、參加者或統計時得用 run_sql
-  assert all(word in text for word in ("假別", "核准", "參加者", "run_sql"))
+def testCriteriaPutConfusableWordsUnderRunSql():
+  # Jev 像在比對字詞、不理會「不要選」：容易混淆的字只能出現在答得了的那個選項
+  runSql, available, busy = (jev.jevCriteria[name] for name in jev.jevOptions)
+  assert all(word in runSql for word in ("假別", "核准", "借用", "加班", "參加者"))
+  assert "上班" not in available
+  assert all(word not in busy for word in ("公務車", "假別", "不要"))
 
 
 def testMasksKeyCutByTruncation(caplog):
