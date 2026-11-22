@@ -10,6 +10,7 @@ from app.infra.actor import Actor
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
 from app.modules.qa import prompt, sandbox, sqlguard
+from app.modules.qa.tools import describeSqlError
 
 logger = logging.getLogger(__name__)
 maxQuestionLength = 300
@@ -42,13 +43,6 @@ def callLlm(llm, model: str, messages: list[dict]) -> str:
     return llm(model, messages)
   except llmModule.LlmUnavailableError as error:
     raise AppError("QA_MODEL_UNAVAILABLE", error.message, 503)
-
-
-def describeSqlError(error: Exception) -> str:
-  if isinstance(error, psycopg.errors.QueryCanceled):
-    return "查詢太久（超過 5 秒）"
-  # PostgreSQL 的錯誤第二行之後是 LINE／HINT 這類細節，給模型看第一行就夠它修正
-  return str(error).strip().split("\n")[0]
 
 
 def composeAnswer(llm, model: str, question: str, columns: list[str], rows: list[list], truncated: bool) -> str:
