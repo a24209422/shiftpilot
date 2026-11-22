@@ -131,3 +131,18 @@ def testApiKeyOnlyFromJevEnv(monkeypatch):
   assert jev.isConfigured() is False
   monkeypatch.setenv("JEV_API_KEY", "  ")
   assert jev.isConfigured() is False
+
+
+def testCriteriaAreIndependentOfAgentToolDescriptions():
+  # Jev 的選項說明可以單獨調整，不能順便改到 agent 模式給 LLM 看的工具說明
+  from app.modules.qa import tools
+
+  agentTexts = {item["function"]["name"]: item["function"]["description"] for item in tools.toolDefinitions}
+  assert list(jev.jevCriteria) == jev.jevOptions
+  assert all(jev.jevCriteria[name] != agentTexts[name] for name in jev.jevOptions)
+
+
+def testBusyPeriodsCriterionSaysWhatItCannotAnswer():
+  text = jev.jevCriteria["get_busy_periods"]
+  # 它的欄位只有誰、起訖、種類、標題；要假別、核准狀態、參加者或統計時得用 run_sql
+  assert all(word in text for word in ("假別", "核准", "參加者", "run_sql"))

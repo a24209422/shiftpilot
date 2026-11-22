@@ -6,7 +6,7 @@ from datetime import datetime
 
 import httpx
 
-from app.modules.qa import prompt, tools
+from app.modules.qa import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,16 @@ defaultMinConfidence = 0.5
 jevTimeout = 10
 jevOptions = ["run_sql", "find_available_people", "get_busy_periods"]
 questionName = "tool"
+
+# 給 Jev 的選項說明跟 agent 給 LLM 的工具說明分開：調這裡不會改到 agent 模式的行為。
+# 說明依工具「實際回傳什麼」寫：get_busy_periods 只有誰、起訖、種類、標題，所以假別、核准狀態、參加者與統計都要用 run_sql
+jevCriteria = {
+  "run_sql": "預設選項，其他選項都不適用時選這個：組織與主管、職稱、班表與假日、請假的假別與核准狀態、會議的參加者與主辦人、"
+             "數量、平均與各部門統計。",
+  "find_available_people": "問某段時間「誰有空」「誰沒事」「哪些人有上班」時選這個，會回傳有空的人的姓名與部門。",
+  "get_busy_periods": "只在要看某個人或某個資源（會議室、設備、公務車）在某段時間「有哪些會議或請假」的時間清單時選，"
+                      "只會回傳誰、開始與結束時間、種類、標題。要知道假別、核准狀態、參加者、主辦人、次數或統計，不要選這個，改選 run_sql。",
+}
 
 
 @dataclass
@@ -46,21 +56,15 @@ def isConfigured() -> bool:
   return bool(getJevConfig()["apiKey"])
 
 
-def optionDescriptions() -> dict[str, str]:
-  # 選項說明直接取自工具定義，之後改工具說明時兩邊不會不一致
-  return {item["function"]["name"]: item["function"]["description"] for item in tools.toolDefinitions}
-
-
 def buildJevRequest(question: str, now: datetime) -> dict:
   # 只送問題、日期參考與選項說明：選工具用不到資料，送得越少越少資料離開本機
-  descriptions = optionDescriptions()
   return {
     "model": getJevConfig()["model"],
     "state": f"{prompt.buildDateReference(now)}\n\n使用者的問題：{question}",
     "questions": {questionName: {
       "type": "choice",
       "instructions": "這題該用哪個工具回答？",
-      "criteria": {name: descriptions[name] for name in jevOptions},
+      "criteria": dict(jevCriteria),
     }},
   }
 
