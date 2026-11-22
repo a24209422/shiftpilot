@@ -1,6 +1,6 @@
 import pytest
 
-from app.modules.qa.llm import LlmUnavailableError
+from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 from evals import gold, run
 from evals.fixture import openEvalWorld
 
@@ -149,7 +149,11 @@ hiddenCases = [
   {"id": "h04", "category": "org", "asker": "employee", "question": "秘密問題丁？", "goldSql": "SELECT e.name FROM employees e WHERE e.name = '王建國'"},
   {"id": "h05", "category": "org", "asker": "employee", "question": "秘密問題戊？", "goldSql": "SELECT e.name FROM employees e WHERE e.name = '劉怡君'"},
 ]
-allowedTestKeys = {"split", "model", "finishedAt", "correct", "scored", "unavailable", "score", "complete"}
+# 平均秒數、工具次數、token 總和都是整份的彙總，不會帶出單題內容
+allowedTestKeys = {
+  "split", "model", "finishedAt", "correct", "scored", "unavailable", "score", "complete",
+  "mode", "avgSeconds", "avgToolCalls", "promptTokens", "completionTokens",
+}
 
 
 def snapshotOf(cases, world):
@@ -319,3 +323,79 @@ def testSaveFailureDoesNotMaskAbort(world, monkeypatch, capsys):
   with pytest.raises(run.EvalAbortError):
     run.runSplit("dev", "qwen2.5:3b", llm=lambda m, x: "", out=lambda line: None, world=world, casesOverride=miniCases)
   assert "無法儲存" in capsys.readouterr().err
+
+
+def toolReplies(*replies):
+  queue = list(replies)
+
+  def fake(model, messages, tools):
+    return queue.pop(0) if len(queue) > 1 else queue[0]
+
+  return fake
+
+
+def sqlTool(sql):
+  return ToolReply("", [ToolCall("c1", "run_sql", {"sql": sql}, "")], 50, 5)
+
+
+def evaluateAgent(world, toolLlm, case=miniCases[0]):
+  return run.evaluateCase(world, case, "qwen2.5:3b", run.makeCountingLlm(lambda model, messages: ""), mode="agent",
+                          toolLlm=run.makeCountingToolLlm(toolLlm))
+
+
+def testAgentCorrectViaTool(world):
+  result = evaluateAgent(world, toolReplies(sqlTool(miniCases[0]["goldSql"]), ToolReply("好。", [], 10, 1)))
+  assert result["outcome"] == "correct" and result["toolCalls"] == 1 and result["tools"] == ["run_sql"]
+  assert result["mode"] == "agent" and result["noTool"] is False
+  assert (result["promptTokens"], result["completionTokens"]) == (60, 6)
+
+
+def testNoToolIsWrongWithFlag(world):
+  result = evaluateAgent(world, toolReplies(ToolReply('<tool_call>{"name": "run_sql"}</tool_call>', [], None, None)))
+  assert result["outcome"] == "wrong" and result["noTool"] is True and result["toolCalls"] == 0
+
+
+def testStepsExhausted(world):
+  result = evaluateAgent(world, toolReplies(sqlTool("SELECT nope FROM employees")))
+  assert result["outcome"] == "stepsExhausted" and result["toolCalls"] == 4
+
+
+def testAgentToolFailureIsSqlFailed(world):
+  result = evaluateAgent(world, toolReplies(sqlTool("SELECT nope FROM employees"), ToolReply("算了", [], None, None)))
+  assert result["outcome"] == "sqlFailed"
+
+
+def testAgentResultFileNameHasMode(world):
+  snapshotOf(miniCases[:1], world)
+  toolLlm = toolReplies(sqlTool(miniCases[0]["goldSql"]), ToolReply("好。", [], 10, 1))
+  lines = []
+  summary = run.runSplit("dev", "qwen2.5:3b", out=lines.append, world=world, casesOverride=miniCases[:1], mode="agent", toolLlm=toolLlm)
+  assert summary["mode"] == "agent" and summary["correct"] == 1 and summary["avgToolCalls"] == 1
+  assert summary["promptTokens"] == 60 and summary["avgSeconds"] is not None
+  assert [path.name.startswith("dev-agent-") for path in run.resultsDir.glob("*.json")] == [True]
+  assert any("run_sql" in line for line in lines)
+
+
+def testPipelineFileNameHasMode(world):
+  snapshotOf(miniCases, world)
+  llm = replying({case["question"]: case["goldSql"] for case in miniCases})
+  summary = run.runSplit("dev", "qwen2.5:3b", llm=llm, world=world, casesOverride=miniCases, out=lambda line: None)
+  assert summary["mode"] == "pipeline" and summary["avgToolCalls"] is None
+  assert [path.name.startswith("dev-pipeline-") for path in run.resultsDir.glob("*.json")] == [True]
+
+
+def testHiddenSplitAgentStillHidesDetails(world):
+  import json
+
+  snapshotOf(hiddenCases[:2], world)
+  toolLlm = toolReplies(sqlTool("SELECT name FROM employees"), ToolReply("好。", [], 10, 1))
+  lines = []
+  run.runSplit("test", "qwen2.5:3b", out=lines.append, world=world, casesOverride=hiddenCases[:2], mode="agent", toolLlm=toolLlm)
+  saved = json.loads(next(run.resultsDir.glob("test-*.json")).read_text(encoding="utf-8"))
+  assert set(saved) == allowedTestKeys
+  assert not any("run_sql" in line or "h0" in line for line in lines)
+
+
+def testModeFlagChoices():
+  with pytest.raises(SystemExit):
+    run.main(["--split", "dev", "--mode", "x"])
