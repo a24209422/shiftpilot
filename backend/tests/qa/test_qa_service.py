@@ -8,6 +8,7 @@ import pytest
 from app.infra.db import openDb
 from app.infra.errors import AppError
 from app.modules.qa import sandbox, service
+from app.modules.qa.jev import JevDecision
 from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 from tests.leave.world import makeWorld
 
@@ -237,16 +238,18 @@ def testDateReferenceCoversTwoWeeksEachSide(world):
 
 
 def toolScript(*replies):
-  calls = []
+  calls, toolSets = [], []
 
   def fake(model, messages, tools):
     calls.append(list(messages))
+    toolSets.append([item["function"]["name"] for item in tools])
     item = replies[len(calls) - 1]
     if isinstance(item, Exception):
       raise item
     return item
 
   fake.calls = calls
+  fake.toolSets = toolSets
   return fake
 
 
@@ -315,3 +318,64 @@ def testAgentModelUnavailable(world):
 def testAgentReleasesSlot(world):
   expectError("QA_QUERY_FAILED", ask, world, scripted(), mode="agent", toolLlm=toolScript(ToolReply("x", [], None, None)))
   assert ask(world, scripted("SELECT 1", "好。"))["rows"] == [[1]]
+
+
+def askJev(w, toolLlm, decision=None, configured=True, **kwargs):
+  asked = []
+
+  def chooser(question, when):
+    asked.append(question)
+    if decision is None:
+      raise AssertionError("不該呼叫 Jev")
+    return decision
+
+  with openDb(w.url) as conn:
+    result = service.ask(
+      conn, kwargs.get("actor") or w.bobActor, "有哪些員工？", "qwen2.5:3b", w.qaUrl, now, llm=scripted(),
+      mode="jev", toolLlm=toolLlm, chooseTool=chooser, jevConfigured=lambda: configured,
+    )
+  return result, asked
+
+
+def chosen(tool="run_sql", reason=None):
+  return JevDecision(tool, 0.9 if tool else 0.3, reason, 439, 0.2)
+
+
+def testJevModeUsesChosenTool(world):
+  toolLlm = toolScript(sqlCall("SELECT name FROM employees ORDER BY name"), ToolReply("四位。", [], 5, 1))
+  result, asked = askJev(world, toolLlm, chosen("run_sql"))
+  assert result["mode"] == "jev" and asked == ["有哪些員工？"]
+  assert toolLlm.toolSets[0] == ["run_sql"]
+  assert result["route"] == {"tool": "run_sql", "confidence": 0.9, "fallbackReason": None, "promptTokens": 439, "seconds": 0.2}
+  assert result["toolCalls"] == 1 and result["steps"][0]["tool"] == "run_sql"
+
+
+def testJevFallbackRunsFullAgent(world):
+  toolLlm = toolScript(sqlCall("SELECT name FROM employees"), ToolReply("四位。", [], 5, 1))
+  result, _ = askJev(world, toolLlm, chosen(None, "low_confidence"))
+  assert toolLlm.toolSets[0] == ["run_sql", "find_available_people", "get_busy_periods"]
+  assert result["route"]["tool"] is None and result["route"]["fallbackReason"] == "low_confidence"
+
+
+def testJevUnavailableRunsFullAgent(world):
+  toolLlm = toolScript(sqlCall("SELECT name FROM employees"), ToolReply("四位。", [], 5, 1))
+  result, _ = askJev(world, toolLlm, chosen(None, "unavailable"))
+  assert result["answer"] == "四位。" and result["route"]["fallbackReason"] == "unavailable"
+
+
+def testJevWithoutKey(world):
+  error = expectError("QA_NOT_CONFIGURED", askJev, world, toolScript(), None, False)
+  assert error.status == 503 and "JEV_API_KEY" in error.message
+  # 沒佔名額：之後的問題照常能問
+  assert service.askingUserIds == set()
+
+
+def testJevQueryFailedHasRoute(world):
+  toolLlm = toolScript(sqlCall("SELECT nope FROM employees"), ToolReply("算了", [], None, None))
+  error = expectError("QA_QUERY_FAILED", askJev, world, toolLlm, chosen("run_sql"))
+  assert error.details["route"]["tool"] == "run_sql"
+
+
+def testQaModeEnvAcceptsJev(monkeypatch):
+  monkeypatch.setenv("QA_MODE", "jev")
+  assert service.resolveMode(None) == "jev"

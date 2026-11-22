@@ -2,7 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import createApp
+from app.modules.qa import jev as qaJev
 from app.modules.qa import llm as qaLlm
+from app.modules.qa.jev import JevDecision
 from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 
 
@@ -72,3 +74,18 @@ def testAskRejectsUnknownMode(qaClient, loginAs):
   loginAs("employee", employee=True, client=qaClient)
   response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "x"})
   assert response.status_code == 422
+
+
+def testAskAcceptsJevMode(qaClient, loginAs, monkeypatch):
+  replies = iter([
+    ToolReply("", [ToolCall("c1", "run_sql", {"sql": "SELECT name FROM employees"}, "")], 10, 2),
+    ToolReply("有一位員工。", [], 5, 1),
+  ])
+  monkeypatch.setattr(qaLlm, "callModelWithTools", lambda model, messages, tools: next(replies))
+  monkeypatch.setattr(qaJev, "isConfigured", lambda: True)
+  monkeypatch.setattr(qaJev, "chooseTool", lambda question, now: JevDecision("run_sql", 0.95, None, 440, 0.1))
+  loginAs("employee", employee=True, client=qaClient)
+  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "jev"})
+  assert response.status_code == 200, response.text
+  body = response.json()
+  assert body["mode"] == "jev" and body["route"]["tool"] == "run_sql" and body["route"]["promptTokens"] == 440

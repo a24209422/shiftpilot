@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import threading
@@ -10,7 +11,7 @@ from psycopg import Connection
 from app.infra.actor import Actor
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
-from app.modules.qa import agent, prompt, sandbox, sqlguard
+from app.modules.qa import agent, jev, prompt, sandbox, sqlguard
 from app.modules.qa.tools import describeSqlError
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def composeAnswer(llm, model: str, question: str, columns: list[str], rows: list
   return answer or fallback
 
 
-modes = ("pipeline", "agent")
+modes = ("pipeline", "agent", "jev")
 
 
 def resolveMode(mode: str | None) -> str:
@@ -65,7 +66,7 @@ def resolveMode(mode: str | None) -> str:
     # 沒指定時預設舊流程：沒設 QA_MODE 的部署行為完全不變
     mode = os.getenv("QA_MODE", "").strip() or "pipeline"
   if mode not in modes:
-    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline 或 agent", 503)
+    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline、agent 或 jev", 503)
   return mode
 
 
@@ -95,15 +96,21 @@ def runPipeline(sandboxConn, llm, model: str, question: str, data, now: datetime
   }
 
 
-def runAgentMode(sandboxConn, toolLlm, model: str, question: str, data, now: datetime) -> dict:
+def runAgentMode(
+  sandboxConn, toolLlm, model: str, question: str, data, now: datetime, decision: jev.JevDecision | None = None,
+) -> dict:
+  # Jev 選中工具時只給那一個；退回（tool 是 None）或不是 jev 模式時三個工具都給
+  allowedTools = [decision.tool] if decision and decision.tool else None
   try:
-    outcome = agent.runAgent(sandboxConn, toolLlm, model, prompt.buildAgentMessages(question, data, now))
+    outcome = agent.runAgent(sandboxConn, toolLlm, model, prompt.buildAgentMessages(question, data, now), allowedTools)
   except llmModule.LlmUnavailableError as error:
     raise AppError("QA_MODEL_UNAVAILABLE", error.message, 503)
   extra = {
     "steps": outcome.steps, "toolCalls": outcome.toolCalls, "exhausted": outcome.exhausted,
     "promptTokens": outcome.promptTokens, "completionTokens": outcome.completionTokens,
   }
+  if decision:
+    extra["route"] = dataclasses.asdict(decision)
   if outcome.result is None:
     lastError = next((step["error"] for step in reversed(outcome.steps) if step["error"]), None) or "模型沒有呼叫工具"
     lastSql = next((step["arguments"].get("sql") for step in reversed(outcome.steps)
@@ -111,6 +118,7 @@ def runAgentMode(sandboxConn, toolLlm, model: str, question: str, data, now: dat
     raise AppError("QA_QUERY_FAILED", f"查詢失敗：{lastError}", 422, {
       "sql": lastSql if isinstance(lastSql, str) else "", "error": lastError,
       "steps": outcome.steps, "toolCalls": outcome.toolCalls, "exhausted": outcome.exhausted,
+      **({"route": extra["route"]} if decision else {}),
     })
   result = outcome.result
   return {
@@ -121,11 +129,14 @@ def runAgentMode(sandboxConn, toolLlm, model: str, question: str, data, now: dat
 
 def ask(
   conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel,
-  mode: str | None = None, toolLlm=llmModule.callModelWithTools,
+  mode: str | None = None, toolLlm=llmModule.callModelWithTools, chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured,
 ) -> dict:
   if not qaDatabaseUrl:
     raise AppError("QA_NOT_CONFIGURED", "問答還沒設定：請在 .env 設定 QA_DB_PASSWORD 並建立 qa_sandbox 帳號（見 README 的「問答」）", 503)
   mode = resolveMode(mode)
+  if mode == "jev" and not jevConfigured():
+    # 在拿名額、讀沙盒資料之前就擋下：沒設 key 的請求不該占用任何資源
+    raise AppError("QA_NOT_CONFIGURED", "jev 模式還沒設定：請在 .env 填 JEV_API_KEY", 503)
   question = (question or "").strip()
   if not question or len(question) > maxQuestionLength:
     raise AppError("VALIDATION", f"問題要 1 到 {maxQuestionLength} 個字", 422, {"field": "question"})
@@ -139,10 +150,12 @@ def ask(
     # 也不該一直占著一條連線：之後只用沙盒連線，請求的連線先關掉（psycopg 離開 with 時遇到已關閉的連線會直接略過）
     conn.commit()
     conn.close()
+    # Jev 不看資料，只看問題；先問完再開沙盒，等它的時候不占著沙盒連線
+    decision = chooseTool(question, now) if mode == "jev" else None
     try:
       with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
-        if mode == "agent":
-          body = runAgentMode(sandboxConn, toolLlm, model, question, data, now)
+        if mode in ("agent", "jev"):
+          body = runAgentMode(sandboxConn, toolLlm, model, question, data, now, decision)
         else:
           body = runPipeline(sandboxConn, llm, model, question, data, now)
     except psycopg.OperationalError:
