@@ -61,12 +61,31 @@ docker compose exec app python -m app.cli seedDemo                              
     python -m evals.run --split dev
     python -m evals.run --split test --model qwen3-vl:4b-instruct
     python -m evals.run --split dev --filter shift
+    python -m evals.run --split dev --mode agent
 
-4b 約需 3 GB 記憶體，要在終端機執行並先關掉其他程式。
+`--mode agent` 改用 tool calling（見下一節），結果檔名會帶模式（`dev-agent-…`、`dev-pipeline-…`）。4b 約需 3 GB 記憶體，要在終端機執行並先關掉其他程式。
 
 改了固定資料或沙盒邏輯導致標準答案改變時，執行器會停下並列出題號；確認改變是預期的，才執行 `python -m evals.run --split dev --update-snapshot` 或 `python -m evals.run --split test --update-snapshot`。
 
 已知限制：問答服務沒有告訴模型提問者是誰，所以評測題都用指名問法，量不到「我的假」這類問法。
+
+### 舊流程 vs agent（tool calling）
+
+agent 模式讓模型自己呼叫三個工具：`run_sql`（沿用 SQL 檢查與沙盒）、`find_available_people`（誰有空，程式算）、`get_busy_periods`（某人或某資源的會議與請假），最多 4 次工具呼叫。工具都在同一個沙盒裡執行，看到的資料跟舊流程一樣已依提問者過濾。API 用 body 的 `mode` 或環境變數 `QA_MODE` 切換，預設舊流程；問答面板可以切換並展開工具步驟。
+
+| qwen2.5:3b | dev | 誰有空 | test | 平均秒數 | 平均工具呼叫 |
+|---|---|---|---|---|---|
+| 舊流程 | 20/40 | 1/7 | 7/25 | — | — |
+| agent | 10/40 | 3/7 | 3/25 | 9.5 | 0.9 |
+
+（2026-11-22，agent 第一版，沒有調整過工具說明或 prompt。dev 各類別：組織 0/5、班表 1/8、誰有空 3/7、請假 3/8、會議 0/7、統計 3/5。）
+
+「誰有空」交給程式算確實有效，但整體掉了一半。dev 上看到的錯誤模式：
+
+- **工具選錯**：`find_available_people` 被用了 12 次，大多用在不相關的題目，例如「工程部有哪些人？」也拿它來查
+- **不會多步**：36 題只呼叫 1 次工具、4 題沒呼叫；工具回錯誤後，模型直接用文字收尾，沒有修正再試（舊流程有一次固定的重試）
+- **班表題不用工具**：4 題班表題直接用文字回答
+- **SQL 品質沒有 few-shot 幫忙**：例如 `employee_id = '林小美'`、`resources` 欄位寫錯
 
 ## 開發
 
