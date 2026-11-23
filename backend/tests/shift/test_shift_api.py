@@ -50,15 +50,16 @@ def testTypeEndpointsAndPermissions(world):
 
 def testManagerSchedulesSubordinateAndScheduleReflectsIt(world):
   alice = world.alice["employeeId"]
-  body = {"employeeId": alice, "effectiveFrom": "2026-11-23", "days": [{"weekday": weekday, "shiftTypeId": world.evening} for weekday in range(5)]}
+  # 主管只能排今天以後的班；用很遠的星期一，測試哪天跑都一樣
+  body = {"employeeId": alice, "effectiveFrom": "2030-01-07", "days": [{"weekday": weekday, "shiftTypeId": world.evening} for weekday in range(5)]}
   assert world.bobClient.post("/api/shift/rosters", json=body).status_code == 403
   created = world.bossClient.post("/api/shift/rosters", json=body)
   assert created.status_code == 201, created.text
-  rows = world.bobClient.get("/api/shift/schedule", params={"from": "2026-11-23", "to": "2026-11-24", "employeeIds": str(alice)}).json()
-  assert [(row["day"], row["source"], row["shiftName"]) for row in rows] == [("2026-11-23", "roster", "晚班"), ("2026-11-24", "roster", "晚班")]
+  rows = world.bobClient.get("/api/shift/schedule", params={"from": "2030-01-07", "to": "2030-01-08", "employeeIds": str(alice)}).json()
+  assert [(row["day"], row["source"], row["shiftName"]) for row in rows] == [("2030-01-07", "roster", "晚班"), ("2030-01-08", "roster", "晚班")]
   assert world.bobClient.get("/api/shift/rosters", params={"employeeId": alice}).json()[0]["id"] == created.json()["id"]
   # 只能刪還沒生效的班表；用很遠的日期，測試哪天跑都一樣
-  future = world.bossClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2030-01-07"}).json()
+  future = world.bossClient.post("/api/shift/rosters", json={**body, "effectiveFrom": "2030-02-04"}).json()
   assert world.bossClient.delete(f"/api/shift/rosters/{future['id']}").status_code == 204
   # 已生效的班表用固定的過去日期，不隨測試執行的日期變動
   # 過去的班只有人資能排；主管刪它時要被「已生效」擋下
@@ -70,14 +71,15 @@ def testManagerSchedulesSubordinateAndScheduleReflectsIt(world):
 
 def testOverrideEndpoints(world):
   alice = world.alice["employeeId"]
-  body = {"employeeId": alice, "day": "2026-11-24", "shiftTypeId": None, "note": "補休"}
+  # 主管只能排今天以後的班；用很遠的日期，測試哪天跑都一樣
+  body = {"employeeId": alice, "day": "2030-01-08", "shiftTypeId": None, "note": "補休"}
   assert world.bobClient.put("/api/shift/overrides", json=body).status_code == 403
   saved = world.bossClient.put("/api/shift/overrides", json=body)
   assert saved.status_code == 200 and saved.json()["note"] == "補休"
-  listed = world.aliceClient.get("/api/shift/overrides", params={"employeeId": alice, "from": "2026-11-23", "to": "2026-11-29"}).json()
-  assert [item["day"] for item in listed] == ["2026-11-24"]
-  assert world.hrClient.delete(f"/api/shift/overrides/{alice}/2026-11-24").status_code == 204
-  assert world.hrClient.delete(f"/api/shift/overrides/{alice}/2026-11-24").status_code == 404
+  listed = world.aliceClient.get("/api/shift/overrides", params={"employeeId": alice, "from": "2030-01-07", "to": "2030-01-13"}).json()
+  assert [item["day"] for item in listed] == ["2030-01-08"]
+  assert world.hrClient.delete(f"/api/shift/overrides/{alice}/2030-01-08").status_code == 204
+  assert world.hrClient.delete(f"/api/shift/overrides/{alice}/2030-01-08").status_code == 404
 
 
 def testScheduleValidation(world):
