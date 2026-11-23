@@ -96,3 +96,36 @@ def testStandaloneWritesJudgedFile(tmp_path, monkeypatch):
   saved = json.loads((tmp_path / "dev-jev-x-judged-judge_model.json").read_text(encoding="utf-8"))
   assert saved["results"][0]["judge"]["verdict"] == "correct"
   assert saved["judgeCorrect"] == 1 and saved["judgeModel"] == "judge/model"
+
+
+def testJudgeRetriesOnceWhenFormatBroken():
+  results = [result("o01")]
+  callJudge = replyingJudge("我覺得對", '{"verdict": "correct", "reason": "ok"}')
+  judge.judgeResults(results, {"o01": "問題"}, "judge-model", callJudge)
+  assert results[0]["judge"]["verdict"] == "correct"
+
+
+def testJudgeFailsAfterSecondBrokenReply():
+  results = [result("o01")]
+  judge.judgeResults(results, {"o01": "問題"}, "judge-model", replyingJudge("亂講", "還是亂講"))
+  assert results[0]["judge"]["verdict"] == "judgeFailed"
+
+
+def testJudgePromptDefinesOvertimeAndNull():
+  system = judge.buildJudgeMessages("問題", [[[None]]], "回答")[0]["content"]
+  assert "休息日" in system and "加班" in system
+  assert "沒有值" in system
+  assert "null 不等於查無資料" in system
+
+
+def testParseVerdictWithBraceInReason():
+  assert judge.parseVerdict('{"verdict": "correct", "reason": "格式 {a} 正確"}')["verdict"] == "correct"
+
+
+def testParseVerdictKeepsRawWhenBroken():
+  assert judge.parseVerdict("完全不是 JSON")["raw"] == "完全不是 JSON"
+
+
+def testParseVerdictWithTrailingBrace():
+  # Gemini 實際回過多一個 } 的 JSON
+  assert judge.parseVerdict('{"verdict": "correct", "reason": "有答到"}}')["verdict"] == "correct"

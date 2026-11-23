@@ -6,7 +6,6 @@
 """
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -21,11 +20,14 @@ judgeSystemPrompt = """你是問答系統的評審。依照標準答案，判斷
 
 規則：
 1. 只看回答有沒有答到問題問的事。多提供其他資訊不算錯，但多講的內容跟標準答案矛盾就算錯。
-2. 標準答案是資料庫的查詢結果；可能有不只一組可接受的答案，符合其中一組就算對。
-3. 標準答案裡的 null 代表提問者沒有權限看這個欄位，回答沒講出這個細節也算對。
+2. 標準答案是資料庫的查詢結果；可能有不只一組可接受的答案。逐組比對，只要回答符合其中任何一組就判對，其他組不符合不影響。
+3. 標準答案裡的 null 有兩種意思，依問題判斷：提問者沒有權限看這個欄位（例如假別），回答說看不到細節也算對；或是那裡本來就沒有值（例如休息日沒有班別），回答說出對應的意思（例如「休息、不用上班」）就算對。null 不等於查無資料：標準答案有一列、內容是 null，代表有這筆資料，只是那個欄位沒有值或看不到。
 4. 標準答案沒有任何資料列，代表正確的回答是「查無資料」。
 5. 問的是名單時，回答要包含標準答案裡所有的人或項目，順序不重要。
-6. 只輸出一行 JSON，不要其他文字：{"verdict": "correct" 或 "wrong", "reason": "一句話理由"}"""
+6. 只輸出一行 JSON，不要其他文字：{"verdict": "correct" 或 "wrong", "reason": "一句話理由"}
+
+這個系統的名詞定義：
+- 加班：休息日（週六、週日、國定假日）有排班就算加班。標準答案列出休息日的上班時間，代表那天要加班；回答說「不是加班」就是錯的。"""
 
 
 def buildJudgeMessages(question: str, goldAll: list, answer: str) -> list[dict]:
@@ -37,15 +39,18 @@ def buildJudgeMessages(question: str, goldAll: list, answer: str) -> list[dict]:
 
 
 def parseVerdict(text: str) -> dict:
-  # 模型常把 JSON 包在 ``` 裡或前後多講話，所以只取第一個 {...}
-  matched = re.search(r"\{.*?\}", text or "", re.DOTALL)
-  try:
-    payload = json.loads(matched.group(0)) if matched else None
-  except json.JSONDecodeError:
-    payload = None
-  if not isinstance(payload, dict) or payload.get("verdict") not in verdicts:
-    return {"verdict": "judgeFailed", "reason": ""}
-  return {"verdict": payload["verdict"], "reason": str(payload.get("reason") or "")}
+  text = text or ""
+  # 模型常把 JSON 包在 ``` 裡、前後多講話，Gemini 還會在結尾多吐一個 }：從第一個 { 開始只解析第一個完整的物件
+  first = text.find("{")
+  if first != -1:
+    try:
+      payload, _ = json.JSONDecoder().raw_decode(text, first)
+    except json.JSONDecodeError:
+      payload = None
+    if isinstance(payload, dict) and payload.get("verdict") in verdicts:
+      return {"verdict": payload["verdict"], "reason": str(payload.get("reason") or "")}
+  # 留下原始回覆才查得出為什麼壞掉；只有 dev 的結果檔會存逐題資料
+  return {"verdict": "judgeFailed", "reason": "", "raw": text[:300]}
 
 
 def judgeResults(results: list[dict], questions: dict[str, str], judgeModel: str, callJudge=None) -> None:
@@ -60,7 +65,14 @@ def judgeResults(results: list[dict], questions: dict[str, str], judgeModel: str
       # 評審連不上不是被評的模型答錯，不計分，整輪繼續跑
       item["judge"] = {"verdict": "judgeUnavailable", "reason": ""}
       continue
-    item["judge"] = parseVerdict(reply)
+    verdict = parseVerdict(reply)
+    if verdict["verdict"] == "judgeFailed":
+      # 偶爾一次格式壞掉不代表評審判不出來，重問一次；再壞才放棄
+      try:
+        verdict = parseVerdict(callJudge(judgeModel, buildJudgeMessages(questions[item["id"]], item["goldAll"], item["answer"])))
+      except llmModule.LlmUnavailableError:
+        verdict = {"verdict": "judgeUnavailable", "reason": ""}
+    item["judge"] = verdict
 
 
 def verdictOf(item: dict) -> bool | None:
