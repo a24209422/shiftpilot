@@ -153,6 +153,9 @@ def testCriteriaPutConfusableWordsUnderRunSql():
   assert all(word in runSql for word in ("假別", "核准", "借用", "加班", "參加者"))
   assert "上班" not in available
   assert all(word not in busy for word in ("公務車", "假別", "不要"))
+  # 第四版：busy 寫「有哪些會議」時，「某人下週有幾場會議」會被引去列行程；計數只放 run_sql
+  assert "幾場" in runSql
+  assert all(word not in busy for word in ("幾場", "有哪些會議"))
 
 
 def testMasksKeyCutByTruncation(caplog):
