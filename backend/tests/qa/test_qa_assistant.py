@@ -45,8 +45,9 @@ def testExecutorRoutesProposalAndQuery(sandbox):
   execute = assistant.makeExecutor(sandbox.data, sandbox.asker)
   query = execute(sandbox.conn, "run_sql", {"sql": "SELECT name FROM employees"})
   assert query.ok and query.rows
+  # 週會是 boss 建的：有走到提議工具，才會收到權限的錯誤
   proposal = execute(sandbox.conn, "propose_cancel_booking", {"bookingId": 1})
-  assert proposal.proposal is not None
+  assert proposal.error == "只有建立者或有權限的人可以取消會議 #1"
   free = execute(sandbox.conn, "find_available_resources", {**slot, "kind": "room"})
   assert free.ok and len(free.rows) == 1
   assert not execute(sandbox.conn, "find_available_resources", None).ok

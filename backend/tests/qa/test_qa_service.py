@@ -417,13 +417,14 @@ def testAssistantPromptWithoutEmployee(toolWorld):
 def testAssistantModeReturnsProposal(toolWorld):
   call = ToolReply("", [ToolCall("c1", "propose_cancel_booking", {"bookingId": toolWorld.weekly}, "")], 10, 2)
   toolLlm = toolScript(call)
-  body = ask(toolWorld, scripted(), question="取消週會", mode="assistant", toolLlm=toolLlm)
+  # 週會是 boss 建的，只有 boss 能提議取消
+  body = ask(toolWorld, scripted(), question="取消週會", mode="assistant", toolLlm=toolLlm, actor=toolWorld.bossActor)
   assert body["mode"] == "assistant" and body["proposal"]["kind"] == "booking.cancel"
   assert body["rows"] == [] and body["columns"] == [] and body["sql"] == "" and body["truncated"] is False
   assert body["answer"] == "請確認以下內容。" and body["toolCalls"] == 1
   # 助理模式給的是助理工具清單，而且看得到提問者
   assert "propose_cancel_booking" in toolLlm.toolSets[0] and "find_available_resources" in toolLlm.toolSets[0]
-  assert f"employee_id = {toolWorld.bob}" in toolLlm.calls[0][0]["content"]
+  assert f"employee_id = {toolWorld.boss}" in toolLlm.calls[0][0]["content"]
 
 
 def testAssistantClarifyingReplyIs200(toolWorld):

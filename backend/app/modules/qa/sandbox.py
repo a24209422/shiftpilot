@@ -10,6 +10,7 @@ import psycopg
 from psycopg import Connection
 
 from app.infra.actor import Actor
+from app.modules.booking import service as bookingService
 from app.modules.leave import service as leaveService
 from app.modules.shift import rules as shiftRules
 from app.modules.shift import service as shiftService
@@ -44,6 +45,8 @@ class SandboxData:
   vocabulary: dict[str, list[str]]
   # 助理提案要帶假別 id；放在這裡而不是沙盒資料表，模型的 SQL 看不到
   leaveTypes: list[tuple[int, str]] = field(default_factory=list)
+  # 提問者能改期、取消的會議；提議前先擋掉，不要等使用者按確認才收到 403
+  modifiableBookingIds: set[int] = field(default_factory=set)
 
 
 def dataWindow(today: date) -> tuple[date, date]:
@@ -106,11 +109,13 @@ def collectSandboxData(conn: Connection, actor: Actor, today: date) -> SandboxDa
   )
   rows["resources"] = tuples(conn, "SELECT id, name, kind, location, capacity FROM resources WHERE is_active ORDER BY id")
   bookings = conn.execute(
-    "SELECT id, title, category, start_at, end_at FROM bookings WHERE status = 'confirmed' AND start_at < %s AND end_at > %s ORDER BY start_at, id",
+    "SELECT id, title, category, start_at, end_at, created_by FROM bookings WHERE status = 'confirmed' AND start_at < %s AND end_at > %s ORDER BY start_at, id",
     (endAt, startAt),
   ).fetchall()
   bookingIds = [booking["id"] for booking in bookings]
-  rows["bookings"] = [tuple(booking.values()) for booking in bookings]
+  # created_by 只用來判斷權限，不放進沙盒資料表
+  rows["bookings"] = [(booking["id"], booking["title"], booking["category"], booking["start_at"], booking["end_at"]) for booking in bookings]
+  modifiableBookingIds = {booking["id"] for booking in bookings if bookingService.canModify(actor, booking["created_by"])}
   rows["booking_resources"] = tuples(
     conn, "SELECT booking_id, resource_id FROM booking_resources WHERE booking_id = ANY(%s) ORDER BY booking_id, resource_id", (bookingIds,)
   )
@@ -139,7 +144,7 @@ def collectSandboxData(conn: Connection, actor: Actor, today: date) -> SandboxDa
     "resources": [row[1] for row in rows["resources"]],
   }
   leaveTypes = tuples(conn, "SELECT id, name FROM leave_types WHERE is_active ORDER BY id")
-  return SandboxData(windowStart, windowEnd, rows, vocabulary, leaveTypes)
+  return SandboxData(windowStart, windowEnd, rows, vocabulary, leaveTypes, modifiableBookingIds)
 
 
 @contextmanager

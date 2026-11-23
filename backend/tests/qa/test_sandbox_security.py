@@ -120,7 +120,7 @@ def testLargeResultIsCappedBySize(sandbox):
 def testOtherAskersQueriesAreNotVisible(sandbox, qaSandboxUrl, migratedUrl):
   marker = "marker_9f3c1d_secret"
   with openDb(migratedUrl) as conn:
-    data = collectSandboxData(conn, SimpleNamespace(role="admin", employeeId=None), date(2026, 11, 21))
+    data = collectSandboxData(conn, SimpleNamespace(role="admin", employeeId=None, userId=None), date(2026, 11, 21))
   with openSandbox(qaSandboxUrl, data) as other:
     runQuery(other, f"SELECT '{marker}' AS x")
     seen = runQuery(sandbox.conn, "SELECT query FROM pg_stat_activity")[1]
