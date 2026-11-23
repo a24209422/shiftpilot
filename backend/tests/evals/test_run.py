@@ -542,3 +542,9 @@ def testHiddenSplitJudgeLeaksNothing(world):
   assert set(saved) == allowedTestKeys | judgeKeys
   assert any(line.startswith("回答（評審）：") for line in lines)
   assert not any("秘密回答丙" in line or "秘密理由丁" in line or "h0" in line for line in lines)
+
+
+def testFailedAgentCaseCountsAsWrongAnswer(world):
+  result = evaluateAgent(world, toolReplies(sqlTool("SELECT nope FROM employees"), ToolReply("算了", [], None, None)))
+  assert result["outcome"] != "unavailable" and result["answer"] is None
+  assert result["answerMatch"] is False

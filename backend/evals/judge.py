@@ -57,7 +57,8 @@ def judgeResults(results: list[dict], questions: dict[str, str], judgeModel: str
   callJudge = callJudge or llmModule.callModel
   for item in results:
     if item.get("answer") is None:
-      item["judge"] = None
+      # 連不上不計分；其他失敗使用者看到的是錯誤訊息，算錯，不能從分母消失
+      item["judge"] = None if item["outcome"] == "unavailable" else {"verdict": "wrong", "reason": "沒有產生回答"}
       continue
     try:
       reply = callJudge(judgeModel, buildJudgeMessages(questions[item["id"]], item["goldAll"], item["answer"]))

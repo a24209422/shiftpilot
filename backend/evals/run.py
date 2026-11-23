@@ -139,8 +139,15 @@ def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pip
     "predicted": predicted, "gold": goldResults[0], "retried": mode == "pipeline" and getattr(llm, "calls", 1) > 1,
     "seconds": round(time.perf_counter() - startedAt, 1),
     "errorType": errorType, "errorMessage": errorMessage, "mode": mode, **agentInfo, **routeInfo,
-    "answer": finalAnswer, "answerMatch": matchAnswer(finalAnswer, goldResults), "goldAll": goldResults,
+    "answer": finalAnswer, "answerMatch": answerMatchFor(mode, outcome, finalAnswer, goldResults), "goldAll": goldResults,
   }
+
+
+def answerMatchFor(mode: str, outcome: str, finalAnswer: str | None, goldResults) -> bool | None:
+  if mode not in agentModes or outcome == "unavailable":
+    return None
+  # 失敗的題目沒有回答，使用者看到的是錯誤訊息：算錯，不能從分母消失
+  return False if finalAnswer is None else matchAnswer(finalAnswer, goldResults)
 
 
 def collectAgentInfo(body: dict) -> dict:

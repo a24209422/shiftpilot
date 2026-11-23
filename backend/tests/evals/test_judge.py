@@ -49,7 +49,7 @@ def testJudgeMessagesContainInputs():
 
 def testJudgeSkipsMissingAnswer():
   calls = []
-  results = [result(answer=None, answerMatch=None)]
+  results = [result(outcome="unavailable", answer=None, answerMatch=None)]
   judge.judgeResults(results, {"o01": "問題"}, "judge-model", replyingJudge(calls=calls))
   assert calls == [] and results[0]["judge"] is None
 
@@ -129,3 +129,12 @@ def testParseVerdictKeepsRawWhenBroken():
 def testParseVerdictWithTrailingBrace():
   # Gemini 實際回過多一個 } 的 JSON
   assert judge.parseVerdict('{"verdict": "correct", "reason": "有答到"}}')["verdict"] == "correct"
+
+
+def testFailedCaseWithoutAnswerIsWrong():
+  # 使用者看到的是錯誤訊息，不是答案：要算錯，不能從分母消失
+  calls = []
+  results = [result(outcome="stepsExhausted", answer=None, answerMatch=False)]
+  judge.judgeResults(results, {"o01": "問題"}, "judge-model", replyingJudge(calls=calls))
+  assert calls == [] and results[0]["judge"]["verdict"] == "wrong"
+  assert judge.summarizeJudge(results)["judgeScored"] == 1
