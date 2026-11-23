@@ -83,6 +83,16 @@ export interface ScheduleDay {
 }
 
 export interface QaModel { id: string; label: string; remote: boolean }
+export const qaProgressStages = ["prepare", "route", "generate_query", "query", "model", "tool", "proposal", "compose"] as const;
+export type QaProgressStage = (typeof qaProgressStages)[number];
+export type QaProgressStep = {
+  type: "step"; id: number; stage: QaProgressStage; state: "running" | "done" | "failed";
+};
+export type QaProgressEvent = { type: "accepted" } | QaProgressStep;
+export type QaStreamEvent = QaProgressEvent
+  | { type: "result"; answer: QaAnswer }
+  | { type: "error"; status: number; error: { code: string; message: string; details?: unknown } };
+
 export type QaMode = "pipeline" | "agent" | "jev" | "assistant";
 export interface QaProposal {
   kind: "booking.create" | "booking.reschedule" | "booking.cancel" | "leave.create" | "leave.withdraw";

@@ -21,21 +21,18 @@ export function onSessionExpired(listener: () => void): () => void {
 
 const networkError = (status: number) => new ApiError(status, "NETWORK", "連不上伺服器，請確認後端有在執行");
 
-async function request<T>(method: string, path: string, params?: Params, body?: unknown): Promise<T> {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params ?? {})) {
-    if (value !== undefined) query.set(key, String(value));
-  }
-  const url = query.size ? `${path}?${query}` : path;
+export async function fetchApi(method: string, url: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
   const headers: Record<string, string> = { "X-App-Client": "web" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  let response: Response;
   try {
-    response = await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body) });
+    return await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body), signal });
   } catch {
     throw networkError(0);
   }
+}
+
+export async function readApiJson<T>(response: Response, path: string): Promise<T> {
   if (response.status === 204) return undefined as T;
   let data: any;
   try {
@@ -54,6 +51,15 @@ async function request<T>(method: string, path: string, params?: Params, body?: 
     throw new ApiError(response.status, error.code, error.message, error.details ?? null);
   }
   return data as T;
+}
+
+async function request<T>(method: string, path: string, params?: Params, body?: unknown): Promise<T> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const response = await fetchApi(method, query.size ? `${path}?${query}` : path, body);
+  return readApiJson<T>(response, path);
 }
 
 export const apiGet = <T>(path: string, params?: Params) => request<T>("GET", path, params);
