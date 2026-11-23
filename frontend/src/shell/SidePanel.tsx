@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
-import { ApiError, apiGet, apiSend } from "../api/client";
-import type { QaAnswer, QaMode, QaModel } from "../api/types";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { ApiError, apiGet } from "../api/client";
+import { askWithProgress } from "../api/qaStream";
+import type { QaMode, QaModel } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, toLocalDate } from "../forms/time";
 import { Icon } from "./icons";
 import { ChatMessage, toHistory, type ChatEntry } from "./QaMessage";
+import { applyQaProgress, type QaProgressSnapshot } from "./QaProgress";
 
 // 跟後端的沙盒範圍一致：還沒問過問題前，先用今天前後各 90 天提示
 const windowDays = 90;
@@ -35,6 +37,14 @@ export function SidePanel() {
   const nextId = useRef(1);
   // state 要等下一次 render 才更新，連按兩次時用 ref 才擋得住第二次
   const askingRef = useRef(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const followChat = useRef(true);
+  useEffect(() => () => requestRef.current?.abort(), []);
+  useLayoutEffect(() => {
+    const log = logRef.current;
+    if (log && open && followChat.current) log.scrollTop = log.scrollHeight;
+  }, [entries, open]);
 
   // 模型清單載入後預設第一個（後端把 .env 的 OLLAMA_MODEL 放第一）
   useEffect(() => {
@@ -59,23 +69,39 @@ export function SidePanel() {
     if (!text || !canAsk || !model || askingRef.current) return;
     const questionId = nextId.current++;
     const pendingId = nextId.current++;
-    setEntries((current) => [...current, { id: questionId, kind: "question", text }, { id: pendingId, kind: "pending" }]);
+    const progress: QaProgressSnapshot = { startedAt: Date.now(), accepted: false, steps: [] };
+    const controller = new AbortController();
+    requestRef.current = controller;
+    followChat.current = true;
+    setEntries((current) => [...current, { id: questionId, kind: "question", text }, { id: pendingId, kind: "pending", progress }]);
+    const updatePending = (update: (progress: QaProgressSnapshot) => ChatEntry) => {
+      setEntries((current) => current.map((entry) => entry.id === pendingId && entry.kind === "pending" ? update(entry.progress) : entry));
+    };
     setQuestion("");
     askingRef.current = true;
     setAsking(true);
     try {
       // history 取發問前的紀錄（此時 entries 還是 render 當下的值，不含這一題）；只有助理模式會讀
       const body = mode === "assistant" ? { question: text, model, mode, history: toHistory(entries) } : { question: text, model, mode };
-      const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", body);
+      const result = await askWithProgress(body, (event) => {
+        if (!controller.signal.aborted) {
+          updatePending((current) => ({ id: pendingId, kind: "pending", progress: applyQaProgress(current, event) }));
+        }
+      }, controller.signal);
+      if (controller.signal.aborted) return;
       setRange(result.window);
-      setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "answer", result } : entry)));
+      const finishedAt = Date.now();
+      updatePending((current) => ({ id: pendingId, kind: "answer", result, progress: { ...current, finishedAt } }));
     } catch (caught) {
+      if (controller.signal.aborted) return;
       const error = caught instanceof ApiError ? caught : new ApiError(0, "UNKNOWN", "問答失敗，請再試一次");
       const sql = (error.details as { sql?: string } | null)?.sql ?? null;
-      setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "error", message: error.message, sql } : entry)));
+      const finishedAt = Date.now();
+      updatePending((current) => ({ id: pendingId, kind: "error", message: error.message, sql, progress: { ...current, finishedAt } }));
     } finally {
+      requestRef.current = null;
       askingRef.current = false;
-      setAsking(false);
+      if (!controller.signal.aborted) setAsking(false);
     }
   }
 
@@ -141,7 +167,9 @@ export function SidePanel() {
               </button>
             </div>
           </header>
-          <div className="chatLog" role="log" aria-live="polite">
+          <div className="chatLog" role="log" aria-live="polite" ref={logRef} onScroll={({ currentTarget }) => {
+            followChat.current = currentTarget.scrollHeight - currentTarget.clientHeight - currentTarget.scrollTop <= 16;
+          }}>
             <div className="msg bot">
               <div className="msgMeta">DESK</div>
               {/* 權限還在載入時先顯示說明，免得有權限的人先閃過一句「沒有權限」 */}

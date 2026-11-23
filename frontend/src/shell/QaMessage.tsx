@@ -1,11 +1,12 @@
 import type { QaAnswer, QaHistoryItem, QaRoute, QaStep } from "../api/types";
 import { ProposalCard } from "./ProposalCard";
+import { QaProgress, type QaProgressSnapshot } from "./QaProgress";
 
 export type ChatEntry =
   | { id: number; kind: "question"; text: string }
-  | { id: number; kind: "pending" }
-  | { id: number; kind: "answer"; result: QaAnswer }
-  | { id: number; kind: "error"; message: string; sql: string | null }
+  | { id: number; kind: "pending"; progress: QaProgressSnapshot }
+  | { id: number; kind: "answer"; result: QaAnswer; progress?: QaProgressSnapshot }
+  | { id: number; kind: "error"; message: string; sql: string | null; progress?: QaProgressSnapshot }
   | { id: number; kind: "note"; text: string };
 
 // 後端上限：最多 40 則、每則 1000 字；超過會被 422 擋掉，所以送出前先裁
@@ -86,12 +87,13 @@ export function ChatMessage({ entry, proposalActive = false, onNote = () => {} }
     return <div className="chatNote qaNote">{entry.text}</div>;
   }
   if (entry.kind === "pending") {
-    return <div className="msg bot"><div className="msgMeta">DESK</div><div className="bubble">查詢中…</div></div>;
+    return <div className="msg bot"><div className="msgMeta">DESK</div><QaProgress progress={entry.progress} /></div>;
   }
   if (entry.kind === "error") {
     return (
       <div className="msg bot">
         <div className="msgMeta">DESK</div>
+        {entry.progress?.accepted && <QaProgress progress={entry.progress} />}
         <div className="bubble qaError" role="alert">
           {entry.message}
           {entry.sql && <details><summary>看 SQL</summary><pre className="mono qaSql">{entry.sql}</pre></details>}
@@ -104,6 +106,7 @@ export function ChatMessage({ entry, proposalActive = false, onNote = () => {} }
     <div className="msg bot">
       {/* 雲端模型要標出來：問題與查詢結果已經離開這台電腦 */}
       <div className="msgMeta">{result.model}{result.remote ? "・已送到雲端" : ""}</div>
+      {entry.progress && <QaProgress progress={entry.progress} collapsed />}
       <div className="bubble">
         {result.answer}
         {((result.steps && result.steps.length > 0) || result.route) && <StepList steps={result.steps ?? []} route={result.route} />}
