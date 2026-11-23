@@ -41,7 +41,7 @@ export function LoginPage() {
   return (
     <div className="loginWrap">
       <form className="loginCard form" onSubmit={submit}>
-        <div className="brand">Ops<br />Desk</div>
+        <div className="brand">Shift<br />Pilot</div>
         {notice && <div className="loginNotice">{notice}</div>}
         <div className="field">
           <label htmlFor="loginEmail">Email</label>

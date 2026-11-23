@@ -35,7 +35,7 @@ def mountModuleRouters(app: FastAPI) -> None:
 
 
 def createApp(databaseUrl: str, sessionHours: int = 12, frontendDir: Path | None = None, qaDatabaseUrl: str | None = None) -> FastAPI:
-  app = FastAPI(title="請假排班系統")
+  app = FastAPI(title="ShiftPilot")
   app.state.databaseUrl = databaseUrl
   app.state.sessionHours = sessionHours
   app.state.qaDatabaseUrl = qaDatabaseUrl

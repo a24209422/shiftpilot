@@ -1,6 +1,6 @@
 # 後端（FastAPI + PostgreSQL）
 
-請假排班系統的後端：組織、資源預約、登入與角色、稽核。設計見 `docs/superpowers/specs/2026-11-20-erp-platform-design.md`，實作計畫見 `docs/superpowers/plans/2026-11-20-erp-platform-backend.md`（裡面的「API 清單」是前端要逐項對照的核對表）。
+ShiftPilot 的後端：組織、資源預約、登入與角色、稽核。設計見 `docs/superpowers/specs/2026-11-20-erp-platform-design.md`，實作計畫見 `docs/superpowers/plans/2026-11-20-erp-platform-backend.md`（裡面的「API 清單」是前端要逐項對照的核對表）。
 
 下面的指令都在 **`backend/` 目錄**執行，設定檔是 repo 根目錄的 `.env`（從 `.env.example` 複製，密碼改成自己的值）。
 

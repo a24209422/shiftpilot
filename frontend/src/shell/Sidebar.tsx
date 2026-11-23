@@ -15,7 +15,7 @@ export function Sidebar({ pages, onChangePassword }: { pages: PageRegistration[]
   const stamp = `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} ${dayNames[now.getDay()]}`;
   return (
     <nav className="sidebar">
-      <div className="brand">Ops<br />Desk</div>
+      <div className="brand">Shift<br />Pilot</div>
       <div className="brandNote">{stamp}</div>
       <NavLink to="/" end className={navClass}><Icon name="home" size={18} /><span className="navLabel">首頁</span></NavLink>
       {pages.map((page) => (

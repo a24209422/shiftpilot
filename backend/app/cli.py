@@ -149,7 +149,7 @@ def seedDemoBookingsCommand(databaseUrl: str) -> tuple[int, int]:
 
 
 def buildParser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(prog="python -m app.cli", description="請假排班系統的管理指令（在 backend/ 目錄執行）")
+  parser = argparse.ArgumentParser(prog="python -m app.cli", description="ShiftPilot 的管理指令（在 backend/ 目錄執行）")
   commands = parser.add_subparsers(dest="command", required=True)
   commands.add_parser("migrate", help="套用還沒執行過的資料庫遷移")
   createUser = commands.add_parser("createUser", help="建立帳號（密碼會用互動方式輸入兩次，不能放在命令列參數）")

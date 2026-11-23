@@ -1,6 +1,6 @@
 # 前端（React + Vite + TypeScript）
 
-請假排班系統的畫面。外觀來源是 `prototype/home-layout.indie-sleaze.chat-panel.prototype.html`（一次性原型，只當參考）。設計見 `docs/superpowers/specs/2026-11-20-erp-frontend-design.md`。
+ShiftPilot 的畫面。外觀來源是 `prototype/home-layout.indie-sleaze.chat-panel.prototype.html`（一次性原型，只當參考）。設計見 `docs/superpowers/specs/2026-11-20-erp-frontend-design.md`。
 
 指令都在 **`frontend/` 目錄**執行。需要 Node 24。
 

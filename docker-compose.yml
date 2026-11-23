@@ -25,7 +25,7 @@ services:
   app:
     build: .
     # 明確取新名字：預設名稱 schedule-mvp-app 在舊機器上可能還留著舊版 Streamlit 的映像檔，compose 會直接拿來用而不重建
-    image: schedule-desk-app
+    image: shiftpilot-app
     restart: unless-stopped
     depends_on:
       postgres:
