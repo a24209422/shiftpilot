@@ -1,3 +1,5 @@
+import json
+import math
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -14,6 +16,9 @@ from app.modules.shift import service as shiftService
 
 windowDays = 90
 maxRows = 200
+# 列數上限擋不住「少數幾列但每列很大」的結果；用轉成 JSON 後的字元數再設一道上限，避免後端被撐爆記憶體
+maxResultChars = 1_000_000
+fetchBatch = 20
 statementTimeout = "5s"
 
 # 沙盒裡的資料表；順序就是寫入時的欄位順序，也是給模型看的說明順序
@@ -165,6 +170,9 @@ def jsonValue(value):
     return value.isoformat(timespec="seconds")
   if isinstance(value, (date, time)):
     return value.isoformat()
+  # NaN、Infinity 不是合法 JSON，回應序列化（allow_nan=False）會失敗；轉成字串讓模型仍看得到算出來的是什麼
+  if isinstance(value, (float, Decimal)) and not math.isfinite(value):
+    return "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
   if isinstance(value, Decimal):
     return float(value)
   if isinstance(value, timedelta):
@@ -177,7 +185,28 @@ def jsonValue(value):
     return [jsonValue(item) for item in value]
   if isinstance(value, dict):
     return {str(key): jsonValue(item) for key, item in value.items()}
-  return value
+  if value is None or isinstance(value, (str, bool, int, float)):
+    return value
+  # Range、inet 這類沒列到的型別：json.dumps 遇到會丟 TypeError 讓整個問答變 500，一律轉成文字
+  return str(value)
+
+
+def fetchLimited(cursor) -> tuple[list[list], bool]:
+  rows: list[list] = []
+  usedChars = 0
+  while len(rows) <= maxRows:
+    batch = cursor.fetchmany(fetchBatch)
+    if not batch:
+      return rows, False
+    for row in batch:
+      if len(rows) == maxRows:
+        return rows, True
+      converted = [jsonValue(value) for value in row]
+      usedChars += len(json.dumps(converted, ensure_ascii=False))
+      if usedChars > maxResultChars:
+        return rows, True
+      rows.append(converted)
+  return rows, True
 
 
 def runQuery(conn: Connection, sql: str, params: dict | None = None) -> tuple[list[str], list[list], bool]:
@@ -185,10 +214,10 @@ def runQuery(conn: Connection, sql: str, params: dict | None = None) -> tuple[li
   # 只能靠 sqlguard 在送進來之前禁止；這裡的防線只負責「就算 SQL 檢查被繞過，沙盒本身仍然唯讀、有逾時」。
   # force_rollback：交易結束一定回滾，模型用 set_config(..., false) 改的連線設定（唯讀、逾時）都會還原。
   # 具名游標只能執行會回傳資料列的陳述式，其他一律丟 psycopg.Error，呼叫端必須接住。
-  # 具名游標在資料庫端分批取：交叉連接不會把上百萬列送到應用程式。
+  # 具名游標在資料庫端分批取：交叉連接不會把上百萬列送到應用程式，超過資料量上限也能提早停下。
   with conn.transaction(force_rollback=True):
     with conn.cursor(name="qaQuery") as cursor:
       cursor.execute(sql, params)
       columns = [column.name for column in cursor.description]
-      fetched = cursor.fetchmany(maxRows + 1)
-  return columns, [[jsonValue(value) for value in row] for row in fetched[:maxRows]], len(fetched) > maxRows
+      rows, truncated = fetchLimited(cursor)
+  return columns, rows, truncated

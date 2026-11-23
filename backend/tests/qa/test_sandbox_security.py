@@ -110,6 +110,13 @@ def testCrossJoinIsCappedInDatabase(sandbox):
   assert len(rows) == 200 and truncated is True
 
 
+def testLargeResultIsCappedBySize(sandbox):
+  # 繞過 validateSql（lpad 會被它擋）：就算檢查被繞過，回到應用程式的資料量也有上限
+  columns, rows, truncated = runQuery(sandbox.conn, "SELECT lpad('x', 100000) AS s FROM generate_series(1, 50)")
+  assert truncated is True and 0 < len(rows) < 50
+  assert sum(len(row[0]) for row in rows) <= 1_000_000
+
+
 def testOtherAskersQueriesAreNotVisible(sandbox, qaSandboxUrl, migratedUrl):
   marker = "marker_9f3c1d_secret"
   with openDb(migratedUrl) as conn:

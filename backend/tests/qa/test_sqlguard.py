@@ -128,3 +128,57 @@ def testUnicodeEscapeAndXmlFunctionsRejected(sql):
 
 def testUnicodeAmpersandInsideStringAccepted():
   validateSql("SELECT name FROM employees WHERE note = 'U&\"x\"'")
+
+
+# 第四輪：PostgreSQL 的 -- 註解遇到 \r 也會結束；pg_try_advisory_* 的 advisory 前面是底線，\b 擋不到
+
+@pytest.mark.parametrize("sql", [
+  "SELECT 1 --x\rUNION SELECT pg_terminate_backend(pid) FROM pg_stat_activity",
+  "SELECT 1 --x\rUNION SELECT 1 FROM employees; DELETE FROM employees",
+  "SELECT pg_try_advisory_lock(7301)",
+  "SELECT pg_try_advisory_xact_lock(7301)",
+  "SELECT pg_try_advisory_lock_shared(7301)",
+  "SELECT pg_catalog.pg_try_advisory_lock(k) FROM generate_series(1, 10000) k",
+])
+def testCarriageReturnCommentAndTryAdvisoryRejected(sql):
+  with pytest.raises(UnsafeSqlError):
+    validateSql(sql)
+
+
+def testCrlfLineCommentAccepted():
+  # Windows 換行的註解仍然要能正常查詢
+  validateSql("SELECT name -- 姓名\r\nFROM employees")
+
+
+# 第五輪：會把結果放大到幾百 MB 的函式；程式碼區塊的語言標籤；說明文字裡的 with
+
+@pytest.mark.parametrize("sql", [
+  "SELECT repeat('x', 500000000)",
+  "SELECT lpad('x', 500000000)",
+  "SELECT RPAD('x', 500000000, 'y')",
+  "SELECT array_fill(1, ARRAY[100000000])",
+  "SELECT pg_catalog.repeat('x', 10)",
+])
+def testAmplifyingFunctionsRejected(sql):
+  with pytest.raises(UnsafeSqlError):
+    validateSql(sql)
+
+
+def testColumnNamedLikeAmplifierInsideStringAccepted():
+  validateSql("SELECT name FROM employees WHERE note = 'repeat'")
+
+
+@pytest.mark.parametrize("fence", ["sql", "SQL", "postgresql", "pgsql", "postgres", ""])
+def testExtractIgnoresFenceLanguageTag(fence):
+  assert extractSql(f"說明\n```{fence}\nSELECT 1\n```") == "SELECT 1"
+
+
+@pytest.mark.parametrize("text,expected", [
+  ("Here is the query with a join: SELECT e.name FROM employees e", "SELECT e.name FROM employees e"),
+  ("說明 WITH t AS (SELECT 1 AS a) SELECT a FROM t", "WITH t AS (SELECT 1 AS a) SELECT a FROM t"),
+  ("WITH RECURSIVE t(n) AS (SELECT 1) SELECT n FROM t", "WITH RECURSIVE t(n) AS (SELECT 1) SELECT n FROM t"),
+  ("with x as materialized (select 1) select * from x", "with x as materialized (select 1) select * from x"),
+  ("查詢：with t AS(SELECT 1) SELECT * FROM t", "with t AS(SELECT 1) SELECT * FROM t"),
+])
+def testExtractStartsAtRealCte(text, expected):
+  assert extractSql(text) == expected

@@ -11,14 +11,18 @@ forbiddenKeywords = re.compile(
 forbiddenLocking = re.compile(r"\bfor\s+(no\s+key\s+update|share|key\s+share)\b", re.IGNORECASE)
 # ts_stat / ts_rewrite 會把字串參數當 SQL 執行，而檢查時字串內容已被清掉，所以函式本身必須擋；pg_sleep_for 等變體用 \w* 一併涵蓋
 # 底線是字元的一部分，\bset\b 擋不到 set_config，所以函式另外列；不要求後面接括號，避免 /**/ 或引號繞過
+# 同理 pg_try_advisory_lock 裡的 advisory 前面是底線，要寫成 pg_\w*advisory 才涵蓋 try 變體
 forbiddenFunctions = re.compile(
   r"\b(set_config|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_\w+|dblink\w*"
   r"|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|setval|nextval|currval|pg_notify|pg_sleep\w*|ts_stat|ts_rewrite"
-  r"|pg_advisory\w*|query_to_xml\w*|pg_ls_\w+|table_to_xml\w*|cursor_to_xml|database_to_xml\w*|schema_to_xml\w*)\b",
+  r"|pg_\w*advisory\w*|query_to_xml\w*|pg_ls_\w+|table_to_xml\w*|cursor_to_xml|database_to_xml\w*|schema_to_xml\w*"
+  # 一次呼叫就能產生幾百 MB 的結果，正常查詢用不到；sandbox 另有資料量上限，這裡先擋最直接的放大手段
+  r"|repeat|lpad|rpad|array_fill)\b",
   re.IGNORECASE,
 )
 # dollar quoting 可以把整段內容藏進字串，檢查時看不到，所以直接不允許
 dollarQuote = re.compile(r"\$\w*\$")
+lineBreak = re.compile(r"[\r\n]")
 
 
 class UnsafeSqlError(ValueError):
@@ -41,8 +45,9 @@ def cleanSql(sql: str) -> str:
   n = len(sql)
   while i < n:
     if sql.startswith("--", i):
-      end = sql.find("\n", i)
-      i = n if end == -1 else end
+      # PostgreSQL 的行註解遇到 \n 或 \r 都會結束；只找 \n 的話，\r 後面的 SQL 會被當成註解藏起來卻照樣執行
+      lineEnd = lineBreak.search(sql, i)
+      i = n if lineEnd is None else lineEnd.start()
       out.append(" ")
     elif sql.startswith("/*", i):
       # PostgreSQL 的區塊註解可以巢狀；這裡用非巢狀處理，只會讓更多文字暴露給檢查，方向是安全的
@@ -94,13 +99,18 @@ def stripThink(text: str | None) -> str:
 
 def extractSql(text: str) -> str:
   text = stripThink(text)
-  fenced = re.search(r"```(?:sql)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+  # 語言標籤不只 sql：模型也常寫 postgresql、pgsql，標籤留在結果開頭會被當成 SQL 的第一個字
+  fenced = re.search(r"```[A-Za-z]*\s*(.*?)```", text, flags=re.DOTALL)
   if fenced:
     text = fenced.group(1)
   else:
     # 小模型常不照格式，在 SQL 前面加說明文字，所以從第一個 SELECT / WITH 開始取；
-    # 前面不能是英文字母或底線，但允許緊接在中文後面（例如「查詢如下SELECT」）
-    start = re.search(r"(?<![A-Za-z_])(select|with)\b", text, flags=re.IGNORECASE)
+    # 前面不能是英文字母或底線，但允許緊接在中文後面（例如「查詢如下SELECT」）。
+    # with 在英文說明裡很常見（query with a join），要接著 CTE 的「名稱 AS (」才算 SQL 的開頭
+    start = re.search(
+      r"(?<![A-Za-z_])(select\b|with\s+(?:recursive\s+)?(?:\"[^\"]+\"|\w+)(?:\s*\([^)]*\))?\s+as\s*(?:(?:not\s+)?materialized\s*)?\()",
+      text, flags=re.IGNORECASE,
+    )
     if start:
       text = text[start.start():]
   # 分號後面通常是模型補的解釋；只取第一句也順便擋掉多語句
