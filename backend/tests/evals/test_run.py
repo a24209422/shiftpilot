@@ -155,6 +155,7 @@ hiddenCases = [
 allowedTestKeys = {
   "split", "model", "finishedAt", "correct", "scored", "unavailable", "score", "complete",
   "mode", "avgSeconds", "avgToolCalls", "promptTokens", "completionTokens", "jevFallbacks", "jevPromptTokens",
+  "answerMatchCorrect", "answerMatchScored",
 }
 
 
@@ -480,3 +481,43 @@ def testModeFlagAcceptsJev(monkeypatch):
   monkeypatch.setattr(run.llmModule, "listModels", lambda: [{"id": "qwen2.5:3b"}])
   run.main(["--split", "dev", "--mode", "jev"])
   assert seen["mode"] == "jev"
+
+
+# ---------- 最後的回答 ----------
+
+
+def testAgentResultKeepsAnswer(world):
+  result = evaluateAgent(world, toolReplies(sqlTool(miniCases[0]["goldSql"]), ToolReply("工程部有陳大文", [], 10, 1)))
+  assert result["answer"] == "工程部有陳大文"
+  assert isinstance(result["answerMatch"], bool)
+  assert isinstance(result["goldAll"], list) and result["goldAll"]
+
+
+def testPipelineHasNoAnswer(world):
+  result = evaluate(world, miniCases[0]["goldSql"])
+  assert result["answer"] is None and result["answerMatch"] is None
+
+
+def testUnavailableHasNoAnswerScore(world):
+  def down(model, messages, tools):
+    raise LlmUnavailableError("連不上")
+
+  result = evaluateAgent(world, down)
+  assert result["outcome"] == "unavailable"
+  assert result["answer"] is None and result["answerMatch"] is None
+
+
+def testSummaryCountsAnswerMatch():
+  base = {"category": "org", "seconds": 1.0, "outcome": "correct"}
+  results = [{**base, "answerMatch": True}, {**base, "answerMatch": False}, {**base, "answerMatch": None}]
+  summary = run.summarize("dev", "qwen2.5:3b", results, "agent")
+  assert summary["answerMatchCorrect"] == 1 and summary["answerMatchScored"] == 2
+
+
+def testHiddenSplitPrintsAnswerMatchTotal(world):
+  snapshotOf(hiddenCases[:2], world)
+  toolLlm = toolReplies(sqlTool("SELECT name FROM employees"), ToolReply("秘密回答丙", [], 10, 1))
+  lines = []
+  run.runSplit("test", "qwen2.5:3b", out=lines.append, world=world, casesOverride=hiddenCases[:2], mode="agent", toolLlm=toolLlm)
+  assert any(line.startswith("回答（字串比對）：") for line in lines)
+  assert not any("秘密回答丙" in line for line in lines)

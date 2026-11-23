@@ -14,6 +14,7 @@ from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
 from app.modules.qa import jev, service, sqlguard
 from evals import gold
+from evals.answer_match import matchAnswer
 from evals.cases import cases as devCases
 from evals.cases import categories
 from evals.fixture import fixedNow, openEvalWorld
@@ -99,7 +100,7 @@ def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pip
   toolLlm = toolLlm or llmModule.callModelWithTools
   chooseTool = chooseTool or jev.chooseTool
   startedAt = time.perf_counter()
-  sql, predicted, errorType, errorMessage = None, None, None, None
+  sql, predicted, errorType, errorMessage, finalAnswer = None, None, None, None, None
   agentInfo = {"toolCalls": None, "tools": [], "noTool": False, "promptTokens": None, "completionTokens": None}
   routeInfo = {"routeTool": None, "routeConfidence": None, "routeFallback": None, "jevPromptTokens": None, "jevSeconds": None}
   with openDb(world.url) as conn:
@@ -114,6 +115,8 @@ def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pip
       if mode in agentModes:
         agentInfo.update(collectAgentInfo(answer))
         routeInfo.update(collectRouteInfo(answer.get("route")))
+        # pipeline 的評測跳過產生回答那一步，只有 agent 與 jev 有使用者真正看到的回答
+        finalAnswer = answer.get("answer")
       matched = any(resultsMatch(expected, predicted, case.get("compareAsSet", False)) for expected in goldResults)
       outcome = "correct" if matched else "wrong"
     except AppError as error:
@@ -136,6 +139,7 @@ def evaluateCase(world, case: dict, model: str, llm, goldResults=None, mode="pip
     "predicted": predicted, "gold": goldResults[0], "retried": mode == "pipeline" and getattr(llm, "calls", 1) > 1,
     "seconds": round(time.perf_counter() - startedAt, 1),
     "errorType": errorType, "errorMessage": errorMessage, "mode": mode, **agentInfo, **routeInfo,
+    "answer": finalAnswer, "answerMatch": matchAnswer(finalAnswer, goldResults), "goldAll": goldResults,
   }
 
 
@@ -190,6 +194,8 @@ def summarize(split: str, model: str, results: list[dict], mode: str = "pipeline
     "jevFallbacks": sum(bool(result.get("routeFallback")) for result in results) if mode == "jev" else None,
     "jevPromptTokens": sum(result.get("jevPromptTokens") or 0 for result in results) if mode == "jev" else None,
     "routeCounts": routeCounts(results) if mode == "jev" else None,
+    "answerMatchCorrect": sum(result.get("answerMatch") is True for result in results),
+    "answerMatchScored": sum(result.get("answerMatch") is not None for result in results),
   }
 
 
@@ -206,6 +212,11 @@ def printCase(out, result: dict) -> None:
   if result["outcome"] == "wrong":
     out(f"   標準答案前 5 列：{json.dumps(result['gold'][:5], ensure_ascii=False)}")
     out(f"   模型結果前 5 列：{json.dumps((result['predicted'] or [])[:5], ensure_ascii=False)}")
+
+
+def printAnswerTotals(out, summary: dict) -> None:
+  if summary["answerMatchScored"]:
+    out(f"回答（字串比對）：{summary['answerMatchCorrect']}/{summary['answerMatchScored']}")
 
 
 def saveResults(split: str, model: str, payload: dict, mode: str = "pipeline") -> Path:
@@ -278,6 +289,7 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
   summary = partial
   if hidden:
     out(f"總分：{summary['correct']}/{summary['scored']}（模型連不上 {summary['unavailable']} 題不計分）")
+    printAnswerTotals(out, summary)
     return summary
   out("")
   for category, counts in summary["byCategory"].items():
@@ -285,6 +297,7 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
   out(f"總分：{summary['correct']}/{summary['scored']}（重試 {sum(result['retried'] for result in results)} 題、模型連不上 {summary['unavailable']} 題）")
   if mode in agentModes:
     out(f"平均 {summary['avgSeconds']} 秒、平均工具呼叫 {summary['avgToolCalls']} 次、token 輸入 {summary['promptTokens']} 輸出 {summary['completionTokens']}")
+  printAnswerTotals(out, summary)
   if mode == "jev":
     out(f"Jev：退回 {summary['jevFallbacks']} 題、選工具分布 {summary['routeCounts']}、token 輸入 {summary['jevPromptTokens']}")
   return summary
