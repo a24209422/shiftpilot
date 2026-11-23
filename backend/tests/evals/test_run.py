@@ -521,3 +521,24 @@ def testHiddenSplitPrintsAnswerMatchTotal(world):
   run.runSplit("test", "qwen2.5:3b", out=lines.append, world=world, casesOverride=hiddenCases[:2], mode="agent", toolLlm=toolLlm)
   assert any(line.startswith("回答（字串比對）：") for line in lines)
   assert not any("秘密回答丙" in line for line in lines)
+
+
+def testJudgeFlagNeedsAgentMode():
+  with pytest.raises(SystemExit):
+    run.main(["--split", "dev", "--judge", "google/gemini-3.5-flash-lite"])
+
+
+def testHiddenSplitJudgeLeaksNothing(world):
+  import json
+
+  snapshotOf(hiddenCases[:2], world)
+  toolLlm = toolReplies(sqlTool("SELECT name FROM employees"), ToolReply("秘密回答丙", [], 10, 1))
+  lines = []
+  callJudge = lambda model, messages: '{"verdict": "wrong", "reason": "秘密理由丁"}'
+  run.runSplit("test", "qwen2.5:3b", out=lines.append, world=world, casesOverride=hiddenCases[:2], mode="agent", toolLlm=toolLlm,
+               judgeModel="judge-model", callJudge=callJudge)
+  saved = json.loads(next(run.resultsDir.glob("test-*.json")).read_text(encoding="utf-8"))
+  judgeKeys = {"judgeModel", "judgeCorrect", "judgeScored", "judgeFailed", "judgeUnavailable"}
+  assert set(saved) == allowedTestKeys | judgeKeys
+  assert any(line.startswith("回答（評審）：") for line in lines)
+  assert not any("秘密回答丙" in line or "秘密理由丁" in line or "h0" in line for line in lines)

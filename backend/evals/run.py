@@ -1,6 +1,6 @@
 """跑問答準確率評測。
 
-執行（在 backend/）：python -m evals.run --split dev|test [--mode pipeline|agent|jev] [--model 模型名稱] [--filter 類別或題號] [--update-snapshot]
+執行（在 backend/）：python -m evals.run --split dev|test [--mode pipeline|agent|jev] [--model 模型名稱] [--filter 類別或題號] [--update-snapshot] [--judge 評審模型]
 """
 import argparse
 import json
@@ -13,7 +13,7 @@ from app.infra.db import openDb
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
 from app.modules.qa import jev, service, sqlguard
-from evals import gold
+from evals import gold, judge
 from evals.answer_match import matchAnswer
 from evals.cases import cases as devCases
 from evals.cases import categories
@@ -254,7 +254,7 @@ def preflight(world, selected, snapshot) -> dict:
   return goldByCase
 
 
-def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=None, chooseTool=None) -> dict:
+def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=None, chooseTool=None, judgeModel=None, callJudge=None) -> dict:
   hidden = split in hiddenSplits
   goldByCase = preflight(world, selected, gold.loadSnapshot())
   results = []
@@ -267,12 +267,17 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
         out(f"{index}/{len(selected)}")
       else:
         printCase(out, result)
+    if judgeModel:
+      # 全部題目跑完再評審：評審連不上不會打斷被評的模型
+      judge.judgeResults(results, {case["id"]: case["question"] for case in selected}, judgeModel, callJudge)
     complete = True
   finally:
     # 中途中止（環境壞掉、Ctrl+C）也留下已跑完的部分，長時間的評測不能白跑
     partial = summarize(split, model, results, mode)
     partial["finishedAt"] = datetime.now().isoformat(timespec="seconds")
     partial["complete"] = complete
+    if judgeModel:
+      partial.update(judge.summarizeJudge(results), judgeModel=judgeModel)
     if hidden:
       # test 的存檔只留總分欄位：類別分數與逐題資料都會洩漏題目內容
       del partial["byCategory"]
@@ -290,6 +295,9 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
   if hidden:
     out(f"總分：{summary['correct']}/{summary['scored']}（模型連不上 {summary['unavailable']} 題不計分）")
     printAnswerTotals(out, summary)
+    if judgeModel:
+      for line in judge.formatJudgeLines(summary, None):
+        out(line)
     return summary
   out("")
   for category, counts in summary["byCategory"].items():
@@ -298,6 +306,9 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
   if mode in agentModes:
     out(f"平均 {summary['avgSeconds']} 秒、平均工具呼叫 {summary['avgToolCalls']} 次、token 輸入 {summary['promptTokens']} 輸出 {summary['completionTokens']}")
   printAnswerTotals(out, summary)
+  if judgeModel:
+    for line in judge.formatJudgeLines(summary, results):
+      out(line)
   if mode == "jev":
     out(f"Jev：退回 {summary['jevFallbacks']} 題、選工具分布 {summary['routeCounts']}、token 輸入 {summary['jevPromptTokens']}")
   return summary
@@ -305,13 +316,13 @@ def runCases(world, split, model, selected, llm, out, mode="pipeline", toolLlm=N
 
 def runSplit(
   split, model, filterText=None, llm=llmModule.callModel, out=print, world=None, casesOverride=None,
-  mode="pipeline", toolLlm=llmModule.callModelWithTools, chooseTool=None,
+  mode="pipeline", toolLlm=llmModule.callModelWithTools, chooseTool=None, judgeModel=None, callJudge=None,
 ) -> dict:
   selected = selectCases(casesOverride if casesOverride is not None else loadCases(split), filterText)
   if world is not None:
-    return runCases(world, split, model, selected, llm, out, mode, toolLlm, chooseTool)
+    return runCases(world, split, model, selected, llm, out, mode, toolLlm, chooseTool, judgeModel, callJudge)
   with openEvalWorld() as ownWorld:
-    return runCases(ownWorld, split, model, selected, llm, out, mode, toolLlm, chooseTool)
+    return runCases(ownWorld, split, model, selected, llm, out, mode, toolLlm, chooseTool, judgeModel, callJudge)
 
 
 def updateSnapshot(split, world=None, casesOverride=None) -> list[str]:
@@ -336,7 +347,10 @@ def main(argv=None) -> None:
   parser.add_argument("--model", help="模型名稱，預設 .env 的 OLLAMA_MODEL；必須在模型清單裡")
   parser.add_argument("--filter", help="只跑某個類別或題號（只能用在 dev）")
   parser.add_argument("--update-snapshot", action="store_true", help="重算標準答案快照（確認答案改變是預期的才用）")
+  parser.add_argument("--judge", help="評審模型：用 LLM 判斷最後的回答對不對（只能搭配 --mode agent 或 jev）；必須在模型清單裡")
   args = parser.parse_args(argv)
+  if args.judge and args.mode not in agentModes:
+    parser.error("--judge 只能搭配 --mode agent 或 jev（pipeline 的評測不產生回答）")
   if args.filter and args.split in hiddenSplits:
     parser.error("--filter 只能用在 dev")
   if args.update_snapshot and (args.filter or args.model):
@@ -354,10 +368,12 @@ def main(argv=None) -> None:
     model = args.model or models[0]
     if model not in models:
       parser.error(f"沒有這個模型：{model}（可用：{', '.join(models)}）")
+    if args.judge and args.judge not in models:
+      parser.error(f"沒有這個評審模型：{args.judge}（可用：{', '.join(models)}）")
     # filter 只允許 dev，所以這裡載入題庫不會碰到 test 題
     if args.filter and not selectCases(loadCases(args.split), args.filter):
       parser.error(f"--filter 沒有符合的題目：{args.filter}")
-    runSplit(args.split, model, args.filter, mode=args.mode)
+    runSplit(args.split, model, args.filter, mode=args.mode, judgeModel=args.judge)
   except (gold.GoldSqlError, gold.SnapshotMismatchError, gold.SandboxUnavailableError, EvalAbortError) as error:
     print(error, file=sys.stderr)
     raise SystemExit(1)
