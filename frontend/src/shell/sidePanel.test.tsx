@@ -348,12 +348,12 @@ const openProposal: QaProposal = {
 
 test("testPreviousIntentAfterClarifyingReply", () => {
   const entries: ChatEntry[] = [{ id: 1, kind: "question", text: "幫我約會議" }, { id: 2, kind: "answer", result: intentAnswer() }];
-  expect(previousTurnFor(entries)).toEqual({ intent: "booking", openProposal: false });
+  expect(previousTurnFor(entries)).toEqual({ intent: "booking", openProposal: null });
 });
 
 test("testPreviousIntentAfterOpenProposal", () => {
   const entries: ChatEntry[] = [{ id: 1, kind: "answer", result: intentAnswer({ rows: [["x"]], columns: ["c"], proposal: openProposal }) }];
-  expect(previousTurnFor(entries)).toEqual({ intent: "booking", openProposal: true });
+  expect(previousTurnFor(entries)).toEqual({ intent: null, openProposal: "booking" });
 });
 
 test("testOpenProposalIntentComesFromProposalKind", () => {
@@ -361,12 +361,12 @@ test("testOpenProposalIntentComesFromProposalKind", () => {
   const leaveProposal: QaProposal = { ...openProposal, kind: "leave.create" };
   const merged: QaIntent = { ...bookingIntent, reused: true, addedName: "leave" };
   const entries: ChatEntry[] = [{ id: 1, kind: "answer", result: intentAnswer({ intent: merged, proposal: leaveProposal }) }];
-  expect(previousTurnFor(entries)).toEqual({ intent: "leave", openProposal: true });
+  expect(previousTurnFor(entries)).toEqual({ intent: null, openProposal: "leave" });
 });
 
 test("testClarifyingAfterMergeReusesAddedIntent", () => {
   const merged: QaIntent = { ...bookingIntent, reused: true, addedName: "manageBooking" };
-  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: merged }) }])).toEqual({ intent: "manageBooking", openProposal: false });
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: merged }) }])).toEqual({ intent: "manageBooking", openProposal: null });
 });
 
 test("testNoPreviousIntentWhenNotConfigured", () => {
@@ -393,7 +393,7 @@ test("testNoPreviousIntentAfterTable", () => {
 
 test("testPreviousIntentAllWhenFallback", () => {
   const fallback: QaIntent = { name: null, confidence: 0.3, fallbackReason: "low_confidence", reused: false, promptTokens: 300, seconds: 0.1 };
-  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: fallback }) }])).toEqual({ intent: "all", openProposal: false });
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: fallback }) }])).toEqual({ intent: "all", openProposal: null });
 });
 
 async function shownIntentText(intent: QaIntent) {
@@ -506,7 +506,8 @@ test("testSendsOpenProposalFlag", async () => {
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "順便請假");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   await waitFor(() => expect(askBodies(api)).toHaveLength(2));
-  expect(askBodies(api)[1]).toMatchObject({ previousIntent: "booking", openProposal: true });
+  expect(askBodies(api)[1]).toMatchObject({ openProposal: "booking" });
+  expect(askBodies(api)[1]).not.toHaveProperty("previousIntent");
 });
 
 test("testMergedIntentIsShown", async () => {
@@ -560,4 +561,65 @@ test("testJevNoteHiddenWhenNotConfiguredOrOtherMode", async () => {
   expect(within(panel()).queryByText(/問題文字會送到 Jev/)).toBeNull();
   await user.selectOptions(within(panel()).getByRole("combobox", { name: "模式" }), "jev");
   expect(within(panel()).getByText("問題文字會送到 Jev（TypeSafe）選工具")).toBeInTheDocument();
+});
+
+const leaveCard: QaProposal = { ...openProposal, kind: "leave.create" };
+
+test("testOldCardStillOpenAfterClarifying", () => {
+  // 請假卡還開著，後面一則是在問「哪場會議？」：沿用改期或取消，也帶上請假卡
+  const reused: QaIntent = { ...bookingIntent, name: "manageBooking", reused: true };
+  const entries: ChatEntry[] = [
+    { id: 1, kind: "answer", result: intentAnswer({ proposal: leaveCard }) },
+    { id: 2, kind: "question", text: "順便取消會議" },
+    { id: 3, kind: "answer", result: intentAnswer({ intent: reused }) },
+  ];
+  expect(previousTurnFor(entries)).toEqual({ intent: "manageBooking", openProposal: "leave" });
+});
+
+test("testOldCardStillOpenAfterTable", () => {
+  const entries: ChatEntry[] = [
+    { id: 1, kind: "answer", result: intentAnswer({ proposal: leaveCard }) },
+    { id: 2, kind: "question", text: "我下週有哪些會？" },
+    { id: 3, kind: "answer", result: intentAnswer({ rows: [["週會"]], columns: ["title"] }) },
+  ];
+  expect(previousTurnFor(entries)).toEqual({ intent: null, openProposal: "leave" });
+});
+
+test("testHandledCardIsNotSentLater", () => {
+  // 確認或取消後補了系統紀錄，之後的問答都不再帶那張卡
+  const entries: ChatEntry[] = [
+    { id: 1, kind: "answer", result: intentAnswer({ proposal: leaveCard }) },
+    { id: 2, kind: "note", text: "（系統紀錄）使用者取消了這個提議" },
+    { id: 3, kind: "question", text: "幫我約會議" },
+    { id: 4, kind: "answer", result: intentAnswer() },
+  ];
+  expect(previousTurnFor(entries)).toEqual({ intent: "booking", openProposal: null });
+});
+
+test("testCardFromOtherModeIsIgnored", () => {
+  // 沒有 intent 的卡片來自開發者模式的其他模式，不帶
+  const entries: ChatEntry[] = [{ id: 1, kind: "answer", result: intentAnswer({ intent: undefined, proposal: leaveCard }) }];
+  expect(previousTurnFor(entries)).toBeNull();
+});
+
+test("testThreeWayMergeIsShown", async () => {
+  const merged: QaIntent = {
+    name: "manageBooking", confidence: 0.9, fallbackReason: null, reused: true, promptTokens: 300, seconds: 0.1, addedName: "booking", cardName: "leave",
+  };
+  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("沿用上一輪：改期或取消會議，還開著的確認卡：請假或撤回請假，加上 Jev 判斷：預約會議（信心 0.90）")).toBeInTheDocument();
+});
+
+test("testCardOnlyMergeIsShown", async () => {
+  const merged: QaIntent = {
+    name: "manageBooking", confidence: 0.9, fallbackReason: null, reused: true, promptTokens: 300, seconds: 0.1, addedName: null, cardName: "leave",
+  };
+  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("沿用上一輪：改期或取消會議，還開著的確認卡：請假或撤回請假")).toBeInTheDocument();
 });

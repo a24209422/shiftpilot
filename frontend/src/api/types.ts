@@ -87,7 +87,7 @@ export type QaMode = "pipeline" | "agent" | "jev" | "assistant" | "assistant-jev
 export type QaIntentName = "query" | "booking" | "manageBooking" | "leave";
 export interface QaIntent {
   name: QaIntentName | null; confidence: number | null; fallbackReason: string | null; reused: boolean; promptTokens: number | null; seconds: number;
-  addedName?: QaIntentName | null;
+  addedName?: QaIntentName | null; cardName?: QaIntentName | null;
 }
 export interface QaSettings { jevConfigured: boolean }
 export interface QaProposal {

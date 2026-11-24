@@ -39,8 +39,10 @@ class IntentDecision:
   reused: bool
   promptTokens: int | None
   seconds: float
-  # 確認卡還開著時，沿用上一輪之外 Jev 另外判斷出的意圖；跟上一輪相同或沒判斷出來時是 None
+  # 確認卡還開著時，沿用之外 Jev 另外判斷出的意圖；跟已有的相同或沒判斷出來時是 None
   addedName: str | None = None
+  # 還開著的確認卡的意圖；跟 name 相同時是 None（上一則就是那張卡時，name 本身就是卡片的意圖）
+  cardName: str | None = None
 
 
 def buildIntentRequest(question: str, now: datetime) -> dict:

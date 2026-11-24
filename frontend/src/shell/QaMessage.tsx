@@ -36,23 +36,41 @@ const proposalIntents: Record<QaProposal["kind"], QaIntentName> = {
   "leave.create": "leave", "leave.withdraw": "leave",
 };
 
-export interface PreviousTurn { intent: QaIntentName | "all"; openProposal: boolean }
+export interface PreviousTurn { intent: QaIntentName | "all" | null; openProposal: QaIntentName | null }
 
-export function previousTurnFor(entries: ChatEntry[]): PreviousTurn | null {
+// 還沒處理的確認卡：最後一張帶提議的回覆，後面沒有系統紀錄（確認、取消、送出失敗都會補一則）
+function openCardIntent(entries: ChatEntry[]): QaIntentName | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.kind === "note") return null;
+    if (entry.kind === "answer" && entry.result.proposal) {
+      // 沒有 intent 的卡片來自開發者模式的其他模式，後端不會合併
+      return entry.result.intent ? proposalIntents[entry.result.proposal.kind] : null;
+    }
+  }
+  return null;
+}
+
+// 上一則是反問時要沿用的意圖；上一則本身是確認卡時由 openCardIntent 處理
+function reusedIntent(entries: ChatEntry[]): QaIntentName | "all" | null {
   const last = entries[entries.length - 1];
   if (!last || last.kind !== "answer") return null;
   const { result } = last;
-  if (!result.intent) return null;
-  // 確認卡還開著：以卡片本身是哪種提議為準，後端會再問 Jev 並合併工具組，讓使用者改這張卡或換件事都行
-  if (result.proposal) return { intent: proposalIntents[result.proposal.kind], openProposal: true };
-  if (result.rows.length > 0) return null;
+  if (!result.intent || result.proposal || result.rows.length > 0) return null;
   // 沒設 key 時不沿用：後端每一則都重新判斷，面板才會一直標出「沒設定 Jev」
   if (result.intent.fallbackReason === "not_configured") return null;
   // 上一輪合併過時，反問多半是針對新加的那件事
   const name = result.intent.addedName ?? result.intent.name;
   // query 組沒有提議工具：沿用它的話，被誤判成查詢的辦事請求之後怎麼說都辦不了，所以重新問 Jev
   if (name === "query") return null;
-  return { intent: name ?? "all", openProposal: false };
+  return name ?? "all";
+}
+
+// 卡片還開著時，不管中間問了什麼，都把卡片的意圖一起送出，後端會合併工具組並再問 Jev，回頭改卡片才辦得到
+export function previousTurnFor(entries: ChatEntry[]): PreviousTurn | null {
+  const intent = reusedIntent(entries);
+  const openProposal = openCardIntent(entries);
+  return intent || openProposal ? { intent, openProposal } : null;
 }
 
 // 物件與陣列直接 String() 會變成 [object Object]，改用 JSON 才看得出內容
@@ -92,8 +110,11 @@ const fallbackText: Record<string, string> = { low_confidence: "信心不足", u
 const intentLabels: Record<QaIntentName, string> = { query: "查詢", booking: "預約會議", manageBooking: "改期或取消會議", leave: "請假或撤回請假" };
 
 const intentText = (intent: QaIntent) => {
-  if (intent.reused && intent.name && intent.addedName) {
-    return `沿用上一輪：${intentLabels[intent.name]}，加上 Jev 判斷：${intentLabels[intent.addedName]}（信心 ${(intent.confidence ?? 0).toFixed(2)}）`;
+  if (intent.reused && intent.name && (intent.addedName || intent.cardName)) {
+    const parts = [`沿用上一輪：${intentLabels[intent.name]}`];
+    if (intent.cardName) parts.push(`還開著的確認卡：${intentLabels[intent.cardName]}`);
+    if (intent.addedName) parts.push(`加上 Jev 判斷：${intentLabels[intent.addedName]}（信心 ${(intent.confidence ?? 0).toFixed(2)}）`);
+    return parts.join("，");
   }
   if (intent.reused) return intent.name ? `沿用上一輪的意圖：${intentLabels[intent.name]}` : "沿用上一輪：9 個工具都給";
   if (intent.name) return `Jev 判斷：${intentLabels[intent.name]}（信心 ${(intent.confidence ?? 0).toFixed(2)}）`;

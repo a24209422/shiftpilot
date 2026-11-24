@@ -156,26 +156,34 @@ def validatePreviousIntent(previousIntent) -> str | None:
   return previousIntent
 
 
-def validateOpenProposal(openProposal) -> bool:
+def validateOpenProposal(openProposal) -> str | None:
   if openProposal is None:
-    return False
-  # bool 才收：1、"yes" 這類值代表前端送錯，不要默默當成 True
-  if not isinstance(openProposal, bool):
-    raise AppError("VALIDATION", "openProposal 要是 true 或 false", 422, {"field": "openProposal"})
+    return None
+  # 確認卡一定是某個具體的辦事意圖，不收 all 或布林值
+  if openProposal not in intent.intentNames:
+    raise AppError("VALIDATION", "openProposal 要是確認卡的意圖", 422, {"field": "openProposal"})
   return openProposal
 
 
-def decideIntent(question: str, now: datetime, previousIntent: str | None, openProposal: bool, chooseIntent) -> intent.IntentDecision:
-  if previousIntent is None:
+def decideIntent(
+  question: str, now: datetime, previousIntent: str | None, openProposal: str | None, chooseIntent,
+) -> intent.IntentDecision:
+  if previousIntent is None and openProposal is None:
     return chooseIntent(question, now)
-  previous = None if previousIntent == intent.allTools else previousIntent
-  if not openProposal or previous is None:
+  if previousIntent == intent.allTools:
+    # 已經 9 個工具全給，再問 Jev 也不會多出工具
+    return intent.IntentDecision(None, None, None, True, None, 0.0)
+  if openProposal is None:
     # 上一輪是反問：單看這一句判斷不出意圖，只沿用上一輪的工具組
-    return intent.IntentDecision(previous, None, None, True, None, 0.0)
-  # 確認卡還開著時，使用者可能改講別件事；沿用上一輪之外也問 Jev，兩組工具合併，改這張卡或換件事都辦得到
+    return intent.IntentDecision(previousIntent, None, None, True, None, 0.0)
+  # 確認卡還開著時，使用者可能回頭改卡片、接著回答反問、或換一件事：三組工具合併，Jev 判斷這一句
+  name = previousIntent or openProposal
+  card = openProposal if openProposal != name else None
   decision = chooseIntent(question, now)
-  added = decision.name if decision.name not in (None, previous) else None
-  return intent.IntentDecision(previous, decision.confidence, decision.fallbackReason, True, decision.promptTokens, decision.seconds, added)
+  added = decision.name if decision.name not in (None, name, card) else None
+  return intent.IntentDecision(
+    name, decision.confidence, decision.fallbackReason, True, decision.promptTokens, decision.seconds, added, card,
+  )
 
 
 def runAssistantMode(
@@ -214,7 +222,7 @@ def ask(
   conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel,
   mode: str | None = None, toolLlm=llmModule.callModelWithTools, chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured,
   history: list[dict] | None = None, previousIntent: str | None = None, chooseIntent=intent.chooseIntent,
-  openProposal: bool | None = None,
+  openProposal: str | None = None,
 ) -> dict:
   if not qaDatabaseUrl:
     raise AppError("QA_NOT_CONFIGURED", "問答還沒設定：請在 .env 設定 QA_DB_PASSWORD 並建立 qa_sandbox 帳號（見 README 的「問答」）", 503)
@@ -231,7 +239,7 @@ def ask(
   # 其他模式一律不看 history，帶了也不驗證，行為才跟以前一樣
   history = validateHistory(history) if mode in assistantModes else []
   previousIntent = validatePreviousIntent(previousIntent) if mode == "assistant-jev" else None
-  openProposal = validateOpenProposal(openProposal) if mode == "assistant-jev" else False
+  openProposal = validateOpenProposal(openProposal) if mode == "assistant-jev" else None
   # 先拿名額再讀資料：被擋下的請求不用讀整包沙盒資料
   with questionSlot(actor.userId):
     data = sandbox.collectSandboxData(conn, actor, now.date())
@@ -246,8 +254,8 @@ def ask(
       with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
         if mode in assistantModes:
           asker = findAsker(data, actor.employeeId)
-          # name 是 None 代表全部工具；addedName 是 None 代表沒有另外的意圖，不能混為一談
-          extraNames = [intentDecision.addedName] if intentDecision and intentDecision.addedName else []
+          # name 是 None 代表全部工具；cardName、addedName 是 None 代表沒有另外的意圖，不能混為一談
+          extraNames = [name for name in (intentDecision.cardName, intentDecision.addedName) if name] if intentDecision else []
           toolNames = intent.mergedTools(intentDecision.name, *extraNames) if intentDecision else None
           body = runAssistantMode(sandboxConn, toolLlm, model, question, history, data, now, asker, toolNames, intentDecision)
         elif mode in ("agent", "jev"):

@@ -75,8 +75,8 @@ export function SidePanel() {
       const body = {
         question: text, model, mode: sentMode,
         ...(isAssistant ? { history: toHistory(entries) } : {}),
-        ...(previous ? { previousIntent: previous.intent } : {}),
-        ...(previous?.openProposal ? { openProposal: true } : {}),
+        ...(previous?.intent ? { previousIntent: previous.intent } : {}),
+        ...(previous?.openProposal ? { openProposal: previous.openProposal } : {}),
       };
       const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", body);
       setRange(result.window);

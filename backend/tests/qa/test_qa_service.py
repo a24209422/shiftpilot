@@ -566,6 +566,7 @@ def testPreviousIntentSkipsJev(toolWorld):
   assert toolLlm.toolSets[0] == intent.intentTools["leave"]
   assert body["intent"] == {
     "name": "leave", "confidence": None, "fallbackReason": None, "reused": True, "promptTokens": None, "seconds": 0.0, "addedName": None,
+    "cardName": None,
   }
 
 
@@ -615,36 +616,49 @@ def testQueryIntentBlocksProposalTools(toolWorld):
 
 
 def testOpenProposalAlsoAsksJevAndMergesTools(toolWorld):
-  # 請假卡還開著時說「順便取消明天的週會」：沿用請假組，再加上 Jev 判斷的改期或取消組
+  # 請假卡還開著時說「順便取消明天的週會」：卡片的請假組，再加上 Jev 判斷的改期或取消組
   toolLlm = toolScript(ToolReply("好。", [], 5, 1))
   chooser = choosing(decided("manageBooking"))
   body = ask(
     toolWorld, scripted(), question="順便取消明天的週會", mode="assistant-jev", toolLlm=toolLlm,
-    previousIntent="leave", openProposal=True, chooseIntent=chooser,
+    openProposal="leave", chooseIntent=chooser,
   )
   assert chooser.asked == ["順便取消明天的週會"]
   merged = set(intent.intentTools["leave"]) | set(intent.intentTools["manageBooking"])
   assert set(toolLlm.toolSets[0]) == merged
   assert body["intent"] == {
     "name": "leave", "confidence": 0.9, "fallbackReason": None, "reused": True, "promptTokens": 300, "seconds": 0.1,
-    "addedName": "manageBooking",
+    "addedName": "manageBooking", "cardName": None,
   }
 
 
-def testOpenProposalSameIntentHasNoAddedName(toolWorld):
+def testClarifyingWhileCardOpenMergesAllThree(toolWorld):
+  # 請假卡還開著、上一則是在問「哪場會議？」：沿用改期或取消、保留請假卡的工具，Jev 也判斷這一句
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(
+    toolWorld, scripted(), question="客戶簡報那場", mode="assistant-jev", toolLlm=toolLlm,
+    previousIntent="manageBooking", openProposal="leave", chooseIntent=choosing(decided("booking")),
+  )
+  merged = set(intent.intentTools["manageBooking"]) | set(intent.intentTools["leave"]) | set(intent.intentTools["booking"])
+  assert set(toolLlm.toolSets[0]) == merged
+  assert (body["intent"]["name"], body["intent"]["cardName"], body["intent"]["addedName"]) == ("manageBooking", "leave", "booking")
+
+
+def testCardSameAsPreviousHasNoCardName(toolWorld):
   toolLlm = toolScript(ToolReply("好。", [], 5, 1))
   body = ask(
     toolWorld, scripted(), question="改成三點", mode="assistant-jev", toolLlm=toolLlm,
-    previousIntent="booking", openProposal=True, chooseIntent=choosing(decided("booking")),
+    previousIntent="booking", openProposal="booking", chooseIntent=choosing(decided("booking")),
   )
-  assert toolLlm.toolSets[0] == intent.intentTools["booking"] and body["intent"]["addedName"] is None
+  assert toolLlm.toolSets[0] == intent.intentTools["booking"]
+  assert body["intent"]["cardName"] is None and body["intent"]["addedName"] is None
 
 
-def testOpenProposalJevFallbackKeepsPrevious(toolWorld):
+def testOpenProposalJevFallbackKeepsCard(toolWorld):
   toolLlm = toolScript(ToolReply("好。", [], 5, 1))
   body = ask(
     toolWorld, scripted(), question="嗯", mode="assistant-jev", toolLlm=toolLlm,
-    previousIntent="booking", openProposal=True, chooseIntent=choosing(decided(None, "unavailable")),
+    openProposal="booking", chooseIntent=choosing(decided(None, "unavailable")),
   )
   assert toolLlm.toolSets[0] == intent.intentTools["booking"]
   assert body["intent"]["name"] == "booking" and body["intent"]["fallbackReason"] == "unavailable"
@@ -653,18 +667,14 @@ def testOpenProposalJevFallbackKeepsPrevious(toolWorld):
 def testOpenProposalWithAllSkipsJev(toolWorld):
   # 上一輪已經是 9 個工具全給，再問 Jev 也不會多出工具
   toolLlm = toolScript(ToolReply("好。", [], 5, 1))
-  ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, previousIntent="all", openProposal=True)
+  ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, previousIntent="all", openProposal="leave")
   assert toolLlm.toolSets[0] == allAssistantTools
 
 
-@pytest.mark.parametrize("value", ["yes", 1, None])
+@pytest.mark.parametrize("value", [True, "all", "foo", 1])
 def testBadOpenProposal(world, value):
-  if value is None:
-    # 沒帶就是 False
-    body = ask(world, scripted(), mode="assistant-jev", toolLlm=toolScript(ToolReply("好。", [], None, None)), previousIntent="query")
-    assert body["intent"]["reused"] is True
-    return
+  # 卡片一定是某個具體的辦事意圖，所以不收 all 或布林值
   error = expectError(
-    "VALIDATION", ask, world, scripted(), mode="assistant-jev", toolLlm=toolScript(), previousIntent="booking", openProposal=value,
+    "VALIDATION", ask, world, scripted(), mode="assistant-jev", toolLlm=toolScript(), openProposal=value,
   )
-  assert error.details == {"field": "openProposal"}
+  assert error.details == {"field": "openProposal"} and service.askingUserIds == set()

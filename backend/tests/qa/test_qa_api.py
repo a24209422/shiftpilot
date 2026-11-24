@@ -147,6 +147,6 @@ def testAskPassesOpenProposal(qaClient, loginAs, monkeypatch):
   monkeypatch.setattr(qaLlm, "callModelWithTools", lambda model, messages, tools: ToolReply("好。", [], None, None))
   monkeypatch.setattr(qaIntent, "chooseIntent", lambda question, now: asked.append(question) or qaIntent.IntentDecision("leave", 0.9, None, False, 1, 0.1))
   loginAs("employee", employee=True, client=qaClient)
-  response = qaClient.post("/api/qa/ask", json={"question": "順便請假", "model": "qwen2.5:3b", "previousIntent": "booking", "openProposal": True})
+  response = qaClient.post("/api/qa/ask", json={"question": "順便請假", "model": "qwen2.5:3b", "openProposal": "booking"})
   assert response.status_code == 200, response.text
   assert asked == ["順便請假"] and response.json()["intent"]["addedName"] == "leave"
