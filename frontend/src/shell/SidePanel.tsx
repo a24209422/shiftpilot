@@ -5,7 +5,8 @@ import type { QaAnswer, QaMode, QaModel } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, toLocalDate } from "../forms/time";
 import { Icon } from "./icons";
-import { ChatMessage, toHistory, type ChatEntry } from "./QaMessage";
+import { useDevMode } from "./devMode";
+import { ChatMessage, previousIntentFor, toHistory, type ChatEntry } from "./QaMessage";
 
 // 跟後端的沙盒範圍一致：還沒問過問題前，先用今天前後各 90 天提示
 const windowDays = 90;
@@ -28,7 +29,10 @@ export function SidePanel() {
   const canAsk = can("qa.ask");
   const { data: models, isLoading: modelsLoading } = useQuery({ queryKey: ["qa", "models"], queryFn: () => apiGet<QaModel[]>("/api/qa/models"), enabled: canAsk });
   const [model, setModel] = useState("");
-  const [mode, setMode] = useState<QaMode>("pipeline");
+  const devMode = useDevMode();
+  const [mode, setMode] = useState<QaMode>("assistant-jev");
+  // 模式選單只給開發者；關掉開發者模式時，之前選過什麼都不算，一律用唯一入口
+  const sentMode: QaMode = devMode ? mode : "assistant-jev";
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [asking, setAsking] = useState(false);
@@ -64,8 +68,14 @@ export function SidePanel() {
     askingRef.current = true;
     setAsking(true);
     try {
-      // history 取發問前的紀錄（此時 entries 還是 render 當下的值，不含這一題）；只有助理模式會讀
-      const body = mode === "assistant" ? { question: text, model, mode, history: toHistory(entries) } : { question: text, model, mode };
+      // history 取發問前的紀錄（此時 entries 還是 render 當下的值，不含這一題）；只有兩種助理模式會讀
+      const isAssistant = sentMode === "assistant" || sentMode === "assistant-jev";
+      const previousIntent = sentMode === "assistant-jev" ? previousIntentFor(entries) : null;
+      const body = {
+        question: text, model, mode: sentMode,
+        ...(isAssistant ? { history: toHistory(entries) } : {}),
+        ...(previousIntent ? { previousIntent } : {}),
+      };
       const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", body);
       setRange(result.window);
       setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "answer", result } : entry)));
@@ -165,12 +175,15 @@ export function SidePanel() {
               <select className="chatModel" aria-label="模型" value={model} onChange={(event) => setModel(event.target.value)} disabled={!canAsk}>
                 {(models ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
-              <select className="chatModel" aria-label="模式" value={mode} onChange={(event) => setMode(event.target.value as QaMode)} disabled={!canAsk}>
-                <option value="pipeline">舊流程</option>
-                <option value="agent">Agent</option>
-                <option value="jev">Agent＋Jev</option>
-                <option value="assistant">助理</option>
-              </select>
+              {devMode && (
+                <select className="chatModel" aria-label="模式" value={mode} onChange={(event) => setMode(event.target.value as QaMode)} disabled={!canAsk}>
+                  <option value="pipeline">舊流程</option>
+                  <option value="agent">Agent</option>
+                  <option value="jev">Agent＋Jev</option>
+                  <option value="assistant">助理</option>
+                  <option value="assistant-jev">助理＋Jev</option>
+                </select>
+              )}
               <button className="chatClear" type="button" onClick={() => setEntries([])} disabled={entries.length === 0 || asking}>清除對話</button>
               {noModels && <div className="chatNote">目前沒有可用的模型</div>}
               {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}

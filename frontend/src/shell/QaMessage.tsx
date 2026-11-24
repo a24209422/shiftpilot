@@ -1,4 +1,4 @@
-import type { QaAnswer, QaHistoryItem, QaRoute, QaStep } from "../api/types";
+import type { QaAnswer, QaHistoryItem, QaIntent, QaIntentName, QaRoute, QaStep } from "../api/types";
 import { ProposalCard } from "./ProposalCard";
 
 export type ChatEntry =
@@ -27,6 +27,16 @@ export function toHistory(entries: ChatEntry[]): QaHistoryItem[] {
     else if (entry.kind === "answer") items.push({ role: "assistant", content: answerText(entry.result) });
   }
   return items.slice(-historyMaxItems).map((item) => ({ role: item.role, content: item.content.slice(0, historyMaxChars) }));
+}
+
+// 上一則是反問（只有文字）或還沒處理的提議時，單看下一句判斷不出意圖，沿用上一輪的工具組；
+// 確認或取消後會補一則系統紀錄，最後一則就不是 answer，下一題重新問 Jev
+export function previousIntentFor(entries: ChatEntry[]): QaIntentName | "all" | null {
+  const last = entries[entries.length - 1];
+  if (!last || last.kind !== "answer") return null;
+  const { result } = last;
+  if (!result.intent || (!result.proposal && result.rows.length > 0)) return null;
+  return result.intent.name ?? "all";
 }
 
 // 物件與陣列直接 String() 會變成 [object Object]，改用 JSON 才看得出內容
@@ -63,15 +73,25 @@ const stepText = (step: QaStep) => {
 
 const fallbackText: Record<string, string> = { low_confidence: "信心不足", unavailable: "呼叫失敗", bad_response: "回應格式不對" };
 
+const intentLabels: Record<QaIntentName, string> = { query: "查詢", booking: "預約會議", manageBooking: "改期或取消會議", leave: "請假或撤回請假" };
+
+const intentText = (intent: QaIntent) => {
+  if (intent.reused) return intent.name ? `沿用上一輪的意圖：${intentLabels[intent.name]}` : "沿用上一輪：9 個工具都給";
+  if (intent.name) return `Jev 判斷：${intentLabels[intent.name]}（信心 ${(intent.confidence ?? 0).toFixed(2)}）`;
+  if (intent.fallbackReason === "not_configured") return "沒設定 Jev，9 個工具都給";
+  return `Jev 沒選定（${fallbackText[intent.fallbackReason ?? ""] ?? "原因不明"}），9 個工具都給`;
+};
+
 const routeText = (route: QaRoute) =>
   route.tool ? `Jev 選了 ${route.tool}（信心 ${(route.confidence ?? 0).toFixed(2)}）`
     : `Jev 沒選定（${fallbackText[route.fallbackReason ?? ""] ?? "原因不明"}），三個工具都給`;
 
-function StepList({ steps, route }: { steps: QaStep[]; route?: QaRoute }) {
+function StepList({ steps, route, intent }: { steps: QaStep[]; route?: QaRoute; intent?: QaIntent }) {
   return (
     <details>
       <summary>看工具步驟</summary>
       {route && <p className="qaRoute">{routeText(route)}</p>}
+      {intent && <p className="qaRoute">{intentText(intent)}</p>}
       <ol className="qaSteps">{steps.map((step, index) => <li key={index}>{stepText(step)}</li>)}</ol>
     </details>
   );
@@ -106,7 +126,9 @@ export function ChatMessage({ entry, proposalActive = false, onNote = () => {} }
       <div className="msgMeta">{result.model}{result.remote ? "・已送到雲端" : ""}</div>
       <div className="bubble">
         {result.answer}
-        {((result.steps && result.steps.length > 0) || result.route) && <StepList steps={result.steps ?? []} route={result.route} />}
+        {((result.steps && result.steps.length > 0) || result.route || result.intent) && (
+          <StepList steps={result.steps ?? []} route={result.route} intent={result.intent} />
+        )}
         <details>
           <summary>看查詢結果</summary>
           <ResultTable result={result} />

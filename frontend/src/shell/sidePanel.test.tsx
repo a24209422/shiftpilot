@@ -1,15 +1,19 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { QaAnswer, QaModel, QaProposal } from "../api/types";
+import type { QaAnswer, QaIntent, QaModel, QaProposal } from "../api/types";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp } from "../test/renderApp";
-import { toHistory, type ChatEntry } from "./QaMessage";
+import { previousIntentFor, toHistory, type ChatEntry } from "./QaMessage";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 10, 22, 9, 30));
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  // 開發者模式記在 localStorage，不清掉會漏到下一個測試
+  localStorage.clear();
+});
 
 const models: QaModel[] = [
   { id: "qwen2.5:3b", label: "qwen2.5:3b（本機）", remote: false },
@@ -22,9 +26,10 @@ const answer: QaAnswer = {
 };
 
 const panel = () => screen.getByRole("complementary", { name: "問答面板" });
+const devRoute = "/?dev=1";
 // 外殼要等登入狀態與權限載入完才會畫出面板，所以先等面板出現再回傳
-const open = async (routes: MockRoutes = {}, permissions = ["qa.ask"]) => {
-  const view = renderApp({ route: "/", permissions, routes: { "GET /api/qa/models": () => ({ body: models }), ...routes } });
+const open = async (routes: MockRoutes = {}, permissions = ["qa.ask"], route = "/") => {
+  const view = renderApp({ route, permissions, routes: { "GET /api/qa/models": () => ({ body: models }), ...routes } });
   await screen.findByRole("complementary", { name: "問答面板" });
   return view;
 };
@@ -52,7 +57,7 @@ test("testAskShowsAnswerTableAndSql", async () => {
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   expect(await within(panel()).findByText("黃志強明天上晚班，14:00 到 23:00。")).toBeInTheDocument();
   expect(within(panel()).getByText("黃志強明天上什麼班？", { selector: ".bubble" })).toBeInTheDocument();
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b", mode: "pipeline" });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b", mode: "assistant-jev", history: [] });
   await user.click(within(panel()).getByText("看查詢結果"));
   expect(within(panel()).getByRole("cell", { name: "晚班" })).toBeInTheDocument();
   expect(within(panel()).getByText("SELECT shift_name FROM day_shifts")).toBeInTheDocument();
@@ -69,7 +74,7 @@ test("testRemoteAnswerIsMarked", async () => {
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   expect(await within(panel()).findByText("gemini-x・已送到雲端")).toBeInTheDocument();
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "問題", model: "gemini-x", mode: "pipeline" });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "問題", model: "gemini-x", mode: "assistant-jev", history: [] });
 });
 
 test("testPendingShownWhileWaitingAndDoubleSubmitSendsOnce", async () => {
@@ -191,10 +196,10 @@ const askQuestion = async (text = "下週二下午誰有空？") => {
 };
 
 test("testModeIsSentWithQuestion", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, devRoute);
   const user = userEvent.setup();
   const mode = await within(panel()).findByRole("combobox", { name: "模式" });
-  expect(mode).toHaveValue("pipeline");
+  expect(mode).toHaveValue("assistant-jev");
   await user.selectOptions(mode, "agent");
   await askQuestion();
   await within(panel()).findByText(answer.answer);
@@ -225,7 +230,7 @@ test("testEmptySqlIsHidden", async () => {
 const jevSteps = [{ tool: "find_available_people", arguments: { start: "2026-11-24 14:00", end: "2026-11-24 15:00" }, rowCount: 3, error: null }];
 
 test("testJevModeIsSent", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, devRoute);
   const user = userEvent.setup();
   const mode = await within(panel()).findByRole("combobox", { name: "模式" });
   await user.selectOptions(mode, "jev");
@@ -294,7 +299,7 @@ test("testToHistoryIncludesProposalSummary", () => {
 });
 
 test("testAssistantSendsHistory", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) });
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) }, undefined, devRoute);
   const user = userEvent.setup();
   await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "assistant");
   await askQuestion("第一題");
@@ -307,7 +312,7 @@ test("testAssistantSendsHistory", async () => {
 });
 
 test("testAgentModeSendsNoHistory", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, devRoute);
   const user = userEvent.setup();
   await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "agent");
   await askQuestion("第一題");
@@ -319,7 +324,7 @@ test("testAgentModeSendsNoHistory", async () => {
 });
 
 test("testClearConversation", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) });
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) }, undefined, devRoute);
   const user = userEvent.setup();
   await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "assistant");
   await askQuestion("第一題");
@@ -331,4 +336,139 @@ test("testClearConversation", async () => {
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   await waitFor(() => expect(askBodies(api)).toHaveLength(2));
   expect(askBodies(api)[1].history).toEqual([]);
+});
+
+const bookingIntent: QaIntent = { name: "booking", confidence: 0.923, fallbackReason: null, reused: false, promptTokens: 300, seconds: 0.1 };
+const intentAnswer = (overrides: Partial<QaAnswer> = {}): QaAnswer => (
+  { ...answer, rows: [], columns: [], mode: "assistant-jev", proposal: null, intent: bookingIntent, ...overrides }
+);
+const openProposal: QaProposal = {
+  kind: "booking.create", request: { method: "POST", path: "/api/booking/bookings", body: {} }, summary: [], quote: null,
+};
+
+test("testPreviousIntentAfterClarifyingReply", () => {
+  const entries: ChatEntry[] = [{ id: 1, kind: "question", text: "幫我約會議" }, { id: 2, kind: "answer", result: intentAnswer() }];
+  expect(previousIntentFor(entries)).toBe("booking");
+});
+
+test("testPreviousIntentAfterOpenProposal", () => {
+  const entries: ChatEntry[] = [{ id: 1, kind: "answer", result: intentAnswer({ rows: [["x"]], columns: ["c"], proposal: openProposal }) }];
+  expect(previousIntentFor(entries)).toBe("booking");
+});
+
+test("testNoPreviousIntentAfterNote", () => {
+  // 確認或取消確認卡後會補一則系統紀錄
+  const entries: ChatEntry[] = [
+    { id: 1, kind: "answer", result: intentAnswer({ proposal: openProposal }) },
+    { id: 2, kind: "note", text: "（系統紀錄）使用者取消了這個提議" },
+  ];
+  expect(previousIntentFor(entries)).toBeNull();
+});
+
+test("testNoPreviousIntentAfterTable", () => {
+  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ rows: [["晚班"]], columns: ["shift"] }) }])).toBeNull();
+  expect(previousIntentFor([])).toBeNull();
+  // 沒有 intent 的回覆（其他模式）不沿用
+  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: undefined }) }])).toBeNull();
+});
+
+test("testPreviousIntentAllWhenFallback", () => {
+  const fallback: QaIntent = { name: null, confidence: 0.3, fallbackReason: "low_confidence", reused: false, promptTokens: 300, seconds: 0.1 };
+  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: fallback }) }])).toBe("all");
+});
+
+async function shownIntentText(intent: QaIntent) {
+  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent }) }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+}
+
+test("testIntentIsShown", async () => {
+  await shownIntentText(bookingIntent);
+  expect(within(panel()).getByText("Jev 判斷：預約會議（信心 0.92）")).toBeInTheDocument();
+});
+
+test("testIntentNotConfiguredIsShown", async () => {
+  await shownIntentText({ name: null, confidence: null, fallbackReason: "not_configured", reused: false, promptTokens: null, seconds: 0 });
+  expect(within(panel()).getByText("沒設定 Jev，9 個工具都給")).toBeInTheDocument();
+});
+
+test("testIntentFallbackIsShown", async () => {
+  await shownIntentText({ name: null, confidence: 0.3, fallbackReason: "low_confidence", reused: false, promptTokens: 300, seconds: 0.1 });
+  expect(within(panel()).getByText("Jev 沒選定（信心不足），9 個工具都給")).toBeInTheDocument();
+});
+
+test("testReusedIntentIsShown", async () => {
+  await shownIntentText({ name: "booking", confidence: null, fallbackReason: null, reused: true, promptTokens: null, seconds: 0 });
+  expect(within(panel()).getByText("沿用上一輪的意圖：預約會議")).toBeInTheDocument();
+});
+
+test("testReusedAllIsShown", async () => {
+  await shownIntentText({ name: null, confidence: null, fallbackReason: null, reused: true, promptTokens: null, seconds: 0 });
+  expect(within(panel()).getByText("沿用上一輪：9 個工具都給")).toBeInTheDocument();
+});
+
+const modeSelect = () => within(panel()).queryByRole("combobox", { name: "模式" });
+
+test("testModeSelectHiddenByDefault", async () => {
+  await open();
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  expect(modeSelect()).toBeNull();
+});
+
+test("testDevModeShowsAllModes", async () => {
+  await open({}, undefined, devRoute);
+  const select = await within(panel()).findByRole("combobox", { name: "模式" });
+  expect(Array.from(select.querySelectorAll("option")).map((item) => item.value)).toEqual(["pipeline", "agent", "jev", "assistant", "assistant-jev"]);
+  expect(select).toHaveValue("assistant-jev");
+});
+
+test("testDevModeIsRemembered", async () => {
+  const first = await open({}, undefined, devRoute);
+  await within(panel()).findByRole("combobox", { name: "模式" });
+  first.unmount();
+  await open();
+  expect(await within(panel()).findByRole("combobox", { name: "模式" })).toBeInTheDocument();
+});
+
+test("testDevModeOff", async () => {
+  localStorage.setItem("shiftpilot.dev", "1");
+  await open({}, undefined, "/?dev=0");
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  expect(modeSelect()).toBeNull();
+  expect(localStorage.getItem("shiftpilot.dev")).toBeNull();
+});
+
+test("testSendsPreviousIntentAfterClarifying", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: intentAnswer() }) });
+  const user = await askQuestion("幫我約會議");
+  await within(panel()).findByText(answer.answer);
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "跟林小美");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  await waitFor(() => expect(askBodies(api)).toHaveLength(2));
+  expect(askBodies(api)[0]).not.toHaveProperty("previousIntent");
+  expect(askBodies(api)[1].previousIntent).toBe("booking");
+  expect(askBodies(api)[1].history).toEqual([{ role: "user", content: "幫我約會議" }, { role: "assistant", content: answer.answer }]);
+});
+
+test("testNoPreviousIntentSentAfterTable", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ rows: [["晚班"]], columns: ["shift"] }) }) });
+  const user = await askQuestion("第一題");
+  await within(panel()).findByText(answer.answer);
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "第二題");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  await waitFor(() => expect(askBodies(api)).toHaveLength(2));
+  expect(askBodies(api)[1]).not.toHaveProperty("previousIntent");
+});
+
+test("testDevModeOffAlwaysSendsAssistantJev", async () => {
+  // 開發者模式時選了別的模式，關掉之後一律送 assistant-jev
+  const first = await open({}, undefined, devRoute);
+  await userEvent.setup().selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "agent");
+  first.unmount();
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, "/?dev=0");
+  await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  expect(askBodies(api)[0].mode).toBe("assistant-jev");
 });

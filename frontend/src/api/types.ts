@@ -83,7 +83,11 @@ export interface ScheduleDay {
 }
 
 export interface QaModel { id: string; label: string; remote: boolean }
-export type QaMode = "pipeline" | "agent" | "jev" | "assistant";
+export type QaMode = "pipeline" | "agent" | "jev" | "assistant" | "assistant-jev";
+export type QaIntentName = "query" | "booking" | "manageBooking" | "leave";
+export interface QaIntent {
+  name: QaIntentName | null; confidence: number | null; fallbackReason: string | null; reused: boolean; promptTokens: number | null; seconds: number;
+}
 export interface QaProposal {
   kind: "booking.create" | "booking.reschedule" | "booking.cancel" | "leave.create" | "leave.withdraw";
   request: { method: "POST" | "PATCH"; path: string; body: Record<string, unknown> | null };
@@ -96,5 +100,5 @@ export interface QaStep { tool: string; arguments: Record<string, unknown> | nul
 export interface QaAnswer {
   answer: string; sql: string; columns: string[]; rows: unknown[][]; truncated: boolean;
   model: string; remote: boolean; window: { from: string; to: string };
-  mode: QaMode; steps?: QaStep[]; route?: QaRoute; proposal?: QaProposal | null;
+  mode: QaMode; steps?: QaStep[]; route?: QaRoute; proposal?: QaProposal | null; intent?: QaIntent;
 }
