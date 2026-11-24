@@ -77,17 +77,17 @@ def buildJevRequest(question: str, now: datetime) -> dict:
   }
 
 
-def parseJevResponse(payload) -> tuple[str, float, int | None]:
+def parseJevResponse(payload, options: list[str] = jevOptions, name: str = questionName) -> tuple[str, float, int | None]:
   # Jev 的回應格式還在變動（文件警告沒有預告期），所以只有這個函式知道欄位在哪裡
-  answer = payload["answers"][questionName]
+  answer = payload["answers"][name]
   probabilities = answer["probabilities"]
   if not isinstance(probabilities, dict) or not probabilities:
     raise ValueError("沒有機率")
-  for name, value in probabilities.items():
-    if name not in jevOptions:
-      raise ValueError(f"不認得的選項：{name}")
+  for option, value in probabilities.items():
+    if option not in options:
+      raise ValueError(f"不認得的選項：{option}")
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
-      raise ValueError(f"機率不是 0～1 的數字：{name}")
+      raise ValueError(f"機率不是 0～1 的數字：{option}")
   tool = max(probabilities, key=probabilities.get)
   tokens = payload.get("usage", {}).get("input_tokens")
   return tool, float(probabilities[tool]), tokens if isinstance(tokens, int) and not isinstance(tokens, bool) else None
@@ -95,6 +95,11 @@ def parseJevResponse(payload) -> tuple[str, float, int | None]:
 
 def chooseTool(question: str, now: datetime, client: httpx.Client | None = None) -> JevDecision:
   """永不丟例外：任何失敗都回傳 tool=None 與原因，讓問答退回三個工具都給的 agent。"""
+  return callJev(buildJevRequest(question, now), jevOptions, questionName, client)
+
+
+def callJev(request: dict, options: list[str], name: str, client: httpx.Client | None = None) -> JevDecision:
+  # 選工具與選意圖共用：連線、遮 key、逾時與退回原因只寫一份
   config = getJevConfig()
   startedAt = time.perf_counter()
 
@@ -106,10 +111,10 @@ def chooseTool(question: str, now: datetime, client: httpx.Client | None = None)
   try:
     response = client.post(
       config["url"], headers={"Authorization": f"Bearer {config['apiKey']}"},
-      json=buildJevRequest(question, now), timeout=jevTimeout,
+      json=request, timeout=jevTimeout,
     )
     response.raise_for_status()
-    tool, confidence, tokens = parseJevResponse(response.json())
+    tool, confidence, tokens = parseJevResponse(response.json(), options, name)
   # InvalidURL 不是 HTTPError 的子類別：JEV_URL 寫壞時也要退回，不能讓每個請求都變 500
   except (httpx.HTTPError, httpx.InvalidURL) as error:
     detail = str(error)
