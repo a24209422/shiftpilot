@@ -1,11 +1,11 @@
-import type { QaAnswer, QaHistoryItem, QaIntent, QaIntentName, QaRoute, QaStep } from "../api/types";
+import type { QaAnswer, QaHistoryItem, QaIntent, QaIntentName, QaProposal, QaRoute, QaStep } from "../api/types";
 import { ProposalCard } from "./ProposalCard";
 
 export type ChatEntry =
   | { id: number; kind: "question"; text: string }
   | { id: number; kind: "pending" }
   | { id: number; kind: "answer"; result: QaAnswer }
-  | { id: number; kind: "error"; message: string; sql: string | null }
+  | { id: number; kind: "error"; message: string; sql: string | null; intent?: QaIntent | null }
   | { id: number; kind: "note"; text: string };
 
 // 後端上限：最多 40 則、每則 1000 字；超過會被 422 擋掉，所以送出前先裁
@@ -31,14 +31,28 @@ export function toHistory(entries: ChatEntry[]): QaHistoryItem[] {
 
 // 上一則是反問（只有文字）或還沒處理的提議時，單看下一句判斷不出意圖，沿用上一輪的工具組；
 // 確認或取消後會補一則系統紀錄，最後一則就不是 answer，下一題重新問 Jev
-export function previousIntentFor(entries: ChatEntry[]): QaIntentName | "all" | null {
+const proposalIntents: Record<QaProposal["kind"], QaIntentName> = {
+  "booking.create": "booking", "booking.reschedule": "manageBooking", "booking.cancel": "manageBooking",
+  "leave.create": "leave", "leave.withdraw": "leave",
+};
+
+export interface PreviousTurn { intent: QaIntentName | "all"; openProposal: boolean }
+
+export function previousTurnFor(entries: ChatEntry[]): PreviousTurn | null {
   const last = entries[entries.length - 1];
   if (!last || last.kind !== "answer") return null;
   const { result } = last;
-  if (!result.intent || (!result.proposal && result.rows.length > 0)) return null;
+  if (!result.intent) return null;
+  // 確認卡還開著：以卡片本身是哪種提議為準，後端會再問 Jev 並合併工具組，讓使用者改這張卡或換件事都行
+  if (result.proposal) return { intent: proposalIntents[result.proposal.kind], openProposal: true };
+  if (result.rows.length > 0) return null;
+  // 沒設 key 時不沿用：後端每一則都重新判斷，面板才會一直標出「沒設定 Jev」
+  if (result.intent.fallbackReason === "not_configured") return null;
+  // 上一輪合併過時，反問多半是針對新加的那件事
+  const name = result.intent.addedName ?? result.intent.name;
   // query 組沒有提議工具：沿用它的話，被誤判成查詢的辦事請求之後怎麼說都辦不了，所以重新問 Jev
-  if (result.intent.name === "query") return null;
-  return result.intent.name ?? "all";
+  if (name === "query") return null;
+  return { intent: name ?? "all", openProposal: false };
 }
 
 // 物件與陣列直接 String() 會變成 [object Object]，改用 JSON 才看得出內容
@@ -78,6 +92,9 @@ const fallbackText: Record<string, string> = { low_confidence: "信心不足", u
 const intentLabels: Record<QaIntentName, string> = { query: "查詢", booking: "預約會議", manageBooking: "改期或取消會議", leave: "請假或撤回請假" };
 
 const intentText = (intent: QaIntent) => {
+  if (intent.reused && intent.name && intent.addedName) {
+    return `沿用上一輪：${intentLabels[intent.name]}，加上 Jev 判斷：${intentLabels[intent.addedName]}（信心 ${(intent.confidence ?? 0).toFixed(2)}）`;
+  }
   if (intent.reused) return intent.name ? `沿用上一輪的意圖：${intentLabels[intent.name]}` : "沿用上一輪：9 個工具都給";
   if (intent.name) return `Jev 判斷：${intentLabels[intent.name]}（信心 ${(intent.confidence ?? 0).toFixed(2)}）`;
   if (intent.fallbackReason === "not_configured") return "沒設定 Jev，9 個工具都給";
@@ -116,6 +133,7 @@ export function ChatMessage({ entry, proposalActive = false, onNote = () => {} }
         <div className="msgMeta">DESK</div>
         <div className="bubble qaError" role="alert">
           {entry.message}
+          {entry.intent && <p className="qaRoute">{intentText(entry.intent)}</p>}
           {entry.sql && <details><summary>看 SQL</summary><pre className="mono qaSql">{entry.sql}</pre></details>}
         </div>
       </div>

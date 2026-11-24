@@ -51,12 +51,12 @@ def scripted(*replies):
 
 def ask(
   w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None, mode="pipeline", toolLlm=None, history=None,
-  previousIntent=None, chooseIntent=None,
+  previousIntent=None, chooseIntent=None, openProposal=None,
 ):
   with openDb(w.url) as conn:
     return service.ask(
       conn, actor or w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm,
-      mode=mode, toolLlm=toolLlm or unusedToolLlm, history=history, previousIntent=previousIntent,
+      mode=mode, toolLlm=toolLlm or unusedToolLlm, history=history, previousIntent=previousIntent, openProposal=openProposal,
       chooseIntent=chooseIntent or unusedChooseIntent,
     )
 
@@ -445,6 +445,9 @@ def testLeavePromptDropsMissingToolRules(toolWorld):
 def testQueryPromptForbidsClaimingDone(toolWorld):
   system = prompt.buildAssistantMessages("誰有空", [], toolWorld.data, now, None, intent.intentTools["query"])[0]["content"]
   assert "這題只能查資料；使用者其實想辦事的話，請他直接說要做什麼，不要說已經辦好。" in system
+  # 沒有提議工具時，開頭與助理規則都不能再提到提議，否則模型會想呼叫它
+  assert "提議" not in system.replace("（系統紀錄）開頭的訊息是系統告訴你使用者對確認卡做了什麼。", "")
+  assert "你是公司內部系統的助理，可以查資料、整理重點。" in system
 
 
 def testAssistantModeReturnsProposal(toolWorld):
@@ -561,7 +564,9 @@ def testPreviousIntentSkipsJev(toolWorld):
   toolLlm = toolScript(ToolReply("好。", [], 5, 1))
   body = ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, previousIntent="leave")
   assert toolLlm.toolSets[0] == intent.intentTools["leave"]
-  assert body["intent"] == {"name": "leave", "confidence": None, "fallbackReason": None, "reused": True, "promptTokens": None, "seconds": 0.0}
+  assert body["intent"] == {
+    "name": "leave", "confidence": None, "fallbackReason": None, "reused": True, "promptTokens": None, "seconds": 0.0, "addedName": None,
+  }
 
 
 def testPreviousIntentAllGivesAllTools(toolWorld):
@@ -607,3 +612,59 @@ def testQueryIntentBlocksProposalTools(toolWorld):
     chooseIntent=choosing(decided("query")),
   )
   assert body["proposal"] is None and "這題只能用" in body["steps"][0]["error"]
+
+
+def testOpenProposalAlsoAsksJevAndMergesTools(toolWorld):
+  # 請假卡還開著時說「順便取消明天的週會」：沿用請假組，再加上 Jev 判斷的改期或取消組
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  chooser = choosing(decided("manageBooking"))
+  body = ask(
+    toolWorld, scripted(), question="順便取消明天的週會", mode="assistant-jev", toolLlm=toolLlm,
+    previousIntent="leave", openProposal=True, chooseIntent=chooser,
+  )
+  assert chooser.asked == ["順便取消明天的週會"]
+  merged = set(intent.intentTools["leave"]) | set(intent.intentTools["manageBooking"])
+  assert set(toolLlm.toolSets[0]) == merged
+  assert body["intent"] == {
+    "name": "leave", "confidence": 0.9, "fallbackReason": None, "reused": True, "promptTokens": 300, "seconds": 0.1,
+    "addedName": "manageBooking",
+  }
+
+
+def testOpenProposalSameIntentHasNoAddedName(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(
+    toolWorld, scripted(), question="改成三點", mode="assistant-jev", toolLlm=toolLlm,
+    previousIntent="booking", openProposal=True, chooseIntent=choosing(decided("booking")),
+  )
+  assert toolLlm.toolSets[0] == intent.intentTools["booking"] and body["intent"]["addedName"] is None
+
+
+def testOpenProposalJevFallbackKeepsPrevious(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(
+    toolWorld, scripted(), question="嗯", mode="assistant-jev", toolLlm=toolLlm,
+    previousIntent="booking", openProposal=True, chooseIntent=choosing(decided(None, "unavailable")),
+  )
+  assert toolLlm.toolSets[0] == intent.intentTools["booking"]
+  assert body["intent"]["name"] == "booking" and body["intent"]["fallbackReason"] == "unavailable"
+
+
+def testOpenProposalWithAllSkipsJev(toolWorld):
+  # 上一輪已經是 9 個工具全給，再問 Jev 也不會多出工具
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, previousIntent="all", openProposal=True)
+  assert toolLlm.toolSets[0] == allAssistantTools
+
+
+@pytest.mark.parametrize("value", ["yes", 1, None])
+def testBadOpenProposal(world, value):
+  if value is None:
+    # 沒帶就是 False
+    body = ask(world, scripted(), mode="assistant-jev", toolLlm=toolScript(ToolReply("好。", [], None, None)), previousIntent="query")
+    assert body["intent"]["reused"] is True
+    return
+  error = expectError(
+    "VALIDATION", ask, world, scripted(), mode="assistant-jev", toolLlm=toolScript(), previousIntent="booking", openProposal=value,
+  )
+  assert error.details == {"field": "openProposal"}

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { QaAnswer, QaIntent, QaModel, QaProposal } from "../api/types";
 import type { MockRoutes } from "../test/mockApi";
 import { renderApp } from "../test/renderApp";
-import { previousIntentFor, toHistory, type ChatEntry } from "./QaMessage";
+import { previousTurnFor, toHistory, type ChatEntry } from "./QaMessage";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -348,12 +348,31 @@ const openProposal: QaProposal = {
 
 test("testPreviousIntentAfterClarifyingReply", () => {
   const entries: ChatEntry[] = [{ id: 1, kind: "question", text: "幫我約會議" }, { id: 2, kind: "answer", result: intentAnswer() }];
-  expect(previousIntentFor(entries)).toBe("booking");
+  expect(previousTurnFor(entries)).toEqual({ intent: "booking", openProposal: false });
 });
 
 test("testPreviousIntentAfterOpenProposal", () => {
   const entries: ChatEntry[] = [{ id: 1, kind: "answer", result: intentAnswer({ rows: [["x"]], columns: ["c"], proposal: openProposal }) }];
-  expect(previousIntentFor(entries)).toBe("booking");
+  expect(previousTurnFor(entries)).toEqual({ intent: "booking", openProposal: true });
+});
+
+test("testOpenProposalIntentComesFromProposalKind", () => {
+  // 上一輪合併過工具組時，以卡片本身是哪種提議為準
+  const leaveProposal: QaProposal = { ...openProposal, kind: "leave.create" };
+  const merged: QaIntent = { ...bookingIntent, reused: true, addedName: "leave" };
+  const entries: ChatEntry[] = [{ id: 1, kind: "answer", result: intentAnswer({ intent: merged, proposal: leaveProposal }) }];
+  expect(previousTurnFor(entries)).toEqual({ intent: "leave", openProposal: true });
+});
+
+test("testClarifyingAfterMergeReusesAddedIntent", () => {
+  const merged: QaIntent = { ...bookingIntent, reused: true, addedName: "manageBooking" };
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: merged }) }])).toEqual({ intent: "manageBooking", openProposal: false });
+});
+
+test("testNoPreviousIntentWhenNotConfigured", () => {
+  // 沒設 key 時不沿用，讓後端每一則都標出「沒設定 Jev」
+  const notConfigured: QaIntent = { name: null, confidence: null, fallbackReason: "not_configured", reused: false, promptTokens: null, seconds: 0 };
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: notConfigured }) }])).toBeNull();
 });
 
 test("testNoPreviousIntentAfterNote", () => {
@@ -362,19 +381,19 @@ test("testNoPreviousIntentAfterNote", () => {
     { id: 1, kind: "answer", result: intentAnswer({ proposal: openProposal }) },
     { id: 2, kind: "note", text: "（系統紀錄）使用者取消了這個提議" },
   ];
-  expect(previousIntentFor(entries)).toBeNull();
+  expect(previousTurnFor(entries)).toBeNull();
 });
 
 test("testNoPreviousIntentAfterTable", () => {
-  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ rows: [["晚班"]], columns: ["shift"] }) }])).toBeNull();
-  expect(previousIntentFor([])).toBeNull();
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ rows: [["晚班"]], columns: ["shift"] }) }])).toBeNull();
+  expect(previousTurnFor([])).toBeNull();
   // 沒有 intent 的回覆（其他模式）不沿用
-  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: undefined }) }])).toBeNull();
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: undefined }) }])).toBeNull();
 });
 
 test("testPreviousIntentAllWhenFallback", () => {
   const fallback: QaIntent = { name: null, confidence: 0.3, fallbackReason: "low_confidence", reused: false, promptTokens: 300, seconds: 0.1 };
-  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: fallback }) }])).toBe("all");
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: fallback }) }])).toEqual({ intent: "all", openProposal: false });
 });
 
 async function shownIntentText(intent: QaIntent) {
@@ -449,6 +468,7 @@ test("testSendsPreviousIntentAfterClarifying", async () => {
   await waitFor(() => expect(askBodies(api)).toHaveLength(2));
   expect(askBodies(api)[0]).not.toHaveProperty("previousIntent");
   expect(askBodies(api)[1].previousIntent).toBe("booking");
+  expect(askBodies(api)[1]).not.toHaveProperty("openProposal");
   expect(askBodies(api)[1].history).toEqual([{ role: "user", content: "幫我約會議" }, { role: "assistant", content: answer.answer }]);
 });
 
@@ -476,5 +496,68 @@ test("testDevModeOffAlwaysSendsAssistantJev", async () => {
 test("testNoPreviousIntentAfterQuery", () => {
   // query 組沒有提議工具，沿用它會讓使用者之後怎麼說都辦不了事
   const queryIntent: QaIntent = { ...bookingIntent, name: "query" };
-  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: queryIntent }) }])).toBeNull();
+  expect(previousTurnFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: queryIntent }) }])).toBeNull();
+});
+
+test("testSendsOpenProposalFlag", async () => {
+  const { api } = await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ proposal: openProposal }) }) });
+  const user = await askQuestion("幫我約會議");
+  await within(panel()).findByText(answer.answer);
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "順便請假");
+  await user.click(within(panel()).getByRole("button", { name: "送出" }));
+  await waitFor(() => expect(askBodies(api)).toHaveLength(2));
+  expect(askBodies(api)[1]).toMatchObject({ previousIntent: "booking", openProposal: true });
+});
+
+test("testMergedIntentIsShown", async () => {
+  const merged: QaIntent = { name: "leave", confidence: 0.98, fallbackReason: null, reused: true, promptTokens: 300, seconds: 0.1, addedName: "manageBooking" };
+  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
+  const user = await askQuestion();
+  await within(panel()).findByText(answer.answer);
+  await user.click(within(panel()).getByText("看工具步驟"));
+  expect(within(panel()).getByText("沿用上一輪：請假或撤回請假，加上 Jev 判斷：改期或取消會議（信心 0.98）")).toBeInTheDocument();
+});
+
+test("testQueryFailedShowsIntent", async () => {
+  const queryIntent: QaIntent = { ...bookingIntent, name: "query", confidence: 0.9 };
+  const failed = { status: 422, body: { error: { code: "QA_QUERY_FAILED", message: "助理沒有給出回答，請換個說法再試", details: { steps: [], intent: queryIntent } } } };
+  await open({ "POST /api/qa/ask": () => failed });
+  await askQuestion();
+  await within(panel()).findByText("助理沒有給出回答，請換個說法再試");
+  expect(within(panel()).getByText("Jev 判斷：查詢（信心 0.90）")).toBeInTheDocument();
+});
+
+test("testDevModeSurvivesBlockedStorage", async () => {
+  // 瀏覽器停用網站資料時 localStorage 會丟例外，面板仍要能用
+  const blocked = () => { throw new DOMException("blocked", "SecurityError"); };
+  const getSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(blocked);
+  const setSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked);
+  try {
+    await open({}, undefined, devRoute);
+    expect(await within(panel()).findByRole("textbox", { name: "問題" })).toBeInTheDocument();
+    // ?dev=1 仍然有效，只是記不住
+    expect(within(panel()).getByRole("combobox", { name: "模式" })).toBeInTheDocument();
+  } finally {
+    getSpy.mockRestore();
+    setSpy.mockRestore();
+  }
+});
+
+test("testJevNoteShownWhenConfigured", async () => {
+  await open({ "GET /api/qa/settings": () => ({ body: { jevConfigured: true } }) });
+  expect(await within(panel()).findByText("問題文字會送到 Jev（TypeSafe）判斷意圖")).toBeInTheDocument();
+});
+
+test("testJevNoteHiddenWhenNotConfiguredOrOtherMode", async () => {
+  const first = await open({ "GET /api/qa/settings": () => ({ body: { jevConfigured: false } }) });
+  await within(panel()).findByRole("combobox", { name: "模型" });
+  expect(within(panel()).queryByText(/問題文字會送到 Jev/)).toBeNull();
+  first.unmount();
+  await open({ "GET /api/qa/settings": () => ({ body: { jevConfigured: true } }) }, undefined, devRoute);
+  const user = userEvent.setup();
+  await within(panel()).findByText("問題文字會送到 Jev（TypeSafe）判斷意圖");
+  await user.selectOptions(within(panel()).getByRole("combobox", { name: "模式" }), "agent");
+  expect(within(panel()).queryByText(/問題文字會送到 Jev/)).toBeNull();
+  await user.selectOptions(within(panel()).getByRole("combobox", { name: "模式" }), "jev");
+  expect(within(panel()).getByText("問題文字會送到 Jev（TypeSafe）選工具")).toBeInTheDocument();
 });

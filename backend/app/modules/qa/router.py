@@ -20,11 +20,18 @@ class AskBody(BaseModel):
   history: list[dict] | None = None
   # 值交給 service 驗證；型別放寬成任意值，錯的值才會是統一的 VALIDATION 格式
   previousIntent: object | None = None
+  openProposal: object | None = None
 
 
 @router.get("/models")
 def listModels(actor: Actor = Depends(askQa)):
   return llm.listModels()
+
+
+@router.get("/settings")
+def settings(actor: Actor = Depends(askQa)):
+  # 只回有沒有設定，不回 key；面板用它決定要不要提示「問題會送到 Jev」
+  return {"jevConfigured": jev.isConfigured()}
 
 
 @router.post("/ask")
@@ -34,5 +41,5 @@ def ask(body: AskBody, request: Request, actor: Actor = Depends(askQa), conn=con
     conn, actor, body.question, body.model, request.app.state.qaDatabaseUrl, datetime.now(),
     llm=llm.callModel, mode=body.mode, toolLlm=llm.callModelWithTools,
     chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured, history=body.history,
-    previousIntent=body.previousIntent, chooseIntent=intent.chooseIntent,
+    previousIntent=body.previousIntent, chooseIntent=intent.chooseIntent, openProposal=body.openProposal,
   )

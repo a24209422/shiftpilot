@@ -140,9 +140,21 @@ def askerSection(asker: Asker | None) -> str:
   return f"提問者：{asker.name}（employee_id = {asker.employeeId}，{asker.department or '沒有部門'}）"
 
 
+# 規則需要「任何一個提議工具」時用這個標記
+anyProposal = "propose_*"
+
+
+def hasTool(tool: str | None, toolNames: list[str] | None) -> bool:
+  if toolNames is None or tool is None:
+    return True
+  if tool == anyProposal:
+    return any(name.startswith("propose_") for name in toolNames)
+  return tool in toolNames
+
+
 def numbered(rules: list[tuple[str | None, str]], toolNames: list[str] | None) -> str:
   # 只放有給的工具的規則：提到沒給的工具，模型會想呼叫它
-  kept = [text for tool, text in rules if toolNames is None or tool is None or tool in toolNames]
+  kept = [text for tool, text in rules if hasTool(tool, toolNames)]
   return "\n".join(f"{index}. {text}" for index, text in enumerate(kept, 1))
 
 
@@ -164,15 +176,17 @@ def buildAssistantMessages(
     (None, f"資料只涵蓋 {data.windowStart} ～ {data.windowEnd}。"),
   ]
   assistantRules = [
-    (None, "使用者要辦事時，先用查詢工具確認（例如找空檔），再呼叫提議工具；資訊不夠（時間、對象不明）就反問，不要猜。"),
-    (None, "提議工具只是「提議」，說明時要說「請確認」，不能說「已經訂好」。"),
+    (anyProposal, "使用者要辦事時，先用查詢工具確認（例如找空檔），再呼叫提議工具；資訊不夠（時間、對象不明）就反問，不要猜。"),
+    (anyProposal, "提議工具只是「提議」，說明時要說「請確認」，不能說「已經訂好」。"),
     (None, "使用者說要總結時，查出資料後用條列整理重點。"),
     ("find_available_resources", "使用者沒有指定會議室時，先用 find_available_resources 找容量至少是參加人數（含提問者）的會議室，取第一間；有指定就用他指定的那一間。"),
     (None, "（系統紀錄）開頭的訊息是系統告訴你使用者對確認卡做了什麼。"),
   ]
-  if toolNames is not None and not any(name.startswith("propose_") for name in toolNames):
+  canPropose = hasTool(anyProposal, toolNames)
+  if not canPropose:
     assistantRules.append((None, queryOnlyRule))
-  systemPrompt = f"""你是公司內部系統的助理，可以查資料、整理重點，也可以提議預約、改期、取消會議與請假、抽回假單。用正體中文（台灣用語）回答使用者。
+  abilities = "可以查資料、整理重點，也可以提議預約、改期、取消會議與請假、抽回假單" if canPropose else "可以查資料、整理重點"
+  systemPrompt = f"""你是公司內部系統的助理，{abilities}。用正體中文（台灣用語）回答使用者。
 
 工具使用原則：
 {numbered(toolRules, toolNames)}

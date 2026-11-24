@@ -129,3 +129,24 @@ def testAskAssistantJevEndToEnd(qaClient, loginAs, monkeypatch):
   # 沒帶 mode 時預設 assistant-jev
   assert body["mode"] == "assistant-jev" and body["intent"]["name"] == "booking" and body["intent"]["reused"] is True
   assert toolSets[0] == qaIntent.intentTools["booking"]
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def testSettingsReportsJevConfigured(qaClient, loginAs, monkeypatch, configured):
+  monkeypatch.setattr(qaJev, "isConfigured", lambda: configured)
+  loginAs("employee", employee=True, client=qaClient)
+  assert qaClient.get("/api/qa/settings").json() == {"jevConfigured": configured}
+
+
+def testSettingsRequiresLogin(qaClient):
+  assert qaClient.get("/api/qa/settings").status_code == 401
+
+
+def testAskPassesOpenProposal(qaClient, loginAs, monkeypatch):
+  asked = []
+  monkeypatch.setattr(qaLlm, "callModelWithTools", lambda model, messages, tools: ToolReply("好。", [], None, None))
+  monkeypatch.setattr(qaIntent, "chooseIntent", lambda question, now: asked.append(question) or qaIntent.IntentDecision("leave", 0.9, None, False, 1, 0.1))
+  loginAs("employee", employee=True, client=qaClient)
+  response = qaClient.post("/api/qa/ask", json={"question": "順便請假", "model": "qwen2.5:3b", "previousIntent": "booking", "openProposal": True})
+  assert response.status_code == 200, response.text
+  assert asked == ["順便請假"] and response.json()["intent"]["addedName"] == "leave"

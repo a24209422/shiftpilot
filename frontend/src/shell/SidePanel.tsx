@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { ApiError, apiGet, apiSend } from "../api/client";
-import type { QaAnswer, QaMode, QaModel } from "../api/types";
+import type { QaAnswer, QaIntent, QaMode, QaModel, QaSettings } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
 import { addDays, formatDay, toLocalDate } from "../forms/time";
 import { Icon } from "./icons";
 import { useDevMode } from "./devMode";
-import { ChatMessage, previousIntentFor, toHistory, type ChatEntry } from "./QaMessage";
+import { ChatMessage, previousTurnFor, toHistory, type ChatEntry } from "./QaMessage";
 
 // 跟後端的沙盒範圍一致：還沒問過問題前，先用今天前後各 90 天提示
 const windowDays = 90;
@@ -28,6 +28,7 @@ export function SidePanel() {
   const { can, isLoading: permissionsLoading } = usePermissions();
   const canAsk = can("qa.ask");
   const { data: models, isLoading: modelsLoading } = useQuery({ queryKey: ["qa", "models"], queryFn: () => apiGet<QaModel[]>("/api/qa/models"), enabled: canAsk });
+  const { data: settings } = useQuery({ queryKey: ["qa", "settings"], queryFn: () => apiGet<QaSettings>("/api/qa/settings"), enabled: canAsk });
   const [model, setModel] = useState("");
   const devMode = useDevMode();
   const [mode, setMode] = useState<QaMode>("assistant-jev");
@@ -70,19 +71,22 @@ export function SidePanel() {
     try {
       // history 取發問前的紀錄（此時 entries 還是 render 當下的值，不含這一題）；只有兩種助理模式會讀
       const isAssistant = sentMode === "assistant" || sentMode === "assistant-jev";
-      const previousIntent = sentMode === "assistant-jev" ? previousIntentFor(entries) : null;
+      const previous = sentMode === "assistant-jev" ? previousTurnFor(entries) : null;
       const body = {
         question: text, model, mode: sentMode,
         ...(isAssistant ? { history: toHistory(entries) } : {}),
-        ...(previousIntent ? { previousIntent } : {}),
+        ...(previous ? { previousIntent: previous.intent } : {}),
+        ...(previous?.openProposal ? { openProposal: true } : {}),
       };
       const result = await apiSend<QaAnswer>("POST", "/api/qa/ask", body);
       setRange(result.window);
       setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "answer", result } : entry)));
     } catch (caught) {
       const error = caught instanceof ApiError ? caught : new ApiError(0, "UNKNOWN", "問答失敗，請再試一次");
-      const sql = (error.details as { sql?: string } | null)?.sql ?? null;
-      setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "error", message: error.message, sql } : entry)));
+      const details = error.details as { sql?: string; intent?: QaIntent } | null;
+      const sql = details?.sql ?? null;
+      const intent = details?.intent ?? null;
+      setEntries((current) => current.map((entry) => (entry.id === pendingId ? { id: pendingId, kind: "error", message: error.message, sql, intent } : entry)));
     } finally {
       askingRef.current = false;
       setAsking(false);
@@ -187,6 +191,9 @@ export function SidePanel() {
               <button className="chatClear" type="button" onClick={() => setEntries([])} disabled={entries.length === 0 || asking}>清除對話</button>
               {noModels && <div className="chatNote">目前沒有可用的模型</div>}
               {selected?.remote && <div className="chatNote">問題與查詢結果會送到雲端廠商</div>}
+              {/* 本機模型也一樣：有設 Jev 時，問題文字會先送到 TypeSafe */}
+              {settings?.jevConfigured && sentMode === "assistant-jev" && <div className="chatNote">問題文字會送到 Jev（TypeSafe）判斷意圖</div>}
+              {settings?.jevConfigured && sentMode === "jev" && <div className="chatNote">問題文字會送到 Jev（TypeSafe）選工具</div>}
               <div className="chatNote">資料範圍：{formatDay(shownRange.from)} ～ {formatDay(shownRange.to)}</div>
             </div>
           </form>

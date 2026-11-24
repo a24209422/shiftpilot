@@ -39,6 +39,8 @@ class IntentDecision:
   reused: bool
   promptTokens: int | None
   seconds: float
+  # 確認卡還開著時，沿用上一輪之外 Jev 另外判斷出的意圖；跟上一輪相同或沒判斷出來時是 None
+  addedName: str | None = None
 
 
 def buildIntentRequest(question: str, now: datetime) -> dict:
@@ -67,3 +69,11 @@ def toolsFor(name: str | None) -> list[str] | None:
   if name is None or name == allTools:
     return None
   return intentTools[name]
+
+
+def mergedTools(*names: str | None) -> list[str] | None:
+  # 任何一個是「全部」就全部給；順序不重要，runAssistantMode 會依原本的工具定義順序篩
+  groups = [toolsFor(name) for name in names]
+  if any(group is None for group in groups):
+    return None
+  return list(dict.fromkeys(tool for group in groups for tool in group))

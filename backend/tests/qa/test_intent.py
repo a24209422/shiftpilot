@@ -93,6 +93,7 @@ def testNotConfiguredSkipsHttp(monkeypatch):
 
   decision = intent.chooseIntent("嗯", fixedNow, httpx.Client(transport=httpx.MockTransport(handler)))
   assert decision == intent.IntentDecision(None, None, "not_configured", False, None, 0.0)
+  assert decision.addedName is None
 
 
 @pytest.mark.parametrize("name, expected", [(None, None), ("all", None), ("leave", "leave")])
