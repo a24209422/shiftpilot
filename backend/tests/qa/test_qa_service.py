@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 from app.infra.db import openDb
 from app.infra.errors import AppError
 from app.modules.qa import assistant, intent, prompt, sandbox, service
+from app.modules.qa.intent import IntentDecision
 from app.modules.qa.jev import JevDecision
 from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 from app.modules.qa.proposals import Asker
@@ -47,12 +49,20 @@ def scripted(*replies):
   return fake
 
 
-def ask(w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None, mode=None, toolLlm=None, history=None):
+def ask(
+  w, llm, question="有哪些員工？", qaUrl="default", model="qwen2.5:3b", actor=None, mode="pipeline", toolLlm=None, history=None,
+  previousIntent=None, chooseIntent=None,
+):
   with openDb(w.url) as conn:
     return service.ask(
       conn, actor or w.bobActor, question, model, w.qaUrl if qaUrl == "default" else qaUrl, now, llm=llm,
-      mode=mode, toolLlm=toolLlm or unusedToolLlm, history=history,
+      mode=mode, toolLlm=toolLlm or unusedToolLlm, history=history, previousIntent=previousIntent,
+      chooseIntent=chooseIntent or unusedChooseIntent,
     )
+
+
+def unusedChooseIntent(question, when):
+  raise AssertionError("不該呼叫 Jev 選意圖")
 
 
 def unusedToolLlm(model, messages, tools):
@@ -158,7 +168,7 @@ def testRequestConnectionClosedDuringLlmCalls(world):
       closedStates.append(conn.closed)
       return "SELECT name FROM employees" if len(closedStates) == 1 else "好。"
 
-    service.ask(conn, world.bobActor, "有哪些員工？", "qwen2.5:3b", world.qaUrl, now, llm=fake)
+    service.ask(conn, world.bobActor, "有哪些員工？", "qwen2.5:3b", world.qaUrl, now, llm=fake, mode="pipeline")
   assert closedStates == [True, True]
 
 
@@ -260,14 +270,14 @@ def sqlCall(sql):
   return ToolReply("", [ToolCall("c1", "run_sql", {"sql": sql}, "")], 10, 2)
 
 
-def testDefaultModeIsPipeline(world):
-  assert ask(world, scripted("SELECT 1 AS n", "一。"))["mode"] == "pipeline"
+def testDefaultModeIsAssistantJev():
+  assert service.resolveMode(None) == "assistant-jev"
 
 
 def testEnvModeAgent(world, monkeypatch):
   monkeypatch.setenv("QA_MODE", "agent")
   toolLlm = toolScript(sqlCall("SELECT name FROM employees"), ToolReply("四位。", [], 5, 1))
-  result = ask(world, scripted(), toolLlm=toolLlm)
+  result = ask(world, scripted(), toolLlm=toolLlm, mode=None)
   assert result["mode"] == "agent" and len(toolLlm.calls) == 2
 
 
@@ -278,7 +288,7 @@ def testBodyModeOverridesEnv(world, monkeypatch):
 
 def testBadEnvMode(world, monkeypatch):
   monkeypatch.setenv("QA_MODE", "foo")
-  expectError("QA_NOT_CONFIGURED", ask, world, scripted())
+  expectError("QA_NOT_CONFIGURED", ask, world, scripted(), mode=None)
 
 
 def testAgentSuccessShape(world):
@@ -503,3 +513,86 @@ def testQaModeEnvAcceptsAssistant(monkeypatch):
   monkeypatch.setenv("QA_MODE", "foo")
   error = expectError("QA_NOT_CONFIGURED", service.resolveMode, None)
   assert "assistant" in error.message
+
+
+def decided(name="booking", reason=None):
+  return IntentDecision(name, 0.9 if name else 0.3, reason, False, 300, 0.1)
+
+
+def choosing(decision):
+  asked = []
+
+  def chooser(question, when):
+    asked.append(question)
+    return decision
+
+  chooser.asked = asked
+  return chooser
+
+
+allAssistantTools = [item["function"]["name"] for item in assistant.assistantToolDefinitions]
+
+
+def testAssistantJevUsesIntentTools(toolWorld):
+  toolLlm = toolScript(ToolReply("請問要約哪一天？", [], 5, 1))
+  chooser = choosing(decided())
+  body = ask(toolWorld, scripted(), question="幫我約會議", mode="assistant-jev", toolLlm=toolLlm, chooseIntent=chooser)
+  assert body["mode"] == "assistant-jev" and chooser.asked == ["幫我約會議"]
+  assert toolLlm.toolSets[0] == intent.intentTools["booking"]
+  assert body["intent"] == dataclasses.asdict(decided())
+
+
+def testAssistantJevFallbackGivesAllTools(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, chooseIntent=choosing(decided(None, "low_confidence")))
+  assert toolLlm.toolSets[0] == allAssistantTools
+  assert "這題只能查資料" not in toolLlm.calls[0][0]["content"]
+  assert body["intent"]["name"] is None and body["intent"]["fallbackReason"] == "low_confidence"
+
+
+def testAssistantJevNotConfiguredStillAnswers(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, chooseIntent=choosing(decided(None, "not_configured")))
+  assert body["answer"] == "好。" and body["intent"]["fallbackReason"] == "not_configured"
+  assert toolLlm.toolSets[0] == allAssistantTools
+
+
+def testPreviousIntentSkipsJev(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, previousIntent="leave")
+  assert toolLlm.toolSets[0] == intent.intentTools["leave"]
+  assert body["intent"] == {"name": "leave", "confidence": None, "fallbackReason": None, "reused": True, "promptTokens": None, "seconds": 0.0}
+
+
+def testPreviousIntentAllGivesAllTools(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], 5, 1))
+  body = ask(toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, previousIntent="all")
+  assert toolLlm.toolSets[0] == allAssistantTools
+  assert body["intent"]["name"] is None and body["intent"]["reused"] is True
+
+
+@pytest.mark.parametrize("value", ["foo", "", 1])
+def testBadPreviousIntent(world, value):
+  error = expectError("VALIDATION", ask, world, scripted(), mode="assistant-jev", toolLlm=toolScript(), previousIntent=value)
+  assert error.status == 422 and error.details == {"field": "previousIntent"}
+  assert service.askingUserIds == set()
+
+
+def testOtherModesIgnorePreviousIntent(world):
+  body = ask(world, scripted(), mode="assistant", toolLlm=toolScript(ToolReply("好。", [], None, None)), previousIntent="foo")
+  assert body["answer"] == "好。" and "intent" not in body
+
+
+def testAssistantJevQueryFailedCarriesIntent(toolWorld):
+  toolLlm = toolScript(*[sqlCall("SELECT nope FROM employees") for _ in range(7)])
+  error = expectError(
+    "QA_QUERY_FAILED", ask, toolWorld, scripted(), mode="assistant-jev", toolLlm=toolLlm, chooseIntent=choosing(decided("query")),
+  )
+  assert error.details["intent"]["name"] == "query" and len(error.details["steps"]) == 6
+
+
+def testAssistantJevHistoryIsSent(toolWorld):
+  toolLlm = toolScript(ToolReply("好。", [], None, None))
+  history = [{"role": "user", "content": "嗨"}, {"role": "assistant", "content": "你好"}]
+  ask(toolWorld, scripted(), question="再來呢", mode="assistant-jev", toolLlm=toolLlm, history=history, chooseIntent=choosing(decided()))
+  assert toolLlm.calls[0][1:] == [*history, {"role": "user", "content": "再來呢"}]

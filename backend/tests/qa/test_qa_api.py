@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import createApp
+from app.modules.qa import intent as qaIntent
 from app.modules.qa import jev as qaJev
 from app.modules.qa import llm as qaLlm
 from app.modules.qa.jev import JevDecision
@@ -34,7 +35,7 @@ def testAskEndToEndWithFakeModel(qaClient, loginAs, monkeypatch):
   replies = iter(["SELECT name FROM employees", "有一位員工。"])
   monkeypatch.setattr(qaLlm, "callModel", lambda model, messages: next(replies))
   loginAs("employee", employee=True, client=qaClient)
-  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b"})
+  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "pipeline"})
   assert response.status_code == 200, response.text
   body = response.json()
   assert body["answer"] == "有一位員工。" and body["columns"] == ["name"] and len(body["rows"]) == 1
@@ -48,7 +49,7 @@ def testAskModelUnavailableIs503(qaClient, loginAs, monkeypatch):
 
   monkeypatch.setattr(qaLlm, "callModel", fail)
   loginAs("employee", employee=True, client=qaClient)
-  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b"})
+  response = qaClient.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "pipeline"})
   assert response.status_code == 503 and response.json()["error"]["code"] == "QA_MODEL_UNAVAILABLE"
 
 
@@ -56,7 +57,7 @@ def testAskWithoutSandboxConfigured(migratedUrl, loginAs, monkeypatch):
   monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
   client = TestClient(createApp(migratedUrl), headers={"X-App-Client": "web"})
   loginAs("employee", employee=True, client=client)
-  response = client.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b"})
+  response = client.post("/api/qa/ask", json={"question": "有哪些員工？", "model": "qwen2.5:3b", "mode": "pipeline"})
   assert response.status_code == 503 and response.json()["error"]["code"] == "QA_NOT_CONFIGURED"
 
 
@@ -106,3 +107,25 @@ def testAskAssistantModeEndToEnd(qaClient, loginAs, monkeypatch):
   body = response.json()
   assert body["mode"] == "assistant" and body["answer"] == "請問要約哪一天？" and body["proposal"] is None
   assert received[0][1:] == [*history, {"role": "user", "content": "跟老闆"}]
+
+
+def testAskAssistantJevEndToEnd(qaClient, loginAs, monkeypatch):
+  toolSets = []
+
+  def fake(model, messages, tools):
+    toolSets.append([item["function"]["name"] for item in tools])
+    return ToolReply("請問要約哪一天？", [], None, None)
+
+  def noJev(question, now):
+    raise AssertionError("帶了 previousIntent 不該呼叫 Jev")
+
+  monkeypatch.setattr(qaLlm, "callModelWithTools", fake)
+  monkeypatch.setattr(qaIntent, "chooseIntent", noJev)
+  loginAs("employee", employee=True, client=qaClient)
+  history = [{"role": "user", "content": "幫我約會議"}, {"role": "assistant", "content": "跟誰？"}]
+  response = qaClient.post("/api/qa/ask", json={"question": "跟老闆", "model": "qwen2.5:3b", "history": history, "previousIntent": "booking"})
+  assert response.status_code == 200, response.text
+  body = response.json()
+  # 沒帶 mode 時預設 assistant-jev
+  assert body["mode"] == "assistant-jev" and body["intent"]["name"] == "booking" and body["intent"]["reused"] is True
+  assert toolSets[0] == qaIntent.intentTools["booking"]

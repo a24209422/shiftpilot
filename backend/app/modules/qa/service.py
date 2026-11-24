@@ -11,7 +11,7 @@ from psycopg import Connection
 from app.infra.actor import Actor
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
-from app.modules.qa import agent, assistant, jev, prompt, sandbox, sqlguard
+from app.modules.qa import agent, assistant, intent, jev, prompt, sandbox, sqlguard
 from app.modules.qa.proposals import findAsker
 from app.modules.qa.tools import describeSqlError
 
@@ -63,15 +63,17 @@ def composeAnswer(llm, model: str, question: str, columns: list[str], rows: list
   return answer or fallback
 
 
-modes = ("pipeline", "agent", "jev", "assistant")
+modes = ("pipeline", "agent", "jev", "assistant", "assistant-jev")
+# 會讀對話紀錄的模式
+assistantModes = ("assistant", "assistant-jev")
 
 
 def resolveMode(mode: str | None) -> str:
   if mode is None:
-    # 沒指定時預設舊流程：沒設 QA_MODE 的部署行為完全不變
-    mode = os.getenv("QA_MODE", "").strip() or "pipeline"
+    # 助理＋Jev 是唯一入口；其他模式留給開發者模式與評測，要明確指定
+    mode = os.getenv("QA_MODE", "").strip() or "assistant-jev"
   if mode not in modes:
-    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline、agent、jev 或 assistant", 503)
+    raise AppError("QA_NOT_CONFIGURED", "QA_MODE 只能是 pipeline、agent、jev、assistant 或 assistant-jev", 503)
   return mode
 
 
@@ -146,11 +148,27 @@ def validateHistory(history) -> list[dict]:
   return [{"role": entry["role"], "content": entry["content"]} for entry in history]
 
 
-def runAssistantMode(sandboxConn, toolLlm, model: str, question: str, history: list[dict], data, now: datetime, asker) -> dict:
-  messages = prompt.buildAssistantMessages(question, history, data, now, asker)
+def validatePreviousIntent(previousIntent) -> str | None:
+  if previousIntent is None:
+    return None
+  if previousIntent not in (*intent.intentNames, intent.allTools):
+    raise AppError("VALIDATION", "previousIntent 不正確", 422, {"field": "previousIntent"})
+  return previousIntent
+
+
+def runAssistantMode(
+  sandboxConn, toolLlm, model: str, question: str, history: list[dict], data, now: datetime, asker,
+  toolNames: list[str] | None = None, decision: intent.IntentDecision | None = None,
+) -> dict:
+  messages = prompt.buildAssistantMessages(question, history, data, now, asker, toolNames)
+  definitions = assistant.assistantToolDefinitions
+  if toolNames is not None:
+    definitions = [item for item in definitions if item["function"]["name"] in toolNames]
+  # 查詢失敗時面板也要顯示 Jev 怎麼判斷，所以 422 的 details 一併帶上
+  extra = {"intent": dataclasses.asdict(decision)} if decision else {}
   try:
     outcome = agent.runAgent(
-      sandboxConn, toolLlm, model, messages, definitions=assistant.assistantToolDefinitions,
+      sandboxConn, toolLlm, model, messages, definitions=definitions,
       execute=assistant.makeExecutor(data, asker), maxCalls=assistant.maxAssistantToolCalls,
     )
   except llmModule.LlmUnavailableError as error:
@@ -158,21 +176,21 @@ def runAssistantMode(sandboxConn, toolLlm, model: str, question: str, history: l
   result = outcome.result
   # 反問、提議都不一定有查詢結果，所以只有三樣都沒有時才算失敗
   if not outcome.answer and result is None and outcome.proposal is None:
-    raise AppError("QA_QUERY_FAILED", "助理沒有給出回答，請換個說法再試", 422, {"steps": outcome.steps})
+    raise AppError("QA_QUERY_FAILED", "助理沒有給出回答，請換個說法再試", 422, {"steps": outcome.steps, **extra})
   return {
     "answer": outcome.answer,
     "sql": (result.sql or "") if result else "", "columns": result.columns if result else [],
     "rows": result.rows if result else [], "truncated": result.truncated if result else False,
     "steps": outcome.steps, "toolCalls": outcome.toolCalls, "exhausted": outcome.exhausted,
     "promptTokens": outcome.promptTokens, "completionTokens": outcome.completionTokens,
-    "proposal": outcome.proposal,
+    "proposal": outcome.proposal, **extra,
   }
 
 
 def ask(
   conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel,
   mode: str | None = None, toolLlm=llmModule.callModelWithTools, chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured,
-  history: list[dict] | None = None,
+  history: list[dict] | None = None, previousIntent: str | None = None, chooseIntent=intent.chooseIntent,
 ) -> dict:
   if not qaDatabaseUrl:
     raise AppError("QA_NOT_CONFIGURED", "問答還沒設定：請在 .env 設定 QA_DB_PASSWORD 並建立 qa_sandbox 帳號（見 README 的「問答」）", 503)
@@ -187,7 +205,8 @@ def ask(
   if model not in models:
     raise AppError("QA_UNKNOWN_MODEL", "沒有這個模型", 422, {"field": "model"})
   # 其他模式一律不看 history，帶了也不驗證，行為才跟以前一樣
-  history = validateHistory(history) if mode == "assistant" else []
+  history = validateHistory(history) if mode in assistantModes else []
+  previousIntent = validatePreviousIntent(previousIntent) if mode == "assistant-jev" else None
   # 先拿名額再讀資料：被擋下的請求不用讀整包沙盒資料
   with questionSlot(actor.userId):
     data = sandbox.collectSandboxData(conn, actor, now.date())
@@ -197,11 +216,20 @@ def ask(
     conn.close()
     # Jev 不看資料，只看問題；先問完再開沙盒，等它的時候不占著沙盒連線
     decision = chooseTool(question, now) if mode == "jev" else None
+    intentDecision = None
+    if mode == "assistant-jev":
+      if previousIntent is not None:
+        # 上一輪是反問或還沒處理的提議：單看這一句判斷不出意圖，沿用上一輪的工具組
+        name = None if previousIntent == intent.allTools else previousIntent
+        intentDecision = intent.IntentDecision(name, None, None, True, None, 0.0)
+      else:
+        intentDecision = chooseIntent(question, now)
     try:
       with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
-        if mode == "assistant":
+        if mode in assistantModes:
           asker = findAsker(data, actor.employeeId)
-          body = runAssistantMode(sandboxConn, toolLlm, model, question, history, data, now, asker)
+          toolNames = intent.toolsFor(intentDecision.name) if intentDecision else None
+          body = runAssistantMode(sandboxConn, toolLlm, model, question, history, data, now, asker, toolNames, intentDecision)
         elif mode in ("agent", "jev"):
           body = runAgentMode(sandboxConn, toolLlm, model, question, data, now, decision)
         else:

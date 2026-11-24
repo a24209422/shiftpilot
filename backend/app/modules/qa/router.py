@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.infra.actor import Actor
 from app.infra.http import connDependency, requirePermission
-from app.modules.qa import jev, llm, service
+from app.modules.qa import intent, jev, llm, service
 
 router = APIRouter()
 askQa = requirePermission("qa.ask")
@@ -15,9 +15,11 @@ askQa = requirePermission("qa.ask")
 class AskBody(BaseModel):
   question: str
   model: str
-  mode: Literal["pipeline", "agent", "jev", "assistant"] | None = None
+  mode: Literal["pipeline", "agent", "jev", "assistant", "assistant-jev"] | None = None
   # 每一則的格式與長度交給 service 驗證，錯誤才會是統一的 VALIDATION 格式
   history: list[dict] | None = None
+  # 值交給 service 驗證；型別放寬成任意值，錯的值才會是統一的 VALIDATION 格式
+  previousIntent: object | None = None
 
 
 @router.get("/models")
@@ -32,4 +34,5 @@ def ask(body: AskBody, request: Request, actor: Actor = Depends(askQa), conn=con
     conn, actor, body.question, body.model, request.app.state.qaDatabaseUrl, datetime.now(),
     llm=llm.callModel, mode=body.mode, toolLlm=llm.callModelWithTools,
     chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured, history=body.history,
+    previousIntent=body.previousIntent, chooseIntent=intent.chooseIntent,
   )
