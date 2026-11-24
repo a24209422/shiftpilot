@@ -39,13 +39,12 @@ const answerWith = (proposal: QaProposal | null, text = "幫你準備好了，�
 const panel = () => screen.getByRole("complementary", { name: "問答面板" });
 const writes = (calls: MockCall[]) => calls.filter((call) => call.method !== "GET" && call.path !== "/api/qa/ask" && !call.path.endsWith("/quote"));
 
-// 切到助理模式問一題，回答帶著提議時面板會畫出確認卡
+// 用預設的助理＋Jev 問一題，回答帶著提議時面板會畫出確認卡
 async function askWith(routes: MockRoutes) {
   const view = renderApp({ route: "/", permissions: ["qa.ask"], routes: { "GET /api/qa/models": () => ({ body: models }), ...routes } });
   await screen.findByRole("complementary", { name: "問答面板" });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
-  await user.selectOptions(within(panel()).getByRole("combobox", { name: "模式" }), "assistant");
   const ask = async (text: string) => {
     await user.type(within(panel()).getByRole("textbox", { name: "問題" }), text);
     await user.click(within(panel()).getByRole("button", { name: "送出" }));

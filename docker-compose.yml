@@ -48,6 +48,12 @@ services:
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
       GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
       GOOGLE_AI_MODELS: ${GOOGLE_AI_MODELS:-}
+      # 助理＋Jev 是預設入口；容器讀不到 .env，沒傳進來就一律退回 9 個工具全給
+      JEV_API_KEY: ${JEV_API_KEY:-}
+      JEV_URL: ${JEV_URL:-}
+      JEV_MODEL: ${JEV_MODEL:-}
+      JEV_MIN_CONFIDENCE: ${JEV_MIN_CONFIDENCE:-}
+      QA_MODE: ${QA_MODE:-}
     # Linux 上才有這個主機名稱，Docker Desktop 本來就有
     extra_hosts:
       - "host.docker.internal:host-gateway"

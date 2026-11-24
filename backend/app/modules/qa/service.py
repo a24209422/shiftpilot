@@ -168,7 +168,8 @@ def runAssistantMode(
   extra = {"intent": dataclasses.asdict(decision)} if decision else {}
   try:
     outcome = agent.runAgent(
-      sandboxConn, toolLlm, model, messages, definitions=definitions,
+      # 只藏起定義不夠：模型可能照對話紀錄呼叫沒給的工具，要讓 runAgent 拒絕執行
+      sandboxConn, toolLlm, model, messages, toolNames, definitions=definitions,
       execute=assistant.makeExecutor(data, asker), maxCalls=assistant.maxAssistantToolCalls,
     )
   except llmModule.LlmUnavailableError as error:

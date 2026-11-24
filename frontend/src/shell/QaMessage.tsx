@@ -36,6 +36,8 @@ export function previousIntentFor(entries: ChatEntry[]): QaIntentName | "all" | 
   if (!last || last.kind !== "answer") return null;
   const { result } = last;
   if (!result.intent || (!result.proposal && result.rows.length > 0)) return null;
+  // query 組沒有提議工具：沿用它的話，被誤判成查詢的辦事請求之後怎麼說都辦不了，所以重新問 Jev
+  if (result.intent.name === "query") return null;
   return result.intent.name ?? "all";
 }
 

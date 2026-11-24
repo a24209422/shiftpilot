@@ -472,3 +472,9 @@ test("testDevModeOffAlwaysSendsAssistantJev", async () => {
   await within(panel()).findByText(answer.answer);
   expect(askBodies(api)[0].mode).toBe("assistant-jev");
 });
+
+test("testNoPreviousIntentAfterQuery", () => {
+  // query 組沒有提議工具，沿用它會讓使用者之後怎麼說都辦不了事
+  const queryIntent: QaIntent = { ...bookingIntent, name: "query" };
+  expect(previousIntentFor([{ id: 1, kind: "answer", result: intentAnswer({ intent: queryIntent }) }])).toBeNull();
+});

@@ -596,3 +596,14 @@ def testAssistantJevHistoryIsSent(toolWorld):
   history = [{"role": "user", "content": "嗨"}, {"role": "assistant", "content": "你好"}]
   ask(toolWorld, scripted(), question="再來呢", mode="assistant-jev", toolLlm=toolLlm, history=history, chooseIntent=choosing(decided()))
   assert toolLlm.calls[0][1:] == [*history, {"role": "user", "content": "再來呢"}]
+
+
+def testQueryIntentBlocksProposalTools(toolWorld):
+  # 對話紀錄裡有過提議時，模型可能照記憶呼叫沒給的提議工具；query 組不能因此跳出確認卡
+  call = ToolReply("", [ToolCall("c1", "propose_cancel_booking", {"bookingId": toolWorld.weekly}, "")], 10, 2)
+  toolLlm = toolScript(call, ToolReply("好。", [], 5, 1))
+  body = ask(
+    toolWorld, scripted(), question="取消週會", mode="assistant-jev", toolLlm=toolLlm, actor=toolWorld.bossActor,
+    chooseIntent=choosing(decided("query")),
+  )
+  assert body["proposal"] is None and "這題只能用" in body["steps"][0]["error"]
