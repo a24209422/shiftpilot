@@ -168,6 +168,10 @@ jev 模式在 agent 前面加一步：先問 Jev（TypeSafe 的決策模型，�
 - agent 模式的 system prompt 也有同樣的問題（「誰在請假，用 get_busy_periods」），Haiku agent 錯的 l01、l02、l03 很可能就是被這句帶偏；這裡沒有改它，所以上面的對照對 agent 不完全公平。
 - 用 Jev 的是非題在工具查完後檢查「結果有沒有答到題」也試過：只給問題與欄位名稱，缺假別、缺借用人的結果跟欄位夠的結果都拿到 0.75～0.93，分不出來，所以沒有做（實測紀錄在 `docs/superpowers/specs/2026-11-22-qa-jev-result-check-design.md`）。
 
+### 助理＋Jev：意圖判斷
+
+`python -m evals.intent`（在 `backend/`）只量 Jev 判斷意圖準不準：只呼叫 Jev、不開資料庫、不跑 LLM，只跑 dev。查詢題是 dev 40 題（全部標成 `query`），辦事題在 `evals/intent_cases.py`（預約、改期或取消、請假或撤回各 8 題）。輸出每題選了什麼、各意圖選對幾題、退回幾題，以及最想避免的「查詢題被判成辦事」（會跳出不該有的確認卡）題數；結果存在 `evals/results/intent-dev-*.json`，`criteriaHash` 標出是哪一版選項說明（`app/modules/qa/intent.py` 的 `intentCriteria`）。
+
 ### 回答分數：最後的回答對不對
 
 上面的分數只比對 SQL 的執行結果，不看模型最後講出來的回答。agent 與 jev 的評測現在會存下每題的回答，另外算兩個回答分數：
