@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from urllib.parse import urlsplit, urlunsplit
 
@@ -7,7 +8,7 @@ import pytest
 
 from app.infra.db import openDb
 from app.infra.errors import AppError
-from app.modules.qa import prompt, sandbox, service
+from app.modules.qa import assistant, intent, prompt, sandbox, service
 from app.modules.qa.jev import JevDecision
 from app.modules.qa.llm import LlmUnavailableError, ToolCall, ToolReply
 from app.modules.qa.proposals import Asker
@@ -412,6 +413,28 @@ def testAssistantPromptWithoutEmployee(toolWorld):
   messages = prompt.buildAssistantMessages("嗨", [], toolWorld.data, now, None)
   assert "提問者沒有員工資料" in messages[0]["content"] and "提問者：" not in messages[0]["content"]
   assert messages[1:] == [{"role": "user", "content": "嗨"}]
+
+
+promptFixture = Path(__file__).parent / "fixtures" / "assistant_prompt.txt"
+
+
+def testAssistantPromptUnchanged(toolWorld):
+  expected = promptFixture.read_text(encoding="utf-8")
+  asker = Asker(toolWorld.bob, "bob", "工程部")
+  allNames = [item["function"]["name"] for item in assistant.assistantToolDefinitions]
+  assert prompt.buildAssistantMessages("再來呢", [], toolWorld.data, now, asker)[0]["content"] == expected
+  assert prompt.buildAssistantMessages("再來呢", [], toolWorld.data, now, asker, allNames)[0]["content"] == expected
+
+
+def testLeavePromptDropsMissingToolRules(toolWorld):
+  system = prompt.buildAssistantMessages("請假", [], toolWorld.data, now, None, intent.intentTools["leave"])[0]["content"]
+  assert "find_available_people" not in system and "find_available_resources" not in system
+  assert "1. 問某個人或某個資源" in system and "這題只能查資料" not in system
+
+
+def testQueryPromptForbidsClaimingDone(toolWorld):
+  system = prompt.buildAssistantMessages("誰有空", [], toolWorld.data, now, None, intent.intentTools["query"])[0]["content"]
+  assert "這題只能查資料；使用者其實想辦事的話，請他直接說要做什麼，不要說已經辦好。" in system
 
 
 def testAssistantModeReturnsProposal(toolWorld):
