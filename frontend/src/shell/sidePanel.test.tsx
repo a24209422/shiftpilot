@@ -50,14 +50,14 @@ test("testRemoteModelShowsWarning", async () => {
 });
 
 test("testAskShowsAnswerTableAndSql", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) });
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: answer }) });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "黃志強明天上什麼班？");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   expect(await within(panel()).findByText("黃志強明天上晚班，14:00 到 23:00。")).toBeInTheDocument();
   expect(within(panel()).getByText("黃志強明天上什麼班？", { selector: ".bubble" })).toBeInTheDocument();
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b", mode: "assistant-jev", history: [] });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask/stream")?.body).toEqual({ question: "黃志強明天上什麼班？", model: "qwen2.5:3b", mode: "assistant-jev", history: [] });
   await user.click(within(panel()).getByText("看查詢結果"));
   expect(within(panel()).getByRole("cell", { name: "晚班" })).toBeInTheDocument();
   expect(within(panel()).getByText("SELECT shift_name FROM day_shifts")).toBeInTheDocument();
@@ -66,7 +66,7 @@ test("testAskShowsAnswerTableAndSql", async () => {
 });
 
 test("testRemoteAnswerIsMarked", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, model: "gemini-x", remote: true } }) });
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, model: "gemini-x", remote: true } }) });
   const user = userEvent.setup();
   const select = await within(panel()).findByRole("combobox", { name: "模型" });
   await waitFor(() => expect(select.querySelectorAll("option")).toHaveLength(2));
@@ -74,28 +74,28 @@ test("testRemoteAnswerIsMarked", async () => {
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
   expect(await within(panel()).findByText("gemini-x・已送到雲端")).toBeInTheDocument();
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "問題", model: "gemini-x", mode: "assistant-jev", history: [] });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask/stream")?.body).toEqual({ question: "問題", model: "gemini-x", mode: "assistant-jev", history: [] });
 });
 
 test("testPendingShownWhileWaitingAndDoubleSubmitSendsOnce", async () => {
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  const { api } = await open({ "POST /api/qa/ask": async () => { await gate; return { body: answer }; } });
+  const { api } = await open({ "POST /api/qa/ask/stream": async () => { await gate; return { body: answer }; } });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
   const input = within(panel()).getByRole("textbox", { name: "問題" });
   await user.type(input, "問題");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
-  expect(await within(panel()).findByText("查詢中…")).toBeInTheDocument();
+  expect(await within(panel()).findByText("思考中")).toBeInTheDocument();
   await user.type(input, "再問一次{Enter}");
-  expect(api.calls.filter((call) => call.path === "/api/qa/ask")).toHaveLength(1);
+  expect(api.calls.filter((call) => call.path === "/api/qa/ask/stream")).toHaveLength(1);
   release();
   expect(await within(panel()).findByText("黃志強明天上晚班，14:00 到 23:00。")).toBeInTheDocument();
-  expect(within(panel()).queryByText("查詢中…")).toBeNull();
+  expect(within(panel()).queryByText("思考中")).toBeNull();
 });
 
 test("testTruncatedNoteShowsRowCount", async () => {
-  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, truncated: true } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, truncated: true } }) });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
@@ -104,8 +104,91 @@ test("testTruncatedNoteShowsRowCount", async () => {
   expect(within(panel()).getByText("只顯示前 1 筆")).toBeInTheDocument();
 });
 
+function controlledProgress() {
+  let writer!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({ start(controller) { writer = controller; } });
+  const push = (...events: unknown[]) => writer.enqueue(new TextEncoder().encode(events.map((event) => JSON.stringify(event) + "\n").join("")));
+  return { stream, push, close: () => writer.close() };
+}
+
+test("shows real progress before the answer and retains failed attempts", async () => {
+  const progress = controlledProgress();
+  await open({ "POST /api/qa/ask/stream": () => ({ stream: progress.stream }) });
+  const user = userEvent.setup();
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題{Enter}");
+  expect(await within(panel()).findByText("正在送出")).toBeVisible();
+  const query = { type: "step", stage: "query" };
+  progress.push({ type: "accepted" }, { ...query, id: 1, state: "running" });
+  expect(await within(panel()).findByText("查詢資料")).toBeVisible();
+  expect(within(panel()).getByText("進行中")).toBeVisible();
+  expect(within(panel()).queryByText(answer.answer)).toBeNull();
+  progress.push({ ...query, id: 1, state: "failed" }, { ...query, id: 2, state: "running" },
+    { ...query, id: 2, state: "done" }, { type: "result", answer });
+  progress.close();
+  expect(await within(panel()).findByText(answer.answer)).toBeVisible();
+  await user.click(within(panel()).getByText("查看處理進度"));
+  expect(within(panel()).getByText("失敗")).toBeVisible();
+  expect(within(panel()).getByText("已完成")).toBeVisible();
+  expect(within(panel()).queryByText("進行中")).toBeNull();
+});
+
+test("shows the intent step and readable tool names", async () => {
+  const progress = controlledProgress();
+  await open({ "POST /api/qa/ask/stream": () => ({ stream: progress.stream }) });
+  const user = userEvent.setup();
+  await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題{Enter}");
+  progress.push({ type: "accepted" }, { type: "step", stage: "intent", id: 1, state: "running" });
+  expect(await within(panel()).findByText("判斷要辦的事")).toBeVisible();
+  progress.push(
+    { type: "step", stage: "intent", id: 1, state: "done" },
+    { type: "step", stage: "tool", id: 2, state: "running", tool: "find_available_resources" },
+  );
+  expect(await within(panel()).findByText("找可用的會議室")).toBeVisible();
+  // 沒列在對照表裡的新工具直接顯示原名，不會變成空白
+  progress.push({ type: "step", stage: "tool", id: 3, state: "running", tool: "brand_new_tool" });
+  expect(await within(panel()).findByText("brand_new_tool")).toBeVisible();
+  progress.push({ type: "result", answer });
+  progress.close();
+  expect(await within(panel()).findByText(answer.answer)).toBeVisible();
+});
+
+test("an interrupted question stops spinning and the next question starts fresh", async () => {
+  const progress = controlledProgress();
+  let count = 0;
+  await open({ "POST /api/qa/ask/stream": () => count++ === 0 ? { stream: progress.stream } : { body: answer } });
+  const user = userEvent.setup();
+  const input = within(panel()).getByRole("textbox", { name: "問題" });
+  await user.type(input, "問題{Enter}");
+  progress.push({ type: "accepted" }, { type: "step", stage: "model", id: 1, state: "running" });
+  expect(await within(panel()).findByText("等待模型回應")).toBeVisible();
+  progress.close();
+  expect(await within(panel()).findByRole("alert")).toHaveTextContent("連線中斷，未收到完整回答");
+  expect(within(panel()).getByText("狀態未確認")).toBeVisible();
+  await user.type(input, "下一題{Enter}");
+  expect(await within(panel()).findByText(answer.answer)).toBeVisible();
+  expect(within(panel()).getAllByText("等待模型回應")).toHaveLength(1);
+});
+
+test("scrolls the chat to a newly submitted question and respects scrolling back", async () => {
+  const progress = controlledProgress();
+  await open({ "POST /api/qa/ask/stream": () => ({ stream: progress.stream }) });
+  const chatLog = within(panel()).getByRole("log");
+  Object.defineProperties(chatLog, { scrollHeight: { value: 600 }, clientHeight: { value: 200 } });
+  chatLog.scrollTop = 40;
+  fireEvent.scroll(chatLog);
+  await userEvent.setup().type(within(panel()).getByRole("textbox", { name: "問題" }), "問題{Enter}");
+  expect(chatLog.scrollTop).toBeGreaterThanOrEqual(400);
+  chatLog.scrollTop = 40;
+  fireEvent.scroll(chatLog);
+  progress.push({ type: "accepted" }, { type: "step", stage: "model", id: 1, state: "running" });
+  expect(await within(panel()).findByText("等待模型回應")).toBeVisible();
+  expect(chatLog.scrollTop).toBe(40);
+  progress.close();
+  await within(panel()).findByRole("alert");
+});
+
 test("testNonApiErrorShowsFallbackMessage", async () => {
-  await open({ "POST /api/qa/ask": () => { throw new Error("boom"); } });
+  await open({ "POST /api/qa/ask/stream": () => { throw new Error("boom"); } });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
@@ -123,7 +206,7 @@ test("testEmptyModelListShowsNoteAndDisablesSend", async () => {
 
 test("testDuplicateColumnNamesRenderWithoutKeyWarning", async () => {
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, columns: ["name", "name"], rows: [["甲", { a: 1 }]] } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, columns: ["name", "name"], rows: [["甲", { a: 1 }]] } }) });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
@@ -136,7 +219,7 @@ test("testDuplicateColumnNamesRenderWithoutKeyWarning", async () => {
 });
 
 test("testErrorShowsMessageAndSql", async () => {
-  await open({ "POST /api/qa/ask": () => ({ status: 422, body: { error: { code: "QA_QUERY_FAILED", message: "查詢失敗：欄位不存在", details: { sql: "SELECT nope", error: "欄位不存在" } } } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ status: 422, body: { error: { code: "QA_QUERY_FAILED", message: "查詢失敗：欄位不存在", details: { sql: "SELECT nope", error: "欄位不存在" } } } }) });
   const user = userEvent.setup();
   await within(panel()).findByRole("combobox", { name: "模型" });
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "問題");
@@ -196,14 +279,14 @@ const askQuestion = async (text = "下週二下午誰有空？") => {
 };
 
 test("testModeIsSentWithQuestion", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, devRoute);
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: answer }) }, undefined, devRoute);
   const user = userEvent.setup();
   const mode = await within(panel()).findByRole("combobox", { name: "模式" });
   expect(mode).toHaveValue("assistant-jev");
   await user.selectOptions(mode, "agent");
   await askQuestion();
   await within(panel()).findByText(answer.answer);
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "下週二下午誰有空？", model: "qwen2.5:3b", mode: "agent" });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask/stream")?.body).toEqual({ question: "下週二下午誰有空？", model: "qwen2.5:3b", mode: "agent" });
 });
 
 test("testAgentStepsAreListed", async () => {
@@ -211,7 +294,7 @@ test("testAgentStepsAreListed", async () => {
     { tool: "find_available_people", arguments: { start: "2026-11-24 14:00", end: "2026-11-24 15:00", department: "工程部" }, rowCount: 3, error: null },
     { tool: "run_sql", arguments: { sql: "SELECT nope" }, rowCount: null, error: "欄位不存在" },
   ];
-  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "agent", steps } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, mode: "agent", steps } }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
@@ -220,7 +303,7 @@ test("testAgentStepsAreListed", async () => {
 });
 
 test("testEmptySqlIsHidden", async () => {
-  const { container } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, sql: "", mode: "agent", steps: [] } }) });
+  const { container } = await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, sql: "", mode: "agent", steps: [] } }) });
   await askQuestion();
   await within(panel()).findByText(answer.answer);
   expect(container.querySelector(".qaSql")).toBeNull();
@@ -230,18 +313,18 @@ test("testEmptySqlIsHidden", async () => {
 const jevSteps = [{ tool: "find_available_people", arguments: { start: "2026-11-24 14:00", end: "2026-11-24 15:00" }, rowCount: 3, error: null }];
 
 test("testJevModeIsSent", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, devRoute);
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: answer }) }, undefined, devRoute);
   const user = userEvent.setup();
   const mode = await within(panel()).findByRole("combobox", { name: "模式" });
   await user.selectOptions(mode, "jev");
   await askQuestion();
   await within(panel()).findByText(answer.answer);
-  expect(api.calls.find((call) => call.path === "/api/qa/ask")?.body).toEqual({ question: "下週二下午誰有空？", model: "qwen2.5:3b", mode: "jev" });
+  expect(api.calls.find((call) => call.path === "/api/qa/ask/stream")?.body).toEqual({ question: "下週二下午誰有空？", model: "qwen2.5:3b", mode: "jev" });
 });
 
 test("testJevRouteIsShown", async () => {
   const route = { tool: "find_available_people", confidence: 0.923, fallbackReason: null, promptTokens: 439, seconds: 0.2 };
-  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "jev", steps: jevSteps, route } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, mode: "jev", steps: jevSteps, route } }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
@@ -250,7 +333,7 @@ test("testJevRouteIsShown", async () => {
 
 test("testJevFallbackShowsReason", async () => {
   const route = { tool: null, confidence: 0.3, fallbackReason: "low_confidence", promptTokens: 439, seconds: 0.2 };
-  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "jev", steps: jevSteps, route } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, mode: "jev", steps: jevSteps, route } }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
@@ -259,14 +342,14 @@ test("testJevFallbackShowsReason", async () => {
 
 test("testJevRouteShownEvenWithoutSteps", async () => {
   const route = { tool: null, confidence: null, fallbackReason: "unavailable", promptTokens: null, seconds: 10 };
-  await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "jev", steps: [], route } }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, mode: "jev", steps: [], route } }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
   expect(within(panel()).getByText("Jev 沒選定（呼叫失敗），三個工具都給")).toBeInTheDocument();
 });
 
-const askBodies = (api: { calls: { path: string; body?: unknown }[] }) => api.calls.filter((call) => call.path === "/api/qa/ask").map((call) => call.body as Record<string, unknown>);
+const askBodies = (api: { calls: { path: string; body?: unknown }[] }) => api.calls.filter((call) => call.path === "/api/qa/ask/stream").map((call) => call.body as Record<string, unknown>);
 
 test("testToHistoryMapsAndTrims", () => {
   const entries: ChatEntry[] = [];
@@ -276,7 +359,7 @@ test("testToHistoryMapsAndTrims", () => {
   }
   entries.push({ id: 100, kind: "note", text: "（系統紀錄）已建立" });
   entries.push({ id: 101, kind: "error", message: "壞了", sql: null });
-  entries.push({ id: 102, kind: "pending" });
+  entries.push({ id: 102, kind: "pending", progress: { startedAt: 0, accepted: false, steps: [] } });
   const history = toHistory(entries);
   expect(history).toHaveLength(40);
   expect(history[history.length - 1]).toEqual({ role: "user", content: "（系統紀錄）已建立" });
@@ -299,7 +382,7 @@ test("testToHistoryIncludesProposalSummary", () => {
 });
 
 test("testAssistantSendsHistory", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) }, undefined, devRoute);
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) }, undefined, devRoute);
   const user = userEvent.setup();
   await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "assistant");
   await askQuestion("第一題");
@@ -312,7 +395,7 @@ test("testAssistantSendsHistory", async () => {
 });
 
 test("testAgentModeSendsNoHistory", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, devRoute);
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: answer }) }, undefined, devRoute);
   const user = userEvent.setup();
   await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "agent");
   await askQuestion("第一題");
@@ -324,7 +407,7 @@ test("testAgentModeSendsNoHistory", async () => {
 });
 
 test("testClearConversation", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) }, undefined, devRoute);
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: { ...answer, mode: "assistant", proposal: null } }) }, undefined, devRoute);
   const user = userEvent.setup();
   await user.selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "assistant");
   await askQuestion("第一題");
@@ -397,7 +480,7 @@ test("testPreviousIntentAllWhenFallback", () => {
 });
 
 async function shownIntentText(intent: QaIntent) {
-  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent }) }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer({ steps: [], intent }) }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
@@ -460,7 +543,7 @@ test("testDevModeOff", async () => {
 });
 
 test("testSendsPreviousIntentAfterClarifying", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: intentAnswer() }) });
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer() }) });
   const user = await askQuestion("幫我約會議");
   await within(panel()).findByText(answer.answer);
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "跟林小美");
@@ -473,7 +556,7 @@ test("testSendsPreviousIntentAfterClarifying", async () => {
 });
 
 test("testNoPreviousIntentSentAfterTable", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ rows: [["晚班"]], columns: ["shift"] }) }) });
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer({ rows: [["晚班"]], columns: ["shift"] }) }) });
   const user = await askQuestion("第一題");
   await within(panel()).findByText(answer.answer);
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "第二題");
@@ -487,7 +570,7 @@ test("testDevModeOffAlwaysSendsAssistantJev", async () => {
   const first = await open({}, undefined, devRoute);
   await userEvent.setup().selectOptions(await within(panel()).findByRole("combobox", { name: "模式" }), "agent");
   first.unmount();
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: answer }) }, undefined, "/?dev=0");
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: answer }) }, undefined, "/?dev=0");
   await askQuestion();
   await within(panel()).findByText(answer.answer);
   expect(askBodies(api)[0].mode).toBe("assistant-jev");
@@ -500,7 +583,7 @@ test("testNoPreviousIntentAfterQuery", () => {
 });
 
 test("testSendsOpenProposalFlag", async () => {
-  const { api } = await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ proposal: openProposal }) }) });
+  const { api } = await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer({ proposal: openProposal }) }) });
   const user = await askQuestion("幫我約會議");
   await within(panel()).findByText(answer.answer);
   await user.type(within(panel()).getByRole("textbox", { name: "問題" }), "順便請假");
@@ -512,7 +595,7 @@ test("testSendsOpenProposalFlag", async () => {
 
 test("testMergedIntentIsShown", async () => {
   const merged: QaIntent = { name: "leave", confidence: 0.98, fallbackReason: null, reused: true, promptTokens: 300, seconds: 0.1, addedName: "manageBooking" };
-  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
@@ -522,7 +605,7 @@ test("testMergedIntentIsShown", async () => {
 test("testQueryFailedShowsIntent", async () => {
   const queryIntent: QaIntent = { ...bookingIntent, name: "query", confidence: 0.9 };
   const failed = { status: 422, body: { error: { code: "QA_QUERY_FAILED", message: "助理沒有給出回答，請換個說法再試", details: { steps: [], intent: queryIntent } } } };
-  await open({ "POST /api/qa/ask": () => failed });
+  await open({ "POST /api/qa/ask/stream": () => failed });
   await askQuestion();
   await within(panel()).findByText("助理沒有給出回答，請換個說法再試");
   expect(within(panel()).getByText("Jev 判斷：查詢（信心 0.90）")).toBeInTheDocument();
@@ -606,7 +689,7 @@ test("testThreeWayMergeIsShown", async () => {
   const merged: QaIntent = {
     name: "manageBooking", confidence: 0.9, fallbackReason: null, reused: true, promptTokens: 300, seconds: 0.1, addedName: "booking", cardName: "leave",
   };
-  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));
@@ -617,7 +700,7 @@ test("testCardOnlyMergeIsShown", async () => {
   const merged: QaIntent = {
     name: "manageBooking", confidence: 0.9, fallbackReason: null, reused: true, promptTokens: 300, seconds: 0.1, addedName: null, cardName: "leave",
   };
-  await open({ "POST /api/qa/ask": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
+  await open({ "POST /api/qa/ask/stream": () => ({ body: intentAnswer({ steps: [], intent: merged }) }) });
   const user = await askQuestion();
   await within(panel()).findByText(answer.answer);
   await user.click(within(panel()).getByText("看工具步驟"));

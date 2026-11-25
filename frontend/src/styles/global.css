@@ -509,6 +509,80 @@ div.tlBlock:hover { outline: 0; }
 .qaSql { white-space: pre-wrap; font-size: 11px; margin: 6px 0 0; }
 /* 要比 .msg.bot .bubble 的邊框更具體才蓋得過去 */
 .msg.bot .bubble.qaError { border-color: var(--stamp); }
+.qaProgress {
+  min-width: 0;
+  width: min(100%, 24rem);
+  margin-bottom: 6px;
+  border: 1px solid var(--ink);
+  background: var(--base-100);
+  padding: 9px 12px;
+  font-size: .875rem;
+}
+.qaProgressHeader, .qaProgress summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.qaProgress summary { cursor: pointer; justify-content: flex-start; list-style: none; }
+.qaProgress summary::before { content: "▸"; }
+.qaProgress[open] summary::before { content: "▾"; }
+.qaProgressTime { margin-inline-start: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qaProgressList { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.qaProgressList li { display: grid; grid-template-columns: 1em minmax(0, 1fr) auto; align-items: baseline; gap: 7px; }
+.qaProgressLabel { overflow-wrap: anywhere; }
+.qaProgressStatus { font-size: .8rem; }
+.qaProgressIcon { text-align: center; font-weight: 700; }
+.qaProgressList [data-state="running"] .qaProgressIcon {
+  width: .76em;
+  height: .76em;
+  align-self: center;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: qaProgressSpin .85s linear infinite;
+}
+@keyframes qaProgressSpin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) {
+  .qaProgressList [data-state="running"] .qaProgressIcon { animation: none; }
+}
+/* 等待回答時標題前的三點繞轉動畫，改自 Uiverse.io（dovatgabriel 的 three-body） */
+.qaThinking { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; font-size: .875rem; }
+/* 框裡的秒數靠 margin auto 推到最右邊；跟在思考中後面時要緊貼文字 */
+.qaThinking .qaProgressTime { margin-inline-start: 0; color: var(--base-300); }
+.qaThreeBody {
+  --qa-dot-speed: .8s;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  animation: qaDotSpin calc(var(--qa-dot-speed) * 2.5) linear infinite;
+}
+.qaThreeBody > span { position: absolute; height: 100%; width: 30%; }
+.qaThreeBody > span::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  padding-bottom: 100%;
+  background-color: #000;
+  border-radius: 50%;
+}
+.qaThreeBody > span:nth-child(1) { bottom: 5%; left: 0; transform: rotate(60deg); transform-origin: 50% 85%; }
+.qaThreeBody > span:nth-child(1)::after { bottom: 0; animation: qaDotWobbleUp var(--qa-dot-speed) ease-in-out calc(var(--qa-dot-speed) * -.3) infinite; }
+.qaThreeBody > span:nth-child(2) { bottom: 5%; right: 0; transform: rotate(-60deg); transform-origin: 50% 85%; }
+.qaThreeBody > span:nth-child(2)::after { bottom: 0; animation: qaDotWobbleUp var(--qa-dot-speed) ease-in-out calc(var(--qa-dot-speed) * -.15) infinite; }
+.qaThreeBody > span:nth-child(3) { bottom: -5%; left: 0; transform: translateX(116.666%); }
+.qaThreeBody > span:nth-child(3)::after { top: 0; animation: qaDotWobbleDown var(--qa-dot-speed) ease-in-out infinite; }
+@keyframes qaDotSpin { to { transform: rotate(1turn); } }
+@keyframes qaDotWobbleUp {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+  50% { transform: translateY(-66%) scale(.65); opacity: .8; }
+}
+@keyframes qaDotWobbleDown {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+  50% { transform: translateY(66%) scale(.65); opacity: .8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qaThreeBody, .qaThreeBody > span::after { animation: none; }
+}
+.qaProgressAnnouncement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .chatNote { font: 11px var(--font-accent); color: var(--base-300); }
 .qaNote { align-self: flex-start; }
 .chatClear { font: 11px var(--font-accent); color: var(--base-300); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 0; }

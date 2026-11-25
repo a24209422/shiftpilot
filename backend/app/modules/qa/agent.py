@@ -1,8 +1,10 @@
+from collections.abc import Set
 from dataclasses import dataclass, field
 
 from psycopg import Connection
 
 from app.modules.qa import sqlguard, tools
+from app.modules.qa.progress import Progress
 from app.modules.qa.tools import ToolResult
 
 # 一題最多 4 次工具呼叫：小模型容易在同一個錯誤上打轉，次數太多只會讓使用者等更久
@@ -28,16 +30,19 @@ def fallbackAnswer(result: ToolResult) -> str:
 def runAgent(
   conn: Connection, toolLlm, model: str, messages: list[dict], allowedTools: list[str] | None = None,
   *, definitions: list[dict] | None = None, execute=None, maxCalls: int = maxToolCalls,
+  progress: Progress | None = None, proposalTools: Set[str] = frozenset(),
 ) -> AgentOutcome:
   outcome = AgentOutcome(answer="", result=None)
   messages = list(messages)
   execute = execute or tools.executeTool
+  progress = progress or Progress()
   # allowedTools 是 None 時全部給（agent 模式）；jev 模式只給 Jev 選中的那一個
   definitions = tools.toolDefinitions if definitions is None else definitions
   if allowedTools is not None:
     definitions = [item for item in definitions if item["function"]["name"] in allowedTools]
   while True:
-    reply = toolLlm(model, messages, definitions)
+    with progress.step("model"):
+      reply = toolLlm(model, messages, definitions)
     outcome.promptTokens += reply.promptTokens or 0
     outcome.completionTokens += reply.completionTokens or 0
     if not reply.toolCalls:
@@ -48,11 +53,14 @@ def runAgent(
       if outcome.toolCalls >= maxCalls:
         outcome.exhausted = True
         break
-      if allowedTools is not None and toolCall.name not in allowedTools:
-        # 只給了被選中的工具，模型仍可能照記憶呼叫別的；不執行，告訴它能用什麼
-        result = tools.failed(f"這題只能用 {', '.join(allowedTools)}")
-      else:
-        result = execute(conn, toolCall.name, toolCall.arguments)
+      with progress.step("proposal" if toolCall.name in proposalTools else "tool", toolCall.name) as fail:
+        if allowedTools is not None and toolCall.name not in allowedTools:
+          # 只給了被選中的工具，模型仍可能照記憶呼叫別的；不執行，告訴它能用什麼
+          result = tools.failed(f"這題只能用 {', '.join(allowedTools)}")
+        else:
+          result = execute(conn, toolCall.name, toolCall.arguments)
+        if not result.ok:
+          fail()
       outcome.toolCalls += 1
       outcome.steps.append({
         "tool": toolCall.name, "arguments": toolCall.arguments,

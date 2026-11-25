@@ -37,7 +37,7 @@ const answerWith = (proposal: QaProposal | null, text = "幫你準備好了，�
 });
 
 const panel = () => screen.getByRole("complementary", { name: "問答面板" });
-const writes = (calls: MockCall[]) => calls.filter((call) => call.method !== "GET" && call.path !== "/api/qa/ask" && !call.path.endsWith("/quote"));
+const writes = (calls: MockCall[]) => calls.filter((call) => call.method !== "GET" && call.path !== "/api/qa/ask/stream" && !call.path.endsWith("/quote"));
 
 // 用預設的助理＋Jev 問一題，回答帶著提議時面板會畫出確認卡
 async function askWith(routes: MockRoutes) {
@@ -55,7 +55,7 @@ async function askWith(routes: MockRoutes) {
 
 test("testBookingConfirmCallsApiAndNotes", async () => {
   const { api, user } = await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(bookingProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(bookingProposal) }),
     "POST /api/booking/bookings": () => ({ body: { id: 42, ...bookingBody } }),
   });
   expect(await within(panel()).findByText("11/24（二） 10:00–11:00")).toBeInTheDocument();
@@ -70,7 +70,7 @@ test("testBookingConfirmCallsApiAndNotes", async () => {
 test("testParticipantConflictThenOverride", async () => {
   let count = 0;
   const { api, user } = await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(bookingProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(bookingProposal) }),
     "POST /api/booking/bookings": () => {
       count += 1;
       if (count === 1) {
@@ -89,7 +89,7 @@ test("testParticipantConflictThenOverride", async () => {
 
 test("testResourceConflictIsFailure", async () => {
   const { user } = await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(bookingProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(bookingProposal) }),
     "POST /api/booking/bookings": () => ({
       status: 409,
       body: { error: { code: "RESOURCE_CONFLICT", message: "資源在這個時段已被預約", details: { conflicts: [{ bookingId: 9, title: "團隊週會", startAt: "2026-11-24T10:00", endAt: "2026-11-24T11:00", resourceId: 3, resourceName: "A 會議室" }] } } },
@@ -104,7 +104,7 @@ test("testResourceConflictIsFailure", async () => {
 test("testOverrideFlagDoesNotLeakIntoRetry", async () => {
   let count = 0;
   const { api, user } = await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(bookingProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(bookingProposal) }),
     "POST /api/booking/bookings": () => {
       count += 1;
       if (count === 1) {
@@ -128,7 +128,7 @@ test("testOverrideFlagDoesNotLeakIntoRetry", async () => {
 test("testLeaveConfirmWaitsForQuote", async () => {
   let finishQuote: (response: MockResponse) => void = () => {};
   await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(leaveProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(leaveProposal) }),
     "POST /api/leave/requests/quote": () => new Promise<MockResponse>((resolve) => { finishQuote = resolve; }),
   });
   expect(await within(panel()).findByRole("button", { name: "確認" })).toBeDisabled();
@@ -139,7 +139,7 @@ test("testLeaveConfirmWaitsForQuote", async () => {
 
 test("testLeaveCardShowsQuote", async () => {
   const { api } = await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(leaveProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(leaveProposal) }),
     "POST /api/leave/requests/quote": () => ({ body: { hours: 8, remainingAfter: 48, conflicts: [] } }),
   });
   expect(await within(panel()).findByText("時數 8 小時")).toBeInTheDocument();
@@ -150,7 +150,7 @@ test("testLeaveCardShowsQuote", async () => {
 
 test("testLeaveQuoteConflictAndFailure", async () => {
   await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(leaveProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(leaveProposal) }),
     "POST /api/leave/requests/quote": () => ({ status: 422, body: { error: { code: "VALIDATION_ERROR", message: "結束時間要晚於開始時間", details: null } } }),
   });
   expect(await within(panel()).findByText("結束時間要晚於開始時間")).toBeInTheDocument();
@@ -158,7 +158,7 @@ test("testLeaveQuoteConflictAndFailure", async () => {
 });
 
 test("testCancelDoesNotCallApi", async () => {
-  const { api, user } = await askWith({ "POST /api/qa/ask": () => ({ body: answerWith(cancelProposal) }) });
+  const { api, user } = await askWith({ "POST /api/qa/ask/stream": () => ({ body: answerWith(cancelProposal) }) });
   await user.click(await within(panel()).findByRole("button", { name: "取消" }));
   expect(await within(panel()).findByText("（系統紀錄）使用者取消了這個提議")).toBeInTheDocument();
   expect(within(panel()).queryByRole("button", { name: "確認" })).toBeNull();
@@ -168,7 +168,7 @@ test("testCancelDoesNotCallApi", async () => {
 test("testOlderProposalIsSuperseded", async () => {
   let count = 0;
   const { ask } = await askWith({
-    "POST /api/qa/ask": () => { count += 1; return { body: answerWith(bookingProposal, `第 ${count} 次提議`) }; },
+    "POST /api/qa/ask/stream": () => { count += 1; return { body: answerWith(bookingProposal, `第 ${count} 次提議`) }; },
   });
   await within(panel()).findByText("第 1 次提議");
   await ask("改成下午");
@@ -179,7 +179,7 @@ test("testOlderProposalIsSuperseded", async () => {
 
 test("testConfirmErrorIsShown", async () => {
   const { user } = await askWith({
-    "POST /api/qa/ask": () => ({ body: answerWith(cancelProposal) }),
+    "POST /api/qa/ask/stream": () => ({ body: answerWith(cancelProposal) }),
     "POST /api/booking/bookings/7/cancel": () => ({ status: 404, body: { error: { code: "NOT_FOUND", message: "找不到這筆排程", details: null } } }),
   });
   await user.click(await within(panel()).findByRole("button", { name: "確認" }));

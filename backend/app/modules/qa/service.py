@@ -12,7 +12,8 @@ from app.infra.actor import Actor
 from app.infra.errors import AppError
 from app.modules.qa import llm as llmModule
 from app.modules.qa import agent, assistant, intent, jev, prompt, sandbox, sqlguard
-from app.modules.qa.proposals import findAsker
+from app.modules.qa.progress import EventSink, Progress
+from app.modules.qa.proposals import findAsker, proposalNames
 from app.modules.qa.tools import describeSqlError
 
 logger = logging.getLogger(__name__)
@@ -77,15 +78,18 @@ def resolveMode(mode: str | None) -> str:
   return mode
 
 
-def runPipeline(sandboxConn, llm, model: str, question: str, data, now: datetime) -> dict:
+def runPipeline(sandboxConn, llm, model: str, question: str, data, now: datetime, *, progress: Progress | None = None) -> dict:
+  progress = progress or Progress()
   messages = prompt.buildSqlMessages(question, data, now)
   sql, lastError, result = "", "", None
   for _ in range(2):
-    reply = callLlm(llm, model, messages)
-    sql = sqlguard.extractSql(reply)
+    with progress.step("generate_query"):
+      reply = callLlm(llm, model, messages)
+      sql = sqlguard.extractSql(reply)
     try:
-      sqlguard.validateSql(sql)
-      result = sandbox.runQuery(sandboxConn, sql)
+      with progress.step("query"):
+        sqlguard.validateSql(sql)
+        result = sandbox.runQuery(sandboxConn, sql)
       break
     except (sqlguard.UnsafeSqlError, psycopg.Error) as error:
       lastError = describeSqlError(error)
@@ -97,19 +101,23 @@ def runPipeline(sandboxConn, llm, model: str, question: str, data, now: datetime
   if result is None:
     raise AppError("QA_QUERY_FAILED", f"查詢失敗：{lastError}", 422, {"sql": sql, "error": lastError})
   columns, rows, truncated = result
+  with progress.step("compose"):
+    answer = composeAnswer(llm, model, question, columns, rows, truncated)
   return {
-    "answer": composeAnswer(llm, model, question, columns, rows, truncated),
+    "answer": answer,
     "sql": sql, "columns": columns, "rows": rows, "truncated": truncated,
   }
 
 
 def runAgentMode(
   sandboxConn, toolLlm, model: str, question: str, data, now: datetime, decision: jev.JevDecision | None = None,
+  *, progress: Progress | None = None,
 ) -> dict:
   # Jev 選中工具時只給那一個；退回（tool 是 None）或不是 jev 模式時三個工具都給
   allowedTools = [decision.tool] if decision and decision.tool else None
   try:
-    outcome = agent.runAgent(sandboxConn, toolLlm, model, prompt.buildAgentMessages(question, data, now), allowedTools)
+    outcome = agent.runAgent(sandboxConn, toolLlm, model, prompt.buildAgentMessages(question, data, now), allowedTools,
+                             progress=progress)
   except llmModule.LlmUnavailableError as error:
     raise AppError("QA_MODEL_UNAVAILABLE", error.message, 503)
   extra = {
@@ -167,9 +175,12 @@ def validateOpenProposal(openProposal) -> str | None:
 
 def decideIntent(
   question: str, now: datetime, previousIntent: str | None, openProposal: str | None, chooseIntent,
+  *, progress: Progress | None = None,
 ) -> intent.IntentDecision:
+  progress = progress or Progress()
   if previousIntent is None and openProposal is None:
-    return chooseIntent(question, now)
+    with progress.step("intent"):
+      return chooseIntent(question, now)
   if previousIntent == intent.allTools:
     # 已經 9 個工具全給，再問 Jev 也不會多出工具
     return intent.IntentDecision(None, None, None, True, None, 0.0)
@@ -179,7 +190,8 @@ def decideIntent(
   # 確認卡還開著時，使用者可能回頭改卡片、接著回答反問、或換一件事：三組工具合併，Jev 判斷這一句
   name = previousIntent or openProposal
   card = openProposal if openProposal != name else None
-  decision = chooseIntent(question, now)
+  with progress.step("intent"):
+    decision = chooseIntent(question, now)
   added = decision.name if decision.name not in (None, name, card) else None
   return intent.IntentDecision(
     name, decision.confidence, decision.fallbackReason, True, decision.promptTokens, decision.seconds, added, card,
@@ -189,6 +201,7 @@ def decideIntent(
 def runAssistantMode(
   sandboxConn, toolLlm, model: str, question: str, history: list[dict], data, now: datetime, asker,
   toolNames: list[str] | None = None, decision: intent.IntentDecision | None = None,
+  *, progress: Progress | None = None,
 ) -> dict:
   messages = prompt.buildAssistantMessages(question, history, data, now, asker, toolNames)
   definitions = assistant.assistantToolDefinitions
@@ -201,6 +214,7 @@ def runAssistantMode(
       # 只藏起定義不夠：模型可能照對話紀錄呼叫沒給的工具，要讓 runAgent 拒絕執行
       sandboxConn, toolLlm, model, messages, toolNames, definitions=definitions,
       execute=assistant.makeExecutor(data, asker), maxCalls=assistant.maxAssistantToolCalls,
+      progress=progress, proposalTools=proposalNames,
     )
   except llmModule.LlmUnavailableError as error:
     raise AppError("QA_MODEL_UNAVAILABLE", error.message, 503)
@@ -222,7 +236,7 @@ def ask(
   conn: Connection, actor: Actor, question: str, model: str, qaDatabaseUrl: str | None, now: datetime, llm=llmModule.callModel,
   mode: str | None = None, toolLlm=llmModule.callModelWithTools, chooseTool=jev.chooseTool, jevConfigured=jev.isConfigured,
   history: list[dict] | None = None, previousIntent: str | None = None, chooseIntent=intent.chooseIntent,
-  openProposal: str | None = None,
+  openProposal: str | None = None, *, onEvent: EventSink | None = None,
 ) -> dict:
   if not qaDatabaseUrl:
     raise AppError("QA_NOT_CONFIGURED", "問答還沒設定：請在 .env 設定 QA_DB_PASSWORD 並建立 qa_sandbox 帳號（見 README 的「問答」）", 503)
@@ -240,16 +254,24 @@ def ask(
   history = validateHistory(history) if mode in assistantModes else []
   previousIntent = validatePreviousIntent(previousIntent) if mode == "assistant-jev" else None
   openProposal = validateOpenProposal(openProposal) if mode == "assistant-jev" else None
+  progress = Progress(onEvent)
   # 先拿名額再讀資料：被擋下的請求不用讀整包沙盒資料
   with questionSlot(actor.userId):
-    data = sandbox.collectSandboxData(conn, actor, now.date())
+    progress.accepted()
     # 資料已全部讀進記憶體；LLM 呼叫可能長達數分鐘，不能一直持有 ACCESS SHARE 鎖擋住遷移或 DDL，
     # 也不該一直占著一條連線：之後只用沙盒連線，請求的連線先關掉（psycopg 離開 with 時遇到已關閉的連線會直接略過）
-    conn.commit()
-    conn.close()
+    with progress.step("prepare"):
+      data = sandbox.collectSandboxData(conn, actor, now.date())
+      conn.commit()
+      conn.close()
     # Jev 不看資料，只看問題；先問完再開沙盒，等它的時候不占著沙盒連線
-    decision = chooseTool(question, now) if mode == "jev" else None
-    intentDecision = decideIntent(question, now, previousIntent, openProposal, chooseIntent) if mode == "assistant-jev" else None
+    decision = None
+    if mode == "jev":
+      with progress.step("route"):
+        decision = chooseTool(question, now)
+    intentDecision = None
+    if mode == "assistant-jev":
+      intentDecision = decideIntent(question, now, previousIntent, openProposal, chooseIntent, progress=progress)
     try:
       with sandbox.openSandbox(qaDatabaseUrl, data) as sandboxConn:
         if mode in assistantModes:
@@ -257,11 +279,13 @@ def ask(
           # name 是 None 代表全部工具；cardName、addedName 是 None 代表沒有另外的意圖，不能混為一談
           extraNames = [name for name in (intentDecision.cardName, intentDecision.addedName) if name] if intentDecision else []
           toolNames = intent.mergedTools(intentDecision.name, *extraNames) if intentDecision else None
-          body = runAssistantMode(sandboxConn, toolLlm, model, question, history, data, now, asker, toolNames, intentDecision)
+          body = runAssistantMode(
+            sandboxConn, toolLlm, model, question, history, data, now, asker, toolNames, intentDecision, progress=progress,
+          )
         elif mode in ("agent", "jev"):
-          body = runAgentMode(sandboxConn, toolLlm, model, question, data, now, decision)
+          body = runAgentMode(sandboxConn, toolLlm, model, question, data, now, decision, progress=progress)
         else:
-          body = runPipeline(sandboxConn, llm, model, question, data, now)
+          body = runPipeline(sandboxConn, llm, model, question, data, now, progress=progress)
     except psycopg.OperationalError:
       # 兩種模式內的資料庫錯誤都已被接住，能走到這裡的只有開沙盒連線失敗；例外文字可能含主機與 port，只寫進伺服器 log
       logger.exception("問答沙盒連線失敗")
