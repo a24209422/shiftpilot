@@ -88,15 +88,25 @@ export function QaProgress({ progress, collapsed = false }: { progress: QaProgre
   }
   const current = progress.steps.at(-1);
   return (
-    <div className="qaProgress">
-      <div className="qaProgressHeader">
-        <span>{progress.accepted ? "已收到問題" : "正在送出"}</span>
-        {elapsed}
+    <>
+      <div className="qaProgress">
+        <div className="qaProgressHeader">
+          <span>{progress.accepted ? "已收到問題" : "正在送出"}</span>
+          {/* 等待中秒數跟著「思考中」顯示；結束後思考中消失，總秒數改放回框裡 */}
+          {!running && elapsed}
+        </div>
+        {running && current && (
+          <span role="status" className="qaProgressAnnouncement">{stepLabel(current)}，{statuses[current.state].label}</span>
+        )}
+        {list}
       </div>
-      {running && current && (
-        <span role="status" className="qaProgressAnnouncement">{stepLabel(current)}，{statuses[current.state].label}</span>
+      {running && (
+        <div className="qaThinking">
+          <span className="qaThreeBody" aria-hidden="true"><span /><span /><span /></span>
+          思考中
+          {elapsed}
+        </div>
       )}
-      {list}
-    </div>
+    </>
   );
 }

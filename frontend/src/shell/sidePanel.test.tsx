@@ -86,12 +86,12 @@ test("testPendingShownWhileWaitingAndDoubleSubmitSendsOnce", async () => {
   const input = within(panel()).getByRole("textbox", { name: "問題" });
   await user.type(input, "問題");
   await user.click(within(panel()).getByRole("button", { name: "送出" }));
-  expect(await within(panel()).findByText("正在送出")).toBeInTheDocument();
+  expect(await within(panel()).findByText("思考中")).toBeInTheDocument();
   await user.type(input, "再問一次{Enter}");
   expect(api.calls.filter((call) => call.path === "/api/qa/ask/stream")).toHaveLength(1);
   release();
   expect(await within(panel()).findByText("黃志強明天上晚班，14:00 到 23:00。")).toBeInTheDocument();
-  expect(within(panel()).queryByText("正在送出")).toBeNull();
+  expect(within(panel()).queryByText("思考中")).toBeNull();
 });
 
 test("testTruncatedNoteShowsRowCount", async () => {

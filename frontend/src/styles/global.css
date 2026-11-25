@@ -520,6 +520,47 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   .qaProgressList [data-state="running"] .qaProgressIcon { animation: none; }
 }
+/* 等待回答時標題前的三點繞轉動畫，改自 Uiverse.io（dovatgabriel 的 three-body） */
+.qaThinking { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; font-size: .875rem; }
+/* 框裡的秒數靠 margin auto 推到最右邊；跟在思考中後面時要緊貼文字 */
+.qaThinking .qaProgressTime { margin-inline-start: 0; color: var(--base-300); }
+.qaThreeBody {
+  --qa-dot-speed: .8s;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  animation: qaDotSpin calc(var(--qa-dot-speed) * 2.5) linear infinite;
+}
+.qaThreeBody > span { position: absolute; height: 100%; width: 30%; }
+.qaThreeBody > span::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  padding-bottom: 100%;
+  background-color: #000;
+  border-radius: 50%;
+}
+.qaThreeBody > span:nth-child(1) { bottom: 5%; left: 0; transform: rotate(60deg); transform-origin: 50% 85%; }
+.qaThreeBody > span:nth-child(1)::after { bottom: 0; animation: qaDotWobbleUp var(--qa-dot-speed) ease-in-out calc(var(--qa-dot-speed) * -.3) infinite; }
+.qaThreeBody > span:nth-child(2) { bottom: 5%; right: 0; transform: rotate(-60deg); transform-origin: 50% 85%; }
+.qaThreeBody > span:nth-child(2)::after { bottom: 0; animation: qaDotWobbleUp var(--qa-dot-speed) ease-in-out calc(var(--qa-dot-speed) * -.15) infinite; }
+.qaThreeBody > span:nth-child(3) { bottom: -5%; left: 0; transform: translateX(116.666%); }
+.qaThreeBody > span:nth-child(3)::after { top: 0; animation: qaDotWobbleDown var(--qa-dot-speed) ease-in-out infinite; }
+@keyframes qaDotSpin { to { transform: rotate(1turn); } }
+@keyframes qaDotWobbleUp {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+  50% { transform: translateY(-66%) scale(.65); opacity: .8; }
+}
+@keyframes qaDotWobbleDown {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+  50% { transform: translateY(66%) scale(.65); opacity: .8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qaThreeBody, .qaThreeBody > span::after { animation: none; }
+}
 .qaProgressAnnouncement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .chatNote { font: 11px var(--font-accent); color: var(--base-300); }
 .qaNote { align-self: flex-start; }
