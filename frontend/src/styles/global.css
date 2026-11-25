@@ -588,14 +588,26 @@ div.tlBlock:hover { outline: 0; }
 .chatClear { font: 11px var(--font-accent); color: var(--base-300); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 0; }
 .chatClear:disabled { cursor: default; text-decoration: none; opacity: 0.5; }
 
-/* ---- 主內容區的幾何浮水印：右上、左下兩個二十邊晶格，用 multiply 滲進底色 ---- */
-/* .body 本身不捲動，畫布放在這裡就固定在主內容區，內容捲過去時圖案不動；isolation 讓 multiply 只跟底色混合 */
+/* ---- 主內容區的文字浮水印：首頁標題一字一行斜放在左上，用 multiply 滲進底色 ---- */
+/* .body 本身不捲動，浮水印放在這裡就固定在主內容區，內容捲過去時字不動；isolation 讓 multiply 只跟底色混合 */
 .body { isolation: isolate; }
-.geoCanvas {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  z-index: 0; pointer-events: none; mix-blend-mode: multiply; opacity: 0.18;
+.bgWatermark {
+  position: absolute; top: 9vh; left: 2vw;
+  z-index: 0; pointer-events: none; user-select: none; mix-blend-mode: multiply;
+  display: flex; flex-direction: column; align-items: flex-start;
+  /* 襯線斜體跟介面的無襯線字拉開距離，一眼就看得出是背景不是內容 */
+  font: italic 700 clamp(170px, 25vw, 380px) / 0.86 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.04em; white-space: nowrap;
+  /* 從底色往米色調一點，跟著色票走，之後改主題不用回來改這裡 */
+  color: color-mix(in oklch, var(--base-200) 35%, var(--base-100));
+  transform: rotate(-16deg); transform-origin: top left;
 }
 .content { position: relative; z-index: 1; }
-/* 原本透明的區塊改成實心，線條才不會穿過文字；數字格、重點卡片、月曆格本來就有底色 */
-.tile, .tableWrap, .panel, .roomRow { background: var(--base-100); }
+/* 卡片用半透明底色：浮水印要透得過來，整個標題才看得到，但又要壓淡到不干擾卡片上的字 */
+.tile, .tableWrap, .panel, .stat { background: color-mix(in oklch, var(--base-100) 70%, transparent); }
+/* 疊在 panel 裡的列表與表格不再加一層，不然透明度疊兩次，跟其他卡片深淺不一 */
+.panel .tableWrap, .panel .roomRow { background: none; }
+/* 數字格原本靠黑底從 1px 間隙透出來當格線；底色變半透明後黑底會整片透上來，改成各格自己畫外框 */
+.stats { background: none; }
+.stat { outline: 1px solid var(--ink); }
 .tile:hover { background: var(--ink); }

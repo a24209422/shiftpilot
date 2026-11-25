@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ModuleRegistration } from "../modules/registry";
 import { renderApp, testUser } from "../test/renderApp";
 import { Drawer } from "./Drawer";
+import { PageHead } from "./PageHead";
 import { useDrawerParams } from "./useDrawerParams";
 
 function DrawerProbe() {
@@ -138,4 +139,24 @@ test("testSidebarCollapsesAndRemembers", async () => {
   } finally {
     localStorage.clear();
   }
+});
+
+test("testWatermarkFollowsCurrentPageHeadline", async () => {
+  const titled: ModuleRegistration[] = [{
+    backendModule: "test",
+    pages: [
+      { key: "leave", path: "/leave", name: "請假頁", en: "Time off", icon: "leave", requires: "booking.read", element: <PageHead headline="Time off" />, order: 1 },
+      { key: "shifts", path: "/shifts", name: "班表頁", en: "Shifts", icon: "shift", requires: "booking.read", element: <PageHead headline="Shifts" />, order: 2 },
+    ],
+  }];
+  const { container } = renderApp({ route: "/leave", permissions: ["booking.read"], registrations: titled });
+  await screen.findByRole("heading", { name: "Time off" });
+  const words = () => Array.from(container.querySelectorAll(".bgWatermark span"), (el) => el.textContent);
+  // 一個字一行，且不進無障礙樹
+  expect(words()).toEqual(["Time", "off"]);
+  expect(container.querySelector(".bgWatermark")).toHaveAttribute("aria-hidden", "true");
+
+  await userEvent.setup().click(screen.getByRole("link", { name: /班表頁/ }));
+  await screen.findByRole("heading", { name: "Shifts" });
+  expect(words()).toEqual(["Shifts"]);
 });
