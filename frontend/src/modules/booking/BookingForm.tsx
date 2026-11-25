@@ -12,7 +12,10 @@ import { ConflictNotice } from "./ConflictNotice";
 import type { BookingPrefill } from "./prefill";
 import { useResources } from "./queries";
 
-const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
+// 資料庫裡實際用到的類別；後端仍收任意文字，清單只在前端限制，助理提議的「會議」也在裡面
+const categories = ["會議", "簡報", "面談", "外出", "訓練"];
+
+const sameSet =(a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
 
 function defaultTimes(): [string, string] {
   // 預設從下一個整點開始、一小時
@@ -38,7 +41,7 @@ export function BookingForm({ booking, prefill, onDone }: { booking?: Booking; p
   const [defaultStart, defaultEnd] = booking ? ["", ""] : defaultTimes();
 
   const [title, setTitle] = useState(booking?.title ?? "");
-  const [category, setCategory] = useState(booking?.category ?? "");
+  const [category, setCategory] = useState(booking?.category ?? categories[0]);
   const [startAt, setStartAt] = useState(original?.startAt ?? prefill?.startAt ?? defaultStart);
   const [endAt, setEndAt] = useState(original?.endAt ?? prefill?.endAt ?? defaultEnd);
   const [resourceIds, setResourceIds] = useState<string[]>(original?.resourceIds ?? (prefill?.resourceId ? [prefill.resourceId] : []));
@@ -65,6 +68,9 @@ export function BookingForm({ booking, prefill, onDone }: { booking?: Booking; p
       .filter((item) => !activeResources.some((active) => active.id === item.id))
       .map((item) => ({ value: String(item.id), label: `${item.name}（已停用）` })),
   ];
+  // 舊排程的類別不在清單裡時留著，否則下拉選單會顯示成第一項，存檔時被悄悄改掉
+  const categoryOptions = [...categories, ...(booking && !categories.includes(booking.category) ? [booking.category] : [])]
+    .map((item) => ({ value: item, label: item }));
   const employees = employeeData ?? [];
   const employeeOptions = [
     ...employees.map((item) => ({ value: String(item.id), label: item.name })),
@@ -118,7 +124,7 @@ export function BookingForm({ booking, prefill, onDone }: { booking?: Booking; p
   return (
     <form className="form" onSubmit={onSubmit}>
       <TextField label="標題" required value={title} onChange={setTitle} error={fieldErrors.title} />
-      <TextField label="類別" required value={category} onChange={setCategory} error={fieldErrors.category} />
+      <SelectField label="類別" required value={category} onChange={setCategory} options={categoryOptions} error={fieldErrors.category} />
       <TextField label="開始" type="datetime-local" required value={startAt} onChange={setStartAt} error={fieldErrors.startAt} />
       <TextField label="結束" type="datetime-local" required value={endAt} onChange={setEndAt} error={fieldErrors.endAt} />
       <CheckList label="資源" options={resourceOptions} values={resourceIds} onChange={setResourceIds} error={fieldErrors.resourceIds} />

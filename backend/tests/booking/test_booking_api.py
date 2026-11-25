@@ -152,9 +152,18 @@ def testSummaryEndpointShape(world):
   response = world.aliceClient.get("/api/booking/summary")
   assert response.status_code == 200
   summary = response.json()
-  assert set(summary) == {"todayBookings", "nextBooking", "resourceStatus", "bookingCount", "resourceCount"}
+  assert set(summary) == {"todayBookings", "nextBooking", "myNextBooking", "resourceStatus", "bookingCount", "resourceCount"}
   assert summary["resourceCount"] == 2 and len(summary["resourceStatus"]) == 2
   assert set(summary["resourceStatus"][0]) == {"resourceId", "name", "kind", "currentBooking"}
+
+
+def testSummaryMyNextBookingIsForLoggedInEmployee(world):
+  bobOnly = world.bobClient.post("/api/booking/bookings", json=bodyFor(world, startAt="2099-01-05T10:00", endAt="2099-01-05T11:00"))
+  assert bobOnly.status_code == 201, bobOnly.text
+  mine = world.aliceClient.post("/api/booking/bookings", json=bodyFor(world, resourceIds=[world.room2], startAt="2099-01-06T10:00", endAt="2099-01-06T11:00"))
+  assert world.aliceClient.get("/api/booking/summary").json()["myNextBooking"]["id"] == mine.json()["id"]
+  assert world.bobClient.get("/api/booking/summary").json()["myNextBooking"]["id"] == bobOnly.json()["id"]
+  assert world.admin.get("/api/booking/summary").json()["myNextBooking"] is None
 
 
 def testAdminWithoutEmployeeMustPassOrganizer(world):

@@ -18,10 +18,15 @@ const booking = (id: number, title: string, startAt: string, endAt: string): Boo
 });
 const today1 = booking(1, "晨會", "2026-11-20T09:00:00", "2026-11-20T10:00:00");
 const today2 = booking(2, "客戶簡報", "2026-11-20T14:00:00", "2026-11-20T15:00:00");
+const mine: Booking = {
+  ...booking(7, "一對一", "2026-11-20T11:00:00", "2026-11-20T11:30:00"),
+  participants: [{ employeeId: 2, name: "林小美", role: "organizer" }, { employeeId: 3, name: "黃志強", role: "attendee" }],
+};
 
 const summary: BookingSummary = {
   todayBookings: [today1, today2],
   nextBooking: today2,
+  myNextBooking: mine,
   resourceStatus: [
     { resourceId: 1, name: "3F 大會議室", kind: "room", currentBooking: today1 },
     { resourceId: 2, name: "2F 小會議室", kind: "room", currentBooking: null },
@@ -63,9 +68,34 @@ test("testRoomsRightNowListsOnlyRooms", async () => {
   expect(within(panel).queryByText("公務車（白色）")).toBeNull();
 });
 
+const nextUpCard = async () => (await screen.findByText("Next up")).closest(".feature") as HTMLElement;
+
+test("testNextUpShowsMyNextBookingNotCompanyWide", async () => {
+  open();
+  const card = await nextUpCard();
+  expect(within(card).getByText("一對一")).toBeInTheDocument();
+  expect(within(card).getByText("1 小時 30 分鐘後開始")).toBeInTheDocument();
+  expect(within(card).getByText("參加者：林小美、黃志強")).toBeInTheDocument();
+  expect(within(card).queryByText("客戶簡報")).toBeNull();
+  // 現在時間的戳記會被誤認成會議時間，已拿掉
+  expect(card.querySelector(".stamp")).toBeNull();
+});
+
+test("testNextUpCountdownForLaterDays", async () => {
+  open({ ...summary, myNextBooking: booking(8, "週會", "2026-11-21T10:00:00", "2026-11-21T11:00:00") });
+  expect(within(await nextUpCard()).getByText("明天開始")).toBeInTheDocument();
+});
+
+test("testNextUpListsAtMostThreeParticipants", async () => {
+  const names = ["林小美", "黃志強", "陳大文", "張雅婷", "王小明"];
+  const crowded = { ...mine, participants: names.map((name, index) => ({ employeeId: index + 2, name, role: "attendee" as const })) };
+  open({ ...summary, myNextBooking: crowded });
+  expect(within(await nextUpCard()).getByText("參加者：林小美、黃志強、陳大文等 5 人")).toBeInTheDocument();
+});
+
 test("testNoNextBooking", async () => {
-  open({ ...summary, nextBooking: null, todayBookings: [] });
-  expect(await screen.findByText("沒有接下來的排程")).toBeInTheDocument();
+  open({ ...summary, nextBooking: null, myNextBooking: null, todayBookings: [] });
+  expect(within(await nextUpCard()).getByText("你接下來沒有排程")).toBeInTheDocument();
 });
 
 test("testNewBookingButtonOpensForm", async () => {

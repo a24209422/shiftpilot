@@ -623,3 +623,8 @@ test("testCardOnlyMergeIsShown", async () => {
   await user.click(within(panel()).getByText("看工具步驟"));
   expect(within(panel()).getByText("沿用上一輪：改期或取消會議，還開著的確認卡：請假或撤回請假")).toBeInTheDocument();
 });
+
+test("testWelcomeTextIntroducesAssistant", async () => {
+  await open();
+  expect(await within(panel()).findByText(/^我可以幫你查組織、班表、會議和請假，也可以幫你約會議、改期或取消，或是請假、撤回假單。/)).toBeInTheDocument();
+});

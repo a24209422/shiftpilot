@@ -16,6 +16,8 @@ export interface Booking {
 export interface BookingSummary {
   todayBookings: Booking[];
   nextBooking: Booking | null;
+  // 登入者有參加的下一場；帳號沒有對應員工時是 null
+  myNextBooking: Booking | null;
   resourceStatus: { resourceId: number; name: string; kind: ResourceKind; currentBooking: Booking | null }[];
   // 還沒結束的已確認排程數
   bookingCount: number;

@@ -40,8 +40,30 @@ const conflictError = (code: string, message: string, conflicts: unknown[]) => (
 
 async function fillBasics(user: ReturnType<typeof userEvent.setup>) {
   await user.type(await screen.findByLabelText("標題"), "新會議");
-  await user.type(screen.getByLabelText("類別"), "會議");
+  await user.selectOptions(screen.getByLabelText("類別"), "會議");
 }
+
+const optionTexts = (select: HTMLElement) => Array.from((select as HTMLSelectElement).options).map((option) => option.text);
+
+test("testCategoryIsDropdownDefaultingToMeeting", async () => {
+  open();
+  await userEvent.setup().click(await screen.findByRole("button", { name: "新增排程" }));
+  const category = await screen.findByLabelText("類別");
+  expect(category.tagName).toBe("SELECT");
+  expect(category).toHaveValue("會議");
+  expect(optionTexts(category)).toEqual(["會議", "簡報", "面談", "外出", "訓練"]);
+});
+
+test("testEditKeepsCategoryOutsideTheList", async () => {
+  open({ routes: { "GET /api/booking/bookings": () => ({ body: [{ ...booking, category: "研討會" }] }) } });
+  const user = userEvent.setup();
+  await user.click(await screen.findByText("團隊週會"));
+  await user.click(await screen.findByRole("button", { name: "編輯" }));
+  const category = await screen.findByLabelText("類別");
+  // 舊資料的類別不在固定清單裡，也不能被悄悄換成第一個選項
+  expect(category).toHaveValue("研討會");
+  expect(optionTexts(category)).toEqual(["會議", "簡報", "面談", "外出", "訓練", "研討會"]);
+});
 
 test("testWeekRangeRequestedAndNavigable", async () => {
   const { api } = open();

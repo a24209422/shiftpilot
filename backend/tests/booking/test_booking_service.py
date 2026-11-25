@@ -347,6 +347,20 @@ def testSummaryUsesNowForTodayNextAndCurrent(world):
   assert tomorrow["id"] not in [item["id"] for item in summary["todayBookings"]]
 
 
+def testSummaryMyNextBookingOnlyCountsAskersBookings(world):
+  with openDb(world.url) as conn:
+    service.createBooking(conn, world.bobActor, inputFor(world, startAt=at(12), endAt=at(13)))
+    cancelled = service.createBooking(conn, world.bobActor, inputFor(world, resourceIds=[], startAt=at(13), endAt=at(14), participantEmployeeIds=[world.alice]))
+    service.cancelBooking(conn, world.bobActor, cancelled["id"])
+    invited = service.createBooking(conn, world.bobActor, inputFor(world, resourceIds=[], startAt=at(15), endAt=at(16), participantEmployeeIds=[world.alice]))
+    organized = service.createBooking(conn, world.aliceActor, inputFor(world, startAt=at(9, day=25), endAt=at(10, day=25)))
+    assert service.getSummary(conn, at(10, 30), world.alice)["myNextBooking"]["id"] == invited["id"]
+    assert service.getSummary(conn, at(16), world.alice)["myNextBooking"]["id"] == organized["id"]
+    assert service.getSummary(conn, at(11), world.carol)["myNextBooking"] is None
+    # 沒有對應員工的帳號（例如系統管理員）沒有個人排程
+    assert service.getSummary(conn, at(11))["myNextBooking"] is None
+
+
 def testMovingBookingRechecksResourcesDeactivatedSinceBooking(world):
   with openDb(world.url) as conn:
     booking = service.createBooking(conn, world.aliceActor, inputFor(world, resourceIds=[world.room1, world.room2]))

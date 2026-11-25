@@ -3,13 +3,33 @@ import { useNavigate } from "react-router";
 import { apiGet } from "../api/client";
 import type { BookingSummary, LeaveRequest } from "../api/types";
 import { usePermissions } from "../auth/usePermissions";
-import { formatDay, formatRange, formatTime, toLocalDate } from "../forms/time";
+import { formatDay, formatRange, formatTime, parseLocal, toLocalDate } from "../forms/time";
 import { navPages, type ModuleRegistration } from "../modules/registry";
 import { Icon } from "../shell/icons";
 import { PageHead } from "../shell/PageHead";
 import { MonthCalendar } from "./MonthCalendar";
 
 const pad = (value: number) => String(value).padStart(2, "0");
+const dayMs = 24 * 60 * 60 * 1000;
+const dateOnly = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+// 隔天以後只講天數：「3 小時後」跨過半夜會讓人誤以為是今天
+function startsIn(startAt: string, now: Date): string {
+  const start = parseLocal(startAt);
+  const days = Math.round((dateOnly(start).getTime() - dateOnly(now).getTime()) / dayMs);
+  if (days === 1) return "明天開始";
+  if (days === 2) return "後天開始";
+  if (days > 2) return `${days} 天後開始`;
+  const minutes = Math.max(1, Math.ceil((start.getTime() - now.getTime()) / 60_000));
+  if (minutes < 60) return `${minutes} 分鐘後開始`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} 小時 ${minutes % 60} 分鐘後開始` : `${hours} 小時後開始`;
+}
+
+// 卡片空間小，人多時只列前三位
+function participantText(names: string[]): string {
+  return names.length > 3 ? `${names.slice(0, 3).join("、")}等 ${names.length} 人` : names.join("、");
+}
 
 export function HomePage({ registrations }: { registrations: ModuleRegistration[] }) {
   const { can } = usePermissions();
@@ -29,10 +49,10 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
 
   const now = new Date();
   const today = toLocalDate(now);
-  const stamp = `'${String(now.getFullYear()).slice(2)}  ${pad(now.getMonth() + 1)}  ${pad(now.getDate())}  ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
   const todayBookings = summary?.todayBookings ?? [];
   const next = summary?.nextBooking ?? null;
+  const myNext = summary?.myNextBooking ?? null;
   const rooms = (summary?.resourceStatus ?? []).filter((item) => item.kind === "room");
   const busyRooms = rooms.filter((item) => item.currentBooking).length;
   const nextIsToday = next !== null && next.startAt.slice(0, 10) === today;
@@ -93,17 +113,19 @@ export function HomePage({ registrations }: { registrations: ModuleRegistration[
         <>
           <section className="split">
             <article className="feature">
-              <div className="photo"><div className="photoInner" /><span className="stamp">{stamp}</span></div>
+              <div className="photo"><div className="photoInner" /></div>
               <div className="featureBody">
                 <h3>Next up</h3>
-                {next ? (
+                {myNext ? (
                   <>
-                    <p className="featureTitle">{next.title}</p>
-                    <p className="featureMeta">{formatRange(next.startAt, next.endAt)} ／ {next.resources.map((item) => item.name).join("、") || "沒有指定資源"}</p>
+                    <p className="featureTitle">{myNext.title}</p>
+                    <p className="featureMeta">{startsIn(myNext.startAt, now)}</p>
+                    <p className="featureMeta">{formatRange(myNext.startAt, myNext.endAt)} ／ {myNext.resources.map((item) => item.name).join("、") || "沒有指定資源"}</p>
+                    <p className="featureMeta">參加者：{participantText(myNext.participants.map((item) => item.name))}</p>
                   </>
                 ) : (
                   <>
-                    <p className="featureTitle">沒有接下來的排程</p>
+                    <p className="featureTitle">你接下來沒有排程</p>
                     <p className="featureMeta">&nbsp;</p>
                   </>
                 )}

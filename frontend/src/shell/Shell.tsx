@@ -5,6 +5,7 @@ import type { ModuleRegistration } from "../modules/registry";
 import { navPages } from "../modules/registry";
 import { ChangePasswordDrawer } from "./ChangePasswordForm";
 import { DrawerHostContext } from "./Drawer";
+import { GeoBackground } from "./GeoBackground";
 import { SidePanel } from "./SidePanel";
 import { Sidebar } from "./Sidebar";
 import { ToastProvider } from "./Toast";
@@ -20,6 +21,7 @@ export function Shell({ registrations }: { registrations: ModuleRegistration[] }
           <Sidebar pages={navPages(registrations, can)} onChangePassword={() => setPasswordOpen(true)} />
           <div className="main">
             <div className="body" ref={setHost}>
+              <GeoBackground />
               <main className="content">{isLoading ? <div className="empty">載入中…</div> : <Outlet />}</main>
             </div>
           </div>

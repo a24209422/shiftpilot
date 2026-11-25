@@ -152,13 +152,21 @@ def listBookings(
   return loadBookings(conn, [row["id"] for row in rows])
 
 
-def getSummary(conn: Connection, now: datetime) -> dict:
+def getSummary(conn: Connection, now: datetime, employeeId: int | None = None) -> dict:
   dayStart = datetime.combine(now.date(), time.min)
   todayBookings = listBookings(conn, dayStart, dayStart + timedelta(days=1))
   nextRow = conn.execute(
     "SELECT id FROM bookings WHERE status = 'confirmed' AND start_at > %s ORDER BY start_at, id LIMIT 1", (now,)
   ).fetchone()
   nextBooking = getBooking(conn, nextRow["id"]) if nextRow else None
+  # 首頁卡片要看的是自己的下一場；沒有對應員工的帳號沒有個人排程，不退回全公司的
+  myNextRow = conn.execute(
+    "SELECT b.id FROM bookings b WHERE b.status = 'confirmed' AND b.start_at > %s "
+    "AND EXISTS (SELECT 1 FROM booking_participants p WHERE p.booking_id = b.id AND p.employee_id = %s) "
+    "ORDER BY b.start_at, b.id LIMIT 1",
+    (now, employeeId),
+  ).fetchone() if employeeId is not None else None
+  myNextBooking = getBooking(conn, myNextRow["id"]) if myNextRow else None
   resources = conn.execute("SELECT id, name, kind FROM resources WHERE is_active ORDER BY id").fetchall()
   currentByResource = {
     row["resource_id"]: row["booking_id"]
@@ -181,6 +189,7 @@ def getSummary(conn: Connection, now: datetime) -> dict:
   return {
     "todayBookings": todayBookings,
     "nextBooking": nextBooking,
+    "myNextBooking": myNextBooking,
     "resourceStatus": resourceStatus,
     "bookingCount": bookingCount,
     "resourceCount": len(resources),

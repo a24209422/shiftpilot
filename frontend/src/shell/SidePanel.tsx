@@ -150,7 +150,7 @@ export function SidePanel() {
             </div>
             <div className="chatActions">
               <button className="iconBtn" type="button" title="收合" aria-label="收合問答面板" onClick={() => setOpen(false)}>
-                <span className="onDesktop"><Icon name="chevron" size={16} /></span>
+                <span className="onDesktop"><Icon name="panelRight" size={18} /></span>
                 <span className="onMobile"><Icon name="close" size={16} /></span>
               </button>
             </div>
@@ -159,7 +159,7 @@ export function SidePanel() {
             <div className="msg bot">
               <div className="msgMeta">DESK</div>
               {/* 權限還在載入時先顯示說明，免得有權限的人先閃過一句「沒有權限」 */}
-              <div className="bubble">{canAsk || permissionsLoading ? "用中文問組織、會議、請假或班表，例如「黃志強明天上什麼班？」「下週二下午誰有空？」" : "沒有使用問答的權限"}</div>
+              <div className="bubble">{canAsk || permissionsLoading ? "我可以幫你查組織、班表、會議和請假，也可以幫你約會議、改期或取消，或是請假、撤回假單。例如「黃志強明天上什麼班？」「幫我約林小美下週二下午開會」" : "沒有使用問答的權限"}</div>
             </div>
             {entries.map((entry) => <ChatMessage key={entry.id} entry={entry} proposalActive={entry.id === activeProposalId} onNote={addNote} />)}
           </div>

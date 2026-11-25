@@ -120,4 +120,4 @@ def cancelBooking(bookingId: int, actor: Actor = Depends(writeBooking), conn=con
 
 @router.get("/summary")
 def getSummary(actor: Actor = Depends(readBooking), conn=connDependency):
-  return service.getSummary(conn, datetime.now())
+  return service.getSummary(conn, datetime.now(), actor.employeeId)

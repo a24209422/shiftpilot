@@ -86,14 +86,37 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ico { display: block; flex: none; }
 
 /* 三欄：側邊導覽｜主內容｜右側面板的位置（問答之後掛在這裡） */
-.app { display: grid; grid-template-columns: 224px minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
+/* 導覽列寬度由 .sidebar 自己決定，收合時整欄跟著變窄 */
+.app { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
 
 /* ---- 側邊導覽：近黑底，米色方塊標示目前頁面 ---- */
 .sidebar {
-  background: var(--neutral); color: var(--neutral-content);
-  padding: 22px 16px 16px; display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: auto;
+  background: var(--neutral); color: var(--neutral-content); width: 224px;
+  padding: 22px 16px 16px; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
-.brand { font-family: var(--font-heading); font-size: 30px; font-weight: 700; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; padding: 0 6px; }
+/* 標題與帳號區塊固定，只有中間的頁面連結捲動 */
+.sidebarHead { flex: none; position: relative; }
+.sidebarNav { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.brandShort { display: none; }
+.sidebarToggle {
+  position: absolute; top: 0; right: 0; display: grid; place-items: center; width: 28px; height: 28px;
+  border: 0; background: none; color: var(--base-200);
+}
+.sidebarToggle:hover { background: color-mix(in oklch, var(--neutral-content) 12%, transparent); color: var(--neutral-content); }
+.sidebarFoot .ghostBtn { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.sidebarFoot .ghostBtn .ico { display: none; }
+.sidebar.collapsed { width: 64px; padding: 22px 8px 16px; }
+.sidebar.collapsed .brandFull, .sidebar.collapsed .brandNote, .sidebar.collapsed .sidebarUser { display: none; }
+/* 不用 display: none：文字要留給螢幕報讀當連結與按鈕的名稱 */
+.sidebar.collapsed .navLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sidebar.collapsed .brandShort { display: inline; }
+.sidebar.collapsed .brand { font-size: 22px; padding: 0; text-align: center; }
+.sidebar.collapsed .sidebarToggle { position: static; margin: 12px auto 14px; }
+.sidebar.collapsed .navItem { justify-content: center; padding: 9px 0; }
+.sidebar.collapsed .sidebarFoot { padding: 14px 0 0; }
+.sidebar.collapsed .sidebarFoot .ghostBtn { padding: 8px 0; }
+.sidebar.collapsed .sidebarFoot .ghostBtn .ico { display: block; }
+.brand { font-family: var(--font-heading); font-size: 30px; font-weight: 700; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; padding: 0 34px 0 6px; }
 .brandNote { font: 15px var(--font-accent); color: var(--base-200); padding: 12px 6px 18px; display: flex; gap: 8px; align-items: center; }
 .brandNote::before { content: ""; width: 7px; height: 7px; background: var(--success); }
 .navItem {
@@ -105,7 +128,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .navItem.active { background: var(--base-200); color: var(--ink); font-weight: 500; }
 .navLabel { flex: 1; }
 .navCount { font: 12px var(--font-accent); opacity: 0.7; }
-.sidebarFoot { margin-top: auto; padding: 14px 6px 0; display: grid; gap: 10px; font: 12px var(--font-accent); color: var(--base-200); }
+.sidebarFoot { flex: none; padding: 14px 6px 0; display: grid; gap: 10px; font: 12px var(--font-accent); color: var(--base-200); }
 .ghostBtn { border: 1px dashed color-mix(in oklch, var(--neutral-content) 40%, transparent); background: none; padding: 9px; color: var(--neutral-content); font: 13px var(--font-accent); }
 .ghostBtn:hover:not(:disabled) { background: var(--base-200); color: var(--ink); border-color: var(--base-200); }
 .ghostBtn:disabled { opacity: 0.5; cursor: default; }
@@ -127,6 +150,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 11px 18px; font-weight: 500; letter-spacing: 0.04em; white-space: nowrap;
 }
 .primary:hover { filter: brightness(1.08); }
+/* 表單的送出鈕用黑色，跟頁首的新增鈕一致；登入卡是深色底，黑色會看不見，維持主色 */
+.form:not(.loginCard) .primary[type="submit"] { background: var(--ink); color: var(--base-100); }
+.form:not(.loginCard) .primary[type="submit"]:hover { filter: none; background: color-mix(in oklch, var(--ink) 85%, var(--base-100)); }
 .danger { border: 1px solid var(--error); background: none; color: var(--error); padding: 11px 18px; font-weight: 500; letter-spacing: 0.04em; }
 .danger:hover { background: var(--error); color: var(--error-content); }
 
@@ -172,7 +198,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   filter: contrast(1.25);
 }
 .photoInner::after { content: ""; position: absolute; inset: 0; background-image: var(--grain); opacity: 0.55; mix-blend-mode: multiply; }
-.stamp { position: absolute; right: 14px; bottom: 10px; z-index: 2; font: 15px var(--font-accent); color: var(--stamp); letter-spacing: 0.1em; text-shadow: 0 0 2px rgba(0, 0, 0, 0.6); }
 .featureBody { padding: 20px 22px 22px; }
 .featureBody h3 { font-family: var(--font-heading); margin: 0 0 6px; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600; }
 .featureTitle { font-family: var(--font-heading); margin: 0; font-size: 30px; font-weight: 600; line-height: 1.1; }
@@ -250,13 +275,16 @@ tbody tr.selected { background: var(--base-200); }
 /* ---- 窄螢幕：側邊導覽變成底部分頁列，聊天面板變成全螢幕 ---- */
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
-  .sidebar { order: 2; flex-direction: row; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); overflow-x: auto; }
-  .brand, .brandNote, .sidebarFoot, .navCount { display: none; }
-  .navItem { flex-direction: column; gap: 3px; font-size: 11px; padding: 7px 12px; min-width: 64px; justify-content: center; width: auto; }
+  .sidebar, .sidebar.collapsed { order: 2; width: auto; flex-direction: row; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); overflow-x: auto; }
+  .sidebarHead, .sidebarFoot, .navCount { display: none; }
+  /* 手機版是底部分頁列，不分收合：一律顯示文字，捲動交給整列 */
+  .sidebarNav { flex-direction: row; overflow: visible; gap: 0; }
+  .sidebar.collapsed .navLabel { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  .navItem, .sidebar.collapsed .navItem { flex-direction: column; gap: 3px; font-size: 11px; padding: 7px 12px; min-width: 64px; justify-content: center; width: auto; }
   .navLabel { flex: none; }
   .content { padding: 20px 16px; }
   .drawer { width: 100%; }
-  .chat { position: fixed; inset: 0; z-index: 60; width: 100%; border-left: 0; transition: none; }
+  .chat { position: fixed; inset: 0; z-index: 60; width: 100%; border-left: 0; }
   .chat.collapsed { display: none; }
   .resizer { display: none; }
   .onDesktop { display: none; }
@@ -264,16 +292,14 @@ tbody tr.selected { background: var(--base-200); }
   .fab { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat, .drawer { transition: none; }
+  .drawer { transition: none; }
 }
 
 /* ---- 問答面板（右側停靠，可收合、可拉寬）：照原型，功能還沒接 ---- */
 .chat {
   position: relative; width: var(--chat-w); min-height: 0; height: 100%;
   background: var(--paper); border-left: 2px solid var(--ink);
-  transition: width 0.18s steps(5);
 }
-body.dragging .chat { transition: none; }       /* 拖曳時不能有動畫，不然寬度會追不上滑鼠 */
 .chat.collapsed { width: 46px; }
 .chatFull { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; }
 .chat.collapsed .chatFull, .chat.collapsed .resizer { display: none; }
@@ -322,7 +348,8 @@ body.dragging { user-select: none; cursor: col-resize; }
 .form { display: grid; gap: 14px; }
 .field { display: grid; gap: 5px; }
 .field label, .fieldLabel { font: 12px var(--font-accent); color: var(--base-300); }
-.field input, .field select, .field textarea {
+/* 勾選框不套用：撐成 100% 寬會把勾選清單的文字擠到右邊 */
+.field input:not([type="checkbox"]), .field select, .field textarea {
   width: 100%; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); padding: 9px 11px; font: 14px var(--font-display);
 }
 .field textarea { min-height: 70px; resize: vertical; }
@@ -414,28 +441,22 @@ a.navItem { text-decoration: none; }
 /* 空檔格子在長條底下：長條蓋住的部分點不到，露出來的才是能預約的時段 */
 .tlCell { position: absolute; top: 0; bottom: 0; z-index: 1; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 0; }
 .tlCell:hover { background: color-mix(in oklch, var(--base-200) 25%, var(--paper)); }
-.tlBar {
+/* 請假區塊跟會議長條同一個甘特圖樣式、用該列的顏色：員工分頁沒有會議，不需要另外區分 */
+.tlBar, .tlBlock {
   position: absolute; top: 10px; bottom: 10px; z-index: 2; border: 0; border-radius: 999px; padding: 0 30px 0 12px;
   background: var(--tone); color: var(--tone-content); font-size: 12px; font-weight: 600; text-align: left;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
 }
 /* 範本長條尾端的白色圓點 */
-.tlBar::after { content: ""; position: absolute; right: 5px; top: 50%; width: 20px; height: 20px; margin-top: -10px; border-radius: 50%; background: var(--paper); }
-.tlBar:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
-/* 請假這類「不在」的區塊：直角、斜線底，跟會議的圓角長條一眼分得出來；顏色依種類，不依列 */
-.tlBlock {
-  position: absolute; top: 6px; bottom: 6px; z-index: 2; border: 1.5px solid var(--ink); border-radius: 0; padding: 0 8px;
-  background: repeating-linear-gradient(135deg, color-mix(in oklch, var(--stamp) 55%, var(--paper)) 0 6px, var(--paper) 6px 12px);
-  color: var(--ink); font-size: 12px; font-weight: 600; text-align: left; display: flex; align-items: center;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
-/* flex 容器的直接文字不吃 ellipsis，所以文字包在 span 裡，min-width 0 才縮得下去 */
-.tlBlock > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-button.tlBlock { cursor: pointer; }
-button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tlBar::after, .tlBlock::after { content: ""; position: absolute; right: 5px; top: 50%; width: 20px; height: 20px; margin-top: -10px; border-radius: 50%; background: var(--paper); }
+.tlBar:hover, .tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+/* 看不到假別的人沒有連結，不能讓它看起來能點 */
+div.tlBlock { cursor: default; }
+div.tlBlock:hover { outline: 0; }
+.tlBlock > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tlMuted { opacity: 0.55; }
-/* 上班時段的底色：在長條與區塊之下、不能點，顏色依種類固定，不跟著列的色調變 */
-.tlStatus { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--success) 22%, transparent); border-radius: 0; pointer-events: none; }
+/* 上班時段的底色：在長條之下、不能點，跟長條一樣用該列的顏色，一列一個人一眼對得上 */
+.tlStatus { position: absolute; top: 0; bottom: 0; background: color-mix(in oklch, var(--tone) 22%, transparent); border-radius: 0; pointer-events: none; }
 .tlTone0 { --tone: var(--primary); --tone-content: var(--primary-content); }
 .tlTone1 { --tone: var(--accent); --tone-content: var(--accent-content); }
 .tlTone2 { --tone: var(--success); --tone-content: var(--success-content); }
@@ -492,3 +513,15 @@ button.tlBlock:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .qaNote { align-self: flex-start; }
 .chatClear { font: 11px var(--font-accent); color: var(--base-300); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 0; }
 .chatClear:disabled { cursor: default; text-decoration: none; opacity: 0.5; }
+
+/* ---- 主內容區的幾何浮水印：右上、左下兩個二十邊晶格，用 multiply 滲進底色 ---- */
+/* .body 本身不捲動，畫布放在這裡就固定在主內容區，內容捲過去時圖案不動；isolation 讓 multiply 只跟底色混合 */
+.body { isolation: isolate; }
+.geoCanvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  z-index: 0; pointer-events: none; mix-blend-mode: multiply; opacity: 0.18;
+}
+.content { position: relative; z-index: 1; }
+/* 原本透明的區塊改成實心，線條才不會穿過文字；數字格、重點卡片、月曆格本來就有底色 */
+.tile, .tableWrap, .panel, .roomRow { background: var(--base-100); }
+.tile:hover { background: var(--ink); }

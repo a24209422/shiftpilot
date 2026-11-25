@@ -16,6 +16,10 @@ const iconPaths = {
   chat: '<path d="M4 5h16v11H9l-5 4V5z"/>',
   arrowUp: '<path d="M12 20V5M5 12l7-7 7 7"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
+  // 收合面板用：方框加一條直線，直線在哪邊就是哪邊的面板
+  panelLeft: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>',
+  panelRight: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/>',
+  logout: '<path d="M14 4H4v16h10"/><path d="M10 12h11M17 8l4 4-4 4"/>',
 };
 
 export type IconName = keyof typeof iconPaths;

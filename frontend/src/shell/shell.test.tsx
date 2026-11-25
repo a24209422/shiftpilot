@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ModuleRegistration } from "../modules/registry";
 import { renderApp, testUser } from "../test/renderApp";
@@ -32,6 +32,20 @@ test("testSidebarShowsUserAndOnlyPermittedPages", async () => {
   expect(await screen.findByRole("link", { name: /排程頁/ })).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /帳號頁/ })).toBeNull();
   expect(screen.getByText("王小明・主管")).toBeInTheDocument();
+});
+
+test("testOnlyExactPageLinkIsActive", async () => {
+  const nested: ModuleRegistration[] = [{
+    backendModule: "test",
+    pages: [
+      { key: "leave", path: "/leave", name: "請假頁", en: "Time off", icon: "leave", requires: "booking.read", element: <div>請假內容</div>, order: 1 },
+      { key: "leaveAdmin", path: "/leave/admin", name: "假別頁", en: "Leave rules", icon: "leave", requires: "booking.read", element: <div>假別內容</div>, order: 2 },
+    ],
+  }];
+  renderApp({ route: "/leave/admin?id=3", permissions: ["booking.read"], registrations: nested });
+  expect(await screen.findByText("假別內容")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /假別頁/ })).toHaveClass("active");
+  expect(screen.getByRole("link", { name: /請假頁/ })).not.toHaveClass("active");
 });
 
 test("testPageWithoutPermissionShowsExplanation", async () => {
@@ -91,5 +105,37 @@ test("testSidebarDateStampIsYearMonthDay", async () => {
     expect(await screen.findByText("2026.11.21 SAT")).toBeInTheDocument();
   } finally {
     vi.useRealTimers();
+  }
+});
+
+test("testSidebarOnlyScrollsPageLinks", async () => {
+  // 標題與帳號區塊固定，只有中間的頁面連結會捲動
+  const { container } = renderApp({ user: manager, permissions: ["booking.read"], registrations });
+  await screen.findByRole("link", { name: /排程頁/ });
+  const scroller = container.querySelector(".sidebarNav");
+  expect(scroller).not.toBeNull();
+  expect(within(scroller as HTMLElement).getByRole("link", { name: /排程頁/ })).toBeInTheDocument();
+  expect(within(scroller as HTMLElement).queryByRole("button", { name: "登出" })).toBeNull();
+  expect(within(scroller as HTMLElement).queryByText("王小明・主管")).toBeNull();
+});
+
+test("testSidebarCollapsesAndRemembers", async () => {
+  try {
+    const first = renderApp({ user: manager, permissions: ["booking.read"], registrations });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "收合導覽列" }));
+    expect(first.container.querySelector(".sidebar")).toHaveClass("collapsed");
+    // 收起後只剩圖示，但連結與按鈕仍叫得出名字
+    expect(screen.getByRole("link", { name: "排程頁" })).toHaveAttribute("title", "排程頁");
+    expect(screen.getByRole("button", { name: "登出" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展開導覽列" })).toHaveAttribute("aria-expanded", "false");
+    first.unmount();
+    const second = renderApp({ user: manager, permissions: ["booking.read"], registrations });
+    await screen.findByRole("button", { name: "展開導覽列" });
+    expect(second.container.querySelector(".sidebar")).toHaveClass("collapsed");
+    await user.click(screen.getByRole("button", { name: "展開導覽列" }));
+    expect(second.container.querySelector(".sidebar")).not.toHaveClass("collapsed");
+  } finally {
+    localStorage.clear();
   }
 });
