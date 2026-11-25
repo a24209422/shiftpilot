@@ -90,6 +90,15 @@ export interface QaIntent {
   addedName?: QaIntentName | null; cardName?: QaIntentName | null;
 }
 export interface QaSettings { jevConfigured: boolean }
+export const qaProgressStages = ["prepare", "route", "intent", "generate_query", "query", "model", "tool", "proposal", "compose"] as const;
+export type QaProgressStage = (typeof qaProgressStages)[number];
+export type QaProgressStep = {
+  type: "step"; id: number; stage: QaProgressStage; state: "running" | "done" | "failed"; tool?: string;
+};
+export type QaProgressEvent = { type: "accepted" } | QaProgressStep;
+export type QaStreamEvent = QaProgressEvent
+  | { type: "result"; answer: QaAnswer }
+  | { type: "error"; status: number; error: { code: string; message: string; details?: unknown } };
 export interface QaProposal {
   kind: "booking.create" | "booking.reschedule" | "booking.cancel" | "leave.create" | "leave.withdraw";
   request: { method: "POST" | "PATCH"; path: string; body: Record<string, unknown> | null };

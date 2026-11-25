@@ -1,7 +1,7 @@
 import { afterEach } from "vitest";
 
 export interface MockRequest { body: unknown; params: URLSearchParams }
-export interface MockResponse { status?: number; body?: unknown }
+export interface MockResponse { status?: number; body?: unknown; stream?: ReadableStream<Uint8Array> }
 export type MockRoutes = Record<string, (request: MockRequest) => MockResponse | Promise<MockResponse>>;
 export interface MockCall { method: string; path: string; params: URLSearchParams; body: unknown; headers: Headers }
 
@@ -26,6 +26,10 @@ export function mockApi(routes: MockRoutes): { calls: MockCall[]; routes: MockRo
     const result = await handler({ body, params: url.searchParams });
     const status = result.status ?? 200;
     if (status === 204) return new Response(null, { status });
+    if (url.pathname === "/api/qa/ask/stream" && status === 200) {
+      const ndjson = [JSON.stringify({ type: "accepted" }), JSON.stringify({ type: "result", answer: result.body })].join("\n") + "\n";
+      return new Response(result.stream ?? ndjson, { status, headers: { "Content-Type": "application/x-ndjson" } });
+    }
     return new Response(JSON.stringify(result.body ?? null), { status, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
   return { calls, routes };
